@@ -11,6 +11,12 @@ Competitive and cooperative livecoding for Hack Club builders. Ranked includes P
 
 All player state lives in PostgreSQL: profiles and avatars, queue entries, teams, match timers, snapshots, coding time, H-Bucks, daily progress, friends, votes, publications, orders, and an immutable ELO transaction ledger. ELO is calculated and applied on the server after independent votes; clients never submit rating changes.
 
+## Vercel deployment
+
+The project uses vinext with Nitro's Vercel adapter. `vercel.json` runs the Vercel preset, which emits the Build Output API bundle in `.vercel/output` with a server function for the homepage and every API route.
+
+In Vercel, use the **Other** framework preset and do not override the output directory. Add all values from `.env.example` to the Vercel project, using the production domain for `APP_BASE_URL`, `AUTH_REDIRECT_URI`, and `GITHUB_REDIRECT_URI`. Apply the PostgreSQL migrations once before accepting users. OAuth providers must list the exact production callbacks.
+
 ## Hack Club Auth
 
 Create a developer app at `https://auth.hackclub.com/developer/apps` and configure:

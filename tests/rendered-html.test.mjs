@@ -1,14 +1,21 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { before, test } from "node:test";
+
+let handler;
+
+before(async () => {
+  const deployment = await import(
+    "../.vercel/output/functions/__server.func/index.mjs"
+  );
+  handler = deployment.default;
+});
 
 async function render() {
-  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
-  workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
-  const { default: worker } = await import(workerUrl.href);
-  return worker.fetch(
-    new Request("http://localhost/", { headers: { accept: "text/html" } }),
-    { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } },
-    { waitUntil() {}, passThroughOnException() {} },
+  return handler.fetch(
+    new Request("https://ranked.example/", {
+      headers: { accept: "text/html" },
+    }),
+    { waitUntil() {} },
   );
 }
 
