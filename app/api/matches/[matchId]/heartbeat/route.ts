@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { currentUser } from "@/app/lib/current-user";
 import { addChallengeProgress } from "@/app/lib/progression";
+import { finalizeForfeit, matchOutcome, pendingDisconnect } from "@/app/lib/match-lifecycle";
 import { getSql } from "@/db";
 
 export async function POST(request: NextRequest, context: { params: Promise<{ matchId: string }> }) {
@@ -15,7 +16,9 @@ export async function POST(request: NextRequest, context: { params: Promise<{ ma
     ), tick AS (
       UPDATE match_players mp SET
         coding_seconds = mp.coding_seconds + elapsed.delta,
-        last_heartbeat_at = NOW()
+        last_heartbeat_at = NOW(),
+        presence_confirmed_at = COALESCE(mp.presence_confirmed_at,NOW()),
+        disconnect_started_at = NULL
       FROM elapsed WHERE mp.match_id=elapsed.match_id AND mp.user_id=elapsed.user_id RETURNING elapsed.delta
     ), credit AS (
       UPDATE users SET coding_seconds = coding_seconds + (SELECT delta FROM tick),
@@ -25,5 +28,16 @@ export async function POST(request: NextRequest, context: { params: Promise<{ ma
   `;
   const delta = Number(rows[0]?.delta ?? 0);
   if (delta) await addChallengeProgress(user.id, "code_seconds", delta);
-  return NextResponse.json({ ok: true, ...(rows[0] ?? { delta: 0 }) });
+
+  let disconnect = await pendingDisconnect(matchId);
+  if (disconnect && Number(disconnect.secondsRemaining) <= 0) {
+    await finalizeForfeit(matchId, disconnect.team, "disconnect", disconnect.userId);
+    disconnect = null;
+  }
+  return NextResponse.json({
+    ok: true,
+    ...(rows[0] ?? { delta: 0 }),
+    match: await matchOutcome(matchId),
+    disconnect,
+  });
 }

@@ -11,6 +11,14 @@ Competitive and cooperative livecoding for Hack Club builders. Ranked includes P
 
 All player state lives in PostgreSQL: profiles and avatars, queue entries, teams, match timers, snapshots, coding time, H-Bucks, daily progress, friends, votes, publications, orders, and an immutable ELO transaction ledger. ELO is calculated and applied on the server after independent votes; clients never submit rating changes.
 
+To permanently remove every user and all gameplay data while preserving the database schema and migration history, point `DATABASE_URL` at the intended database and run:
+
+```bash
+npm run db:wipe-users -- --confirm WIPE_ALL_USER_DATA
+```
+
+The command prints the database hostname and name before deleting anything. It does not delete published GitHub repositories or external Liveblocks rooms.
+
 ## Vercel deployment
 
 The project uses vinext with Nitro's Vercel adapter. `vercel.json` runs the Vercel preset, which emits the Build Output API bundle in `.vercel/output` with a server function for the homepage and every API route.

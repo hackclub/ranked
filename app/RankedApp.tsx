@@ -14,6 +14,8 @@ type AuthState = {
   github: { login: string; avatarUrl: string | null } | null;
 };
 type ActiveMatch = { id: string; mode: Mode; durationMinutes: number; theme: string; status: string; startedAt: string; endsAt: string; team: "blue" | "red" };
+type MatchOutcome = { status: string; winningTeam: "blue" | "red" | null; endReason: string | null; forfeitedBy: string | null; forfeitingTeam: "blue" | "red" | null; endedAt: string | null };
+type DisconnectNotice = { userId: string; name: string; team: "blue" | "red"; expiresAt: string; secondsRemaining: number };
 type MediaPrefs = { mic: boolean; video: boolean; micDeviceId?: string; videoDeviceId?: string };
 type DashboardData = {
   friends: Array<{ id: string; friendshipId: string; name: string; slackId: string | null; status: string; incoming: boolean }>;
@@ -346,6 +348,10 @@ function Match({ navigate, toast, auth, match, media }: { navigate: (s: Screen) 
   const [syncIn, setSyncIn] = useState(18);
   const [opponentSnapshot, setOpponentSnapshot] = useState<string | null>(null);
   const [publishOpen, setPublishOpen] = useState(false);
+  const [forfeitOpen, setForfeitOpen] = useState(false);
+  const [forfeitLoading, setForfeitLoading] = useState(false);
+  const [disconnect, setDisconnect] = useState<DisconnectNotice | null>(null);
+  const [outcome, setOutcome] = useState<MatchOutcome | null>(null);
   const [repoName, setRepoName] = useState("");
   const [publishState, setPublishState] = useState<{ loading: boolean; error?: string; repositoryUrl?: string; pagesUrl?: string }>({ loading: false });
   const team = match.team;
@@ -372,6 +378,7 @@ function Match({ navigate, toast, auth, match, media }: { navigate: (s: Screen) 
     const timer = setInterval(() => {
       setSeconds(s => Math.max(0, s - 1));
       setSyncIn(s => s <= 1 ? 30 : s - 1);
+      setDisconnect(current => current ? { ...current, secondsRemaining: Math.max(0, current.secondsRemaining - 1) } : null);
     }, 1000);
     return () => clearInterval(timer);
   }, []);
@@ -417,10 +424,51 @@ function Match({ navigate, toast, auth, match, media }: { navigate: (s: Screen) 
     }
   }, [auth.github, files, match.id, previewDoc, publishState.loading, publishState.repositoryUrl, repoName, toast]);
 
+  const applyLifecycle = useCallback((result: { match?: MatchOutcome | null; disconnect?: DisconnectNotice | null }) => {
+    setDisconnect(result.disconnect ?? null);
+    if (result.match?.status === "completed" && ["forfeit", "disconnect"].includes(result.match.endReason ?? "")) {
+      setOutcome(result.match);
+      setPublishOpen(false);
+      setForfeitOpen(false);
+    }
+  }, []);
+
   useEffect(() => {
-    const heartbeat = window.setInterval(() => { void fetch(`/api/matches/${match.id}/heartbeat`, { method: "POST" }); }, 60_000);
-    return () => window.clearInterval(heartbeat);
+    let cancelled = false;
+    const heartbeat = async () => {
+      try {
+        const response = await fetch(`/api/matches/${match.id}/heartbeat`, { method: "POST" });
+        if (!response.ok || cancelled) return;
+        applyLifecycle(await response.json());
+      } catch {}
+    };
+    void heartbeat();
+    const timer = window.setInterval(() => void heartbeat(), 2_000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [applyLifecycle, match.id]);
+
+  useEffect(() => {
+    const markDisconnected = () => {
+      navigator.sendBeacon(`/api/matches/${match.id}/presence`);
+    };
+    window.addEventListener("pagehide", markDisconnected);
+    return () => window.removeEventListener("pagehide", markDisconnected);
   }, [match.id]);
+
+  const forfeit = useCallback(async () => {
+    if (forfeitLoading || outcome) return;
+    setForfeitLoading(true);
+    try {
+      const response = await fetch(`/api/matches/${match.id}/forfeit`, { method: "POST" });
+      const result = await response.json() as { error?: string; match?: MatchOutcome | null };
+      if (!response.ok && result.match?.status !== "completed") throw new Error(result.error ?? "Could not forfeit the match.");
+      applyLifecycle(result);
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Could not forfeit the match.");
+    } finally {
+      setForfeitLoading(false);
+    }
+  }, [applyLifecycle, forfeitLoading, match.id, outcome, toast]);
 
   useEffect(() => {
     const sync = async () => {
@@ -438,8 +486,15 @@ function Match({ navigate, toast, auth, match, media }: { navigate: (s: Screen) 
   }, [match.id]);
 
   useEffect(() => {
-    if (seconds === 0) window.setTimeout(() => setPublishOpen(true), 0);
-  }, [seconds]);
+    if (seconds === 0 && !outcome) window.setTimeout(() => setPublishOpen(true), 0);
+  }, [outcome, seconds]);
+
+  const disconnectSeconds = disconnect
+    ? Math.max(0, disconnect.secondsRemaining)
+    : 0;
+  const disconnectLabel = disconnect?.team === team
+    ? match.mode === "duo" ? "Your teammate disconnected" : "Your connection is unstable"
+    : "An opponent disconnected";
 
   const teammate = remotePeers.find(peer => peer.team === team);
   const opponents = remotePeers.filter(peer => peer.team !== team).slice(0, 2);
@@ -451,8 +506,9 @@ function Match({ navigate, toast, auth, match, media }: { navigate: (s: Screen) 
         <div className="theme-tag"><span>THEME</span><strong>{match.theme}</strong></div>
         <div className="timer" aria-label={`${time} remaining`}><span>{time}</span><small>remaining</small></div>
         <div className="match-score"><span><b className="blue-dot" /> your {match.mode === "duo" ? "duo" : "side"} <strong>{auth.user?.elo}</strong></span><i>VS</i><span><b className="red-dot" /> opponents</span></div>
-        <button className="exit-match" onClick={() => setPublishOpen(true)} disabled={seconds > 0 || publishState.loading}>{publishState.loading ? "publishing…" : seconds > 0 ? "publishes after match" : "publish to GitHub ↗"}</button>
+        <div className="match-actions"><button className="forfeit-match" onClick={() => setForfeitOpen(true)} disabled={Boolean(outcome) || forfeitLoading}>forfeit</button><button className="exit-match" onClick={() => setPublishOpen(true)} disabled={seconds > 0 || publishState.loading || Boolean(outcome)}>{publishState.loading ? "publishing…" : seconds > 0 ? "publishes after match" : "publish to GitHub ↗"}</button></div>
       </header>
+      {disconnect && !outcome && <div className={`disconnect-banner ${disconnect.team === team ? "danger" : ""}`} role="status"><strong>{disconnectLabel}</strong><span>{disconnectSeconds}s to reconnect before {disconnect.team === team ? "your team forfeits" : "the match ends"}</span></div>}
       <section className="call-strip">
         <div className="call-team"><span className="call-label">YOUR DUO</span><VideoTile name={auth.user?.name ?? "you"} team={`${team} · you`} color={auth.user?.avatar.color ?? COLORS[1]} eyes={auth.user?.avatar.eyes} mouths={auth.user?.avatar.mouths} stream={video ? localStream : null} local muted={!mic} /><VideoTile name={teammate?.name ?? "waiting…"} team={teammate ? "teammate · live" : "waiting for teammate"} color={teammate?.color ?? COLORS[2]} stream={teammate?.video ? teammate.stream : null} muted={teammate ? !teammate.mic : false} /></div>
         <div className="call-team opponents"><span className="call-label">OPPONENTS</span>{[0, 1].map(index => { const peer = opponents[index]; return <VideoTile key={peer?.connectionId ?? index} name={peer?.name ?? "open slot"} team={peer ? `${peer.team} team` : "waiting for builder"} color={peer?.color ?? COLORS[index + 3]} stream={peer?.video ? peer.stream : null} muted={peer ? !peer.mic : false} audioMuted={scope === "team" && peer?.team !== team} />; })}</div>
@@ -486,7 +542,9 @@ function Match({ navigate, toast, auth, match, media }: { navigate: (s: Screen) 
         </aside>
       </section>
       {previewOpen && <div className="preview-modal modal-backdrop" onClick={() => setPreviewOpen(false)}><div className="expanded-preview" onClick={e => e.stopPropagation()}><button onClick={() => setPreviewOpen(false)}>×</button><iframe title="Expanded live preview" srcDoc={previewDoc} sandbox="allow-scripts" /></div></div>}
-      {(publishOpen || publishState.repositoryUrl) && <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="publish-title"><section className="modal publish-modal"><span className="eyebrow">match complete · your GitHub copy</span><h2 id="publish-title">{publishState.repositoryUrl ? "Your build is open source." : "Name your repository."}</h2>{publishState.repositoryUrl ? <><p>Every player publishes the finished build to their own account. Voting opens after everyone has finished publishing.</p><div className="publish-links"><a href={publishState.repositoryUrl} target="_blank" rel="noreferrer">open repository ↗</a><a href={publishState.pagesUrl} target="_blank" rel="noreferrer">open live website ↗</a></div><button className="primary-button" onClick={() => navigate("home")}>return home</button></> : <><p>Choose the exact public repository name to create under {auth.github ? <strong>@{auth.github.login}</strong> : "your GitHub account"}.</p><label className="repo-name-field"><span>github.com/{auth.github?.login ?? "you"}/</span><input value={repoName} onChange={event => { setRepoName(event.target.value); if (publishState.error) setPublishState({ loading: false }); }} placeholder="my-ranked-build" autoFocus maxLength={100} pattern="[A-Za-z0-9._-]+" required /></label>{publishState.error && <p className="publish-error">{publishState.error}</p>}{auth.github ? <button className="primary-button" onClick={() => void publish()} disabled={publishState.loading || !repoName}>{publishState.loading ? "creating repository…" : "publish repo & Pages ↗"}</button> : <a className="primary-button github-connect" href="/api/auth/github/start">connect GitHub ↗</a>}<small>The repository will be public and include the finished site plus the original HTML, CSS, and JavaScript files.</small></>}</section></div>}
+      {(publishOpen || publishState.repositoryUrl) && !outcome && <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="publish-title"><section className="modal publish-modal"><span className="eyebrow">match complete · your GitHub copy</span><h2 id="publish-title">{publishState.repositoryUrl ? "Your build is open source." : "Name your repository."}</h2>{publishState.repositoryUrl ? <><p>Every player publishes the finished build to their own account. Voting opens after everyone has finished publishing.</p><div className="publish-links"><a href={publishState.repositoryUrl} target="_blank" rel="noreferrer">open repository ↗</a><a href={publishState.pagesUrl} target="_blank" rel="noreferrer">open live website ↗</a></div><button className="primary-button" onClick={() => navigate("home")}>return home</button></> : <><p>Choose the exact public repository name to create under {auth.github ? <strong>@{auth.github.login}</strong> : "your GitHub account"}.</p><label className="repo-name-field"><span>github.com/{auth.github?.login ?? "you"}/</span><input value={repoName} onChange={event => { setRepoName(event.target.value); if (publishState.error) setPublishState({ loading: false }); }} placeholder="my-ranked-build" autoFocus maxLength={100} pattern="[A-Za-z0-9._-]+" required /></label>{publishState.error && <p className="publish-error">{publishState.error}</p>}{auth.github ? <button className="primary-button" onClick={() => void publish()} disabled={publishState.loading || !repoName}>{publishState.loading ? "creating repository…" : "publish repo & Pages ↗"}</button> : <a className="primary-button github-connect" href="/api/auth/github/start">connect GitHub ↗</a>}<small>The repository will be public and include the finished site plus the original HTML, CSS, and JavaScript files.</small></>}</section></div>}
+      {forfeitOpen && !outcome && <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="forfeit-title"><section className="modal publish-modal forfeit-modal"><span className="eyebrow">leave this match</span><h2 id="forfeit-title">Forfeit the match?</h2><p>This ends the match immediately. The other team wins and ELO is updated.</p><div className="forfeit-actions"><button onClick={() => setForfeitOpen(false)} disabled={forfeitLoading}>keep coding</button><button className="danger-button" onClick={() => void forfeit()} disabled={forfeitLoading}>{forfeitLoading ? "closing match…" : "yes, forfeit"}</button></div></section></div>}
+      {outcome && <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="outcome-title"><section className="modal publish-modal outcome-modal"><span className="eyebrow">match closed · {outcome.endReason}</span><h2 id="outcome-title">{outcome.winningTeam === team ? "You win by forfeit." : "Your team forfeited."}</h2><p>{outcome.endReason === "disconnect" ? "A player did not reconnect during the 10-second grace period." : "A player chose to end the match early."} ELO has been updated for both teams.</p><button className="primary-button" onClick={() => navigate("home")}>return home</button></section></div>}
     </main>
   );
 }

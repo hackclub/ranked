@@ -46,6 +46,10 @@ export const matches = pgTable("matches", {
   startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
   endsAt: timestamp("ends_at", { withTimezone: true }).notNull(),
   votingEndsAt: timestamp("voting_ends_at", { withTimezone: true }),
+  endedAt: timestamp("ended_at", { withTimezone: true }),
+  endReason: text("end_reason"),
+  forfeitedBy: text("forfeited_by"),
+  forfeitingTeam: teamEnum("forfeiting_team"),
   playersCounted: boolean("players_counted").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, table => [index("matches_status_idx").on(table.status), index("matches_ends_idx").on(table.endsAt)]);
@@ -59,6 +63,8 @@ export const matchPlayers = pgTable("match_players", {
   postElo: integer("post_elo"),
   codingSeconds: integer("coding_seconds").notNull().default(0),
   lastHeartbeatAt: timestamp("last_heartbeat_at", { withTimezone: true }),
+  presenceConfirmedAt: timestamp("presence_confirmed_at", { withTimezone: true }),
+  disconnectStartedAt: timestamp("disconnect_started_at", { withTimezone: true }),
   finishedAt: timestamp("finished_at", { withTimezone: true }),
   joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
 }, table => [primaryKey({ columns: [table.matchId, table.userId] }), index("match_players_user_idx").on(table.userId), index("match_players_match_team_idx").on(table.matchId, table.team)]);

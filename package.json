@@ -13,7 +13,8 @@
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern .output --ignore-pattern .vercel --ignore-pattern .wrangler",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "db:push": "drizzle-kit push"
+    "db:push": "drizzle-kit push",
+    "db:wipe-users": "node scripts/wipe-users.mjs"
   },
   "dependencies": {
     "@liveblocks/client": "^3.23.0",
