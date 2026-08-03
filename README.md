@@ -1,100 +1,56 @@
-# vinext-starter
+# Ranked
 
-A clean full-stack starter running on
-[vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
-Drizzle support.
+Competitive and cooperative livecoding for Hack Club builders. Ranked includes PostgreSQL-backed accounts, placement/ELO matchmaking, solo and duo matches, community voting, progression, friends, rewards, Hack Club OAuth, GitHub Pages publishing, team-scoped Yjs/Monaco collaboration, and peer-to-peer WebRTC calls.
 
-## Prerequisites
+## Local setup
 
-- Node.js `>=22.13.0`
+1. Create a PostgreSQL database (Neon works well) and copy its pooled connection string to `DATABASE_URL` in `.env.local`.
+2. Fill in the remaining provider values from `.env.example`.
+3. Run `npm run db:migrate` once, then `npm run dev`.
+4. Open `http://localhost:3000`.
 
-## Quick Start
+All player state lives in PostgreSQL: profiles and avatars, queue entries, teams, match timers, snapshots, coding time, H-Bucks, daily progress, friends, votes, publications, orders, and an immutable ELO transaction ledger. ELO is calculated and applied on the server after independent votes; clients never submit rating changes.
+
+## Hack Club Auth
+
+Create a developer app at `https://auth.hackclub.com/developer/apps` and configure:
+
+- Callback: `http://localhost:3000/api/auth/hackclub/callback`
+- Scopes: `email name verification_status slack_id`
+- Environment: `AUTH_CLIENTID`, `AUTH_CLIENTSECRET`, `AUTH_SESSION_SECRET`
+
+`AUTH_SESSION_SECRET` should be at least 32 random characters. It encrypts the HTTP-only session that contains account connections.
+
+## GitHub publishing
+
+Create a GitHub OAuth App and configure:
+
+- Callback: `http://localhost:3000/api/auth/github/callback`
+- Environment: `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`
+- Scope: `public_repo`
+
+When the timer ends, every participant chooses an exact repository name. Ranked creates that public repository in the participant’s connected GitHub account, commits the deployable `index.html`, README, `.nojekyll`, and original HTML/CSS/JS source files, then enables GitHub Pages from the `main` branch. Duo teammates publish the same finished team build independently to their own accounts; voting opens after every player has published.
+
+## Realtime rooms and calls
+
+Create a Liveblocks project and set `LIVEBLOCKS_SECRET_KEY`. Ranked verifies match membership before authorizing rooms. A match has one call room for all players and a separate code room per team, so opponents cannot read or edit each other’s source. Monaco files synchronize with Liveblocks’ Yjs provider, and call-room events carry WebRTC offer/answer/ICE signaling.
+
+Audio and video travel directly between peers. Google's public STUN servers are included for local testing. For reliable production calls across restrictive networks, fill in the optional TURN variables in `.env.local`.
+
+For a local multiplayer test, sign in as separate Hack Club users in separate browser profiles, select the same mode and duration, and ready up. Ranked assigns teams transactionally once two solo or four duo players are queued.
+
+## Other services
+
+- `SLACK_BOT_TOKEN`: optional Slack-name lookup; use `users:read`. The other person must have signed into Ranked before they can be friended.
+- `VOTES_TO_FINALIZE`: community votes needed before server-side ELO settlement; defaults to `3`.
+- `NEXT_PUBLIC_TURN_*`: optional but strongly recommended for reliable WebRTC outside friendly networks.
+- Shop redemptions create `pending` PostgreSQL orders and atomically deduct H-Bucks. Fulfillment/approval remains an admin operation, not an automatic hardware purchase.
+
+## Checks
 
 ```bash
-npm install
-npm run dev
+npm run lint
+npx tsc --noEmit
 npm run build
+npm test
 ```
-
-This starter does not use `wrangler.jsonc`.
-
-## Included Shape
-
-- edit site code under `app/`
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
-- `vite.config.ts` simulates declared bindings for local development
-- `db/schema.ts` starts intentionally empty
-- `examples/d1/` contains an optional D1 example surface
-- `drizzle.config.ts` supports local migration generation when needed
-
-## Workspace Auth Headers
-
-Signed-in visitors receive both `oai-authenticated-user-id` and `oai-authenticated-user-email`. Private Sites require every visitor to sign in; public Sites may also have anonymous visitors, for whom neither header is present.
-
-The user ID is stable for the same user on the same Site and different across Sites. Email and name are intended for display or contact purposes.
-
-SIWC-authenticated workspace sites may also receive
-`oai-authenticated-user-full-name` when the user's SIWC profile has a non-empty
-`name` claim. The full-name value is percent-encoded UTF-8 and is accompanied by
-`oai-authenticated-user-full-name-encoding: percent-encoded-utf-8`.
-
-Treat the full name as optional and fall back to email when it is absent:
-
-```tsx
-import { headers } from "next/headers";
-
-export default async function Home() {
-  const requestHeaders = await headers();
-  const userId = requestHeaders.get("oai-authenticated-user-id");
-  const email = requestHeaders.get("oai-authenticated-user-email");
-  const encodedFullName = requestHeaders.get("oai-authenticated-user-full-name");
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get("oai-authenticated-user-full-name-encoding") ===
-      "percent-encoded-utf-8"
-      ? decodeURIComponent(encodedFullName)
-      : null;
-
-  const displayName = fullName ?? email;
-  // ...
-}
-```
-
-## Optional Dispatch-Owned ChatGPT Sign-In
-
-Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs
-optional or required ChatGPT sign-in:
-
-- Use `getChatGPTUser()` for optional signed-in UI.
-- Use `requireChatGPTUser(returnTo)` for server-rendered pages that should send
-  anonymous visitors through Sign in with ChatGPT.
-- Use `chatGPTSignInPath(returnTo)` and `chatGPTSignOutPath(returnTo)` for
-  browser links or actions.
-- Pass a same-origin relative `returnTo` path for the destination after sign-in
-  or sign-out. The helper validates and safely encodes it.
-- Mark protected pages with `export const dynamic = "force-dynamic"` because
-  they depend on per-request identity headers.
-
-Dispatch owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the
-OAuth cookies, and identity header injection. Do not implement app routes for
-those reserved paths. Routes that do not import and call the helper remain
-anonymous-compatible.
-
-SIWC establishes identity only; it does not prove workspace membership. Use the
-Sites hosting platform's access policy controls for workspace-wide restrictions,
-or enforce explicit server-side membership or allowlist checks.
-
-Use SIWC for account pages, user-specific dashboards, saved records, and write
-actions tied to the current ChatGPT user. Leave public content anonymous.
-
-## Useful Commands
-
-- `npm run dev`: start local development
-- `npm run build`: verify the vinext build output
-- `npm test`: build the starter and verify its rendered loading skeleton
-- `npm run db:generate`: generate Drizzle migrations after schema changes
-
-## Learn More
-
-- [vinext Documentation](https://github.com/cloudflare/vinext)
-- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)

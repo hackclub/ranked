@@ -20,7 +20,8 @@ test("server-renders the Ranked product shell", async () => {
   assert.match(html, /Ranked — livecoding for builders/);
   assert.match(html, /HACK CLUB/);
   assert.match(html, /daily challenges/);
-  assert.match(html, /find a match/);
+  assert.match(html, /sign in to play/);
+  assert.match(html, /Hack Club account required/);
   assert.doesNotMatch(html, /codex-preview|Building your site|react-loading-skeleton/);
 });
 

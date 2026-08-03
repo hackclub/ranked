@@ -1,0 +1,79 @@
+import { NextRequest, NextResponse } from "next/server";
+import { currentUser } from "@/app/lib/current-user";
+import { getSql } from "@/db";
+
+const themes = ["solar system", "tiny arcade", "midnight garden", "future transit", "friendly monsters", "music festival"];
+
+async function activeMatch(userId: string) {
+  const rows = await getSql()`SELECT m.id, m.mode, m.duration_minutes AS "durationMinutes", m.theme, m.status,
+      m.started_at AS "startedAt", m.ends_at AS "endsAt", mp.team
+    FROM match_players mp JOIN matches m ON m.id = mp.match_id
+    WHERE mp.user_id = ${userId} AND m.status IN ('active','voting') ORDER BY m.created_at DESC LIMIT 1`;
+  return rows[0] ?? null;
+}
+
+export async function GET(request: NextRequest) {
+  const user = await currentUser(request);
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const match = await activeMatch(user.id);
+  if (match) return NextResponse.json({ status: "matched", match });
+  const queued = await getSql()`SELECT joined_at AS "joinedAt" FROM matchmaking_queue WHERE user_id = ${user.id}`;
+  return NextResponse.json({ status: queued.length ? "queued" : "idle", queued: queued[0] ?? null });
+}
+
+export async function POST(request: NextRequest) {
+  const user = await currentUser(request);
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const existing = await activeMatch(user.id);
+  if (existing) return NextResponse.json({ status: "matched", match: existing });
+  const body = await request.json();
+  const mode = body.mode === "duo" ? "duo" : "solo";
+  const duration = [10, 30, 60].includes(Number(body.durationMinutes)) ? Number(body.durationMinutes) : 10;
+  const experience = ["beginner", "intermediate", "expert"].includes(body.experience) ? body.experience : user.experience;
+  if (!experience) return NextResponse.json({ error: "Choose your experience level first.", code: "onboarding_required" }, { status: 400 });
+  const voteRows = await getSql()`SELECT COUNT(*)::int AS count FROM votes WHERE voter_id = ${user.id}`;
+  if (Number(voteRows[0]?.count ?? 0) < Math.floor(user.matchesPlayed / 3)) {
+    return NextResponse.json({ error: "Vote on a finished match to keep playing.", code: "vote_required" }, { status: 403 });
+  }
+  await getSql()`UPDATE users SET experience = ${experience}::experience_level WHERE id = ${user.id}`;
+  await getSql()`INSERT INTO matchmaking_queue (user_id, mode, duration_minutes, experience, elo)
+    VALUES (${user.id}, ${mode}::match_mode, ${duration}, ${experience}::experience_level, ${user.elo})
+    ON CONFLICT (user_id) DO UPDATE SET mode=EXCLUDED.mode, duration_minutes=EXCLUDED.duration_minutes,
+      experience=EXCLUDED.experience, elo=EXCLUDED.elo, joined_at=NOW()`;
+
+  const matchId = crypto.randomUUID();
+  const needed = mode === "duo" ? 4 : 2;
+  const theme = themes[Math.floor(Math.random() * themes.length)];
+  await getSql()`
+    WITH candidates AS (
+      SELECT q.user_id, q.joined_at FROM matchmaking_queue q JOIN users u ON u.id=q.user_id
+      WHERE q.user_id <> ${user.id} AND q.mode=${mode}::match_mode AND q.duration_minutes=${duration}
+        AND ((u.matches_played < 3 AND q.experience=${experience}::experience_level)
+          OR (u.matches_played >= 3 AND ${user.matchesPlayed} >= 3 AND ABS(q.elo-${user.elo}) <= 400))
+      ORDER BY q.joined_at LIMIT ${needed - 1} FOR UPDATE OF q SKIP LOCKED
+    ), selected AS (
+      SELECT ${user.id}::text AS user_id, 0 AS ord UNION ALL
+      SELECT user_id, ROW_NUMBER() OVER (ORDER BY joined_at)::int AS ord FROM candidates
+    ), made AS (
+      INSERT INTO matches (id, mode, duration_minutes, theme, ends_at)
+      SELECT ${matchId}, ${mode}::match_mode, ${duration}, ${theme}, NOW() + (${duration} || ' minutes')::interval
+      WHERE (SELECT COUNT(*) FROM selected) = ${needed} RETURNING id
+    ), players AS (
+      INSERT INTO match_players (match_id, user_id, team, slot, pre_elo, last_heartbeat_at)
+      SELECT made.id, s.user_id,
+        CASE WHEN s.ord < ${needed / 2} THEN 'blue'::match_team ELSE 'red'::match_team END,
+        s.ord, u.elo, NOW() FROM selected s JOIN users u ON u.id=s.user_id CROSS JOIN made RETURNING user_id
+    )
+    DELETE FROM matchmaking_queue q USING players p WHERE q.user_id=p.user_id
+  `;
+  const match = await activeMatch(user.id);
+  return NextResponse.json(match ? { status: "matched", match } : { status: "queued" });
+}
+
+export async function DELETE(request: NextRequest) {
+  const user = await currentUser(request);
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  await getSql()`DELETE FROM matchmaking_queue WHERE user_id = ${user.id}`;
+  return NextResponse.json({ ok: true });
+}
+
