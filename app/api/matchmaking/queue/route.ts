@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { currentUser } from "@/app/lib/current-user";
+import { getVoteGate } from "@/app/lib/vote-gate";
 import { getSql } from "@/db";
 
 const themes = ["solar system", "tiny arcade", "midnight garden", "future transit", "friendly monsters", "music festival"];
@@ -32,8 +33,8 @@ export async function POST(request: NextRequest) {
   const duration = [10, 30, 60].includes(Number(body.durationMinutes)) ? Number(body.durationMinutes) : 10;
   const experience = ["beginner", "intermediate", "expert"].includes(body.experience) ? body.experience : user.experience;
   if (!experience) return NextResponse.json({ error: "Choose your experience level first.", code: "onboarding_required" }, { status: 400 });
-  const voteRows = await getSql()`SELECT COUNT(*)::int AS count FROM votes WHERE voter_id = ${user.id}`;
-  if (Number(voteRows[0]?.count ?? 0) < Math.floor(user.matchesPlayed / 3)) {
+  const voteGate = await getVoteGate(user.id, user.matchesPlayed);
+  if (voteGate.due) {
     return NextResponse.json({ error: "Vote on a finished match to keep playing.", code: "vote_required" }, { status: 403 });
   }
   await getSql()`UPDATE users SET experience = ${experience}::experience_level WHERE id = ${user.id}`;

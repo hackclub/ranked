@@ -23,7 +23,8 @@ export async function POST(request: NextRequest) {
   const { matchId, choice } = await request.json();
   if (!matchId || !["blue", "red"].includes(choice)) return NextResponse.json({ error: "Invalid vote" }, { status: 400 });
   const eligible = await getSql()`SELECT id FROM matches m WHERE id=${matchId} AND status='voting'
-    AND NOT EXISTS (SELECT 1 FROM match_players WHERE match_id=m.id AND user_id=${user.id})`;
+    AND NOT EXISTS (SELECT 1 FROM match_players WHERE match_id=m.id AND user_id=${user.id})
+    AND (SELECT COUNT(DISTINCT team)::int FROM publications WHERE match_id=m.id)=2`;
   if (!eligible.length) return NextResponse.json({ error: "You cannot vote on this match." }, { status: 403 });
   await getSql()`INSERT INTO votes (id, match_id, voter_id, choice) VALUES (${crypto.randomUUID()},${matchId},${user.id},${choice}::match_team)
     ON CONFLICT (match_id,voter_id) DO NOTHING`;

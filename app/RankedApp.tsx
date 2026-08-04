@@ -21,7 +21,7 @@ type DashboardData = {
   friends: Array<{ id: string; friendshipId: string; name: string; slackId: string | null; status: string; incoming: boolean }>;
   recent: Array<{ id: string; theme: string; status: string; createdAt: string; opponents: Array<{ id: string; name: string }> }>;
   challenges: Array<{ type: string; progress: number; target: number; rewardElo: number; rewardHBucks: number; rewardClaimed: boolean }>;
-  voteGate: { required: number; cast: number; due: boolean };
+  voteGate: { required: number; cast: number; available: boolean; due: boolean; deferred: boolean };
 };
 
 const COLORS = ["#D891D9", "#497CBF", "#CCD96C", "#D99F6C", "#BF5A5A"];
@@ -223,8 +223,8 @@ function Home({ navigate, toast, auth }: { navigate: (s: Screen) => void; toast:
             <small className="resets">resets in 08:42:16</small>
           </div>
           <div className="paper-card vote-nudge">
-            <div className="vote-icon">◒</div><div><strong>{dashboard?.voteGate.due ? `${dashboard.voteGate.required - dashboard.voteGate.cast} vote due` : "community voting"}</strong><span>{dashboard?.voteGate.due ? "Vote to unlock your next match" : "Help choose another match winner"}</span></div>
-            <button onClick={() => navigate("vote")}>vote now</button>
+            <div className="vote-icon">◒</div><div><strong>{dashboard?.voteGate.due ? `${dashboard.voteGate.required - dashboard.voteGate.cast} vote due` : dashboard?.voteGate.available ? "community voting" : "no votes waiting"}</strong><span>{dashboard?.voteGate.due ? "Vote to unlock your next match" : dashboard?.voteGate.available ? "Help choose another match winner" : dashboard?.voteGate.deferred ? "You can keep playing until a vote appears" : "Fresh matchups will appear here"}</span></div>
+            <button onClick={() => navigate("vote")} disabled={!dashboard?.voteGate.available}>vote now</button>
           </div>
         </aside>
       </section>
