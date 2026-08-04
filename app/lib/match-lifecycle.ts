@@ -11,6 +11,7 @@ export type MatchOutcome = {
   forfeitedBy: string | null;
   forfeitingTeam: MatchTeam | null;
   endedAt: string | null;
+  remainingSeconds: number;
 };
 
 export type DisconnectNotice = {
@@ -23,7 +24,8 @@ export type DisconnectNotice = {
 
 export async function matchOutcome(matchId: string): Promise<MatchOutcome | null> {
   const rows = await getSql()`SELECT status, winning_team AS "winningTeam", end_reason AS "endReason",
-      forfeited_by AS "forfeitedBy", forfeiting_team AS "forfeitingTeam", ended_at AS "endedAt"
+      forfeited_by AS "forfeitedBy", forfeiting_team AS "forfeitingTeam", ended_at AS "endedAt",
+      GREATEST(0,CEIL(EXTRACT(EPOCH FROM (ends_at-NOW()))))::int AS "remainingSeconds"
     FROM matches WHERE id=${matchId}`;
   return (rows[0] as MatchOutcome | undefined) ?? null;
 }
@@ -92,7 +94,7 @@ export async function finalizeForfeit(
         m.forfeiting_team AS "forfeitingTeam",m.ended_at AS "endedAt"
     ) SELECT * FROM completed`;
 
-  const completed = rows[0] as Omit<MatchOutcome, "status"> | undefined;
+  const completed = rows[0] as Omit<MatchOutcome, "status" | "remainingSeconds"> | undefined;
   if (!completed) return null;
 
   const players = await getSql()`SELECT user_id FROM match_players WHERE match_id=${matchId}`;
@@ -101,5 +103,5 @@ export async function finalizeForfeit(
       addChallengeProgress(String(player.user_id), "play_matches", 1),
     ),
   );
-  return { status: "completed", ...completed } satisfies MatchOutcome;
+  return { status: "completed", remainingSeconds: 0, ...completed } satisfies MatchOutcome;
 }

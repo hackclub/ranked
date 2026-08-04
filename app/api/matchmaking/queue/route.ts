@@ -6,7 +6,8 @@ const themes = ["solar system", "tiny arcade", "midnight garden", "future transi
 
 async function activeMatch(userId: string) {
   const rows = await getSql()`SELECT m.id, m.mode, m.duration_minutes AS "durationMinutes", m.theme, m.status,
-      m.started_at AS "startedAt", m.ends_at AS "endsAt", mp.team
+      m.started_at AS "startedAt", m.ends_at AS "endsAt",
+      GREATEST(0,CEIL(EXTRACT(EPOCH FROM (m.ends_at-NOW()))))::int AS "remainingSeconds",mp.team
     FROM match_players mp JOIN matches m ON m.id = mp.match_id
     WHERE mp.user_id = ${userId} AND m.status='active' ORDER BY m.created_at DESC LIMIT 1`;
   return rows[0] ?? null;

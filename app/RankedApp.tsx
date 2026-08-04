@@ -13,8 +13,8 @@ type AuthState = {
   user: { id: string; name: string; email: string; slackId: string | null; verificationStatus: string | null; experience: Experience | null; elo: number; matchesPlayed: number; codingSeconds: number; hBucks: number; avatar: { color: string; eyes: number; mouths: number } } | null;
   github: { login: string; avatarUrl: string | null } | null;
 };
-type ActiveMatch = { id: string; mode: Mode; durationMinutes: number; theme: string; status: string; startedAt: string; endsAt: string; team: "blue" | "red" };
-type MatchOutcome = { status: string; winningTeam: "blue" | "red" | null; endReason: string | null; forfeitedBy: string | null; forfeitingTeam: "blue" | "red" | null; endedAt: string | null };
+type ActiveMatch = { id: string; mode: Mode; durationMinutes: number; theme: string; status: string; startedAt: string; endsAt: string; remainingSeconds: number; team: "blue" | "red" };
+type MatchOutcome = { status: string; winningTeam: "blue" | "red" | null; endReason: string | null; forfeitedBy: string | null; forfeitingTeam: "blue" | "red" | null; endedAt: string | null; remainingSeconds: number };
 type DisconnectNotice = { userId: string; name: string; team: "blue" | "red"; expiresAt: string; secondsRemaining: number };
 type MediaPrefs = { mic: boolean; video: boolean; micDeviceId?: string; videoDeviceId?: string };
 type DashboardData = {
@@ -25,6 +25,45 @@ type DashboardData = {
 };
 
 const COLORS = ["#D891D9", "#497CBF", "#CCD96C", "#D99F6C", "#BF5A5A"];
+
+async function clearBrowserSiteData() {
+  window.localStorage.clear();
+  window.sessionStorage.clear();
+
+  const cleanup: Array<Promise<unknown>> = [];
+  if ("caches" in window) {
+    cleanup.push(
+      window.caches.keys().then(keys =>
+        Promise.all(keys.map(key => window.caches.delete(key))),
+      ),
+    );
+  }
+  if ("serviceWorker" in navigator) {
+    cleanup.push(
+      navigator.serviceWorker.getRegistrations().then(registrations =>
+        Promise.all(registrations.map(registration => registration.unregister())),
+      ),
+    );
+  }
+  if ("indexedDB" in window && typeof window.indexedDB.databases === "function") {
+    cleanup.push(
+      window.indexedDB.databases().then(databases =>
+        Promise.all(databases.flatMap(database => database.name ? [new Promise<void>(resolve => {
+          const deletion = window.indexedDB.deleteDatabase(database.name!);
+          deletion.onsuccess = () => resolve();
+          deletion.onerror = () => resolve();
+          deletion.onblocked = () => resolve();
+        })] : [])),
+      ),
+    );
+  }
+
+  document.cookie.split(";").forEach(cookie => {
+    const name = cookie.split("=")[0]?.trim();
+    if (name) document.cookie = `${name}=; Max-Age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/`;
+  });
+  await Promise.allSettled(cleanup);
+}
 
 const starterFiles: Record<string, string> = {
   "index.html": `<!doctype html>
@@ -338,7 +377,12 @@ function VideoTile({ name, team, color, eyes = 2, mouths = 1, muted = false, str
 }
 
 function Match({ navigate, toast, auth, match, media }: { navigate: (s: Screen) => void; toast: (m: string) => void; auth: AuthState; match: ActiveMatch; media: MediaPrefs }) {
-  const [seconds, setSeconds] = useState(() => Math.max(0, Math.floor((new Date(match.endsAt).getTime() - Date.now()) / 1000)));
+  const [seconds, setSeconds] = useState(() => {
+    const serverSeconds = Number(match.remainingSeconds);
+    return Number.isFinite(serverSeconds) && serverSeconds >= 0
+      ? Math.ceil(serverSeconds)
+      : match.durationMinutes * 60;
+  });
   const [files, setFiles] = useState(starterFiles);
   const [tab, setTab] = useState("index.html");
   const [mic, setMic] = useState(media.mic);
@@ -426,6 +470,9 @@ function Match({ navigate, toast, auth, match, media }: { navigate: (s: Screen) 
 
   const applyLifecycle = useCallback((result: { match?: MatchOutcome | null; disconnect?: DisconnectNotice | null }) => {
     setDisconnect(result.disconnect ?? null);
+    if (result.match && Number.isFinite(Number(result.match.remainingSeconds))) {
+      setSeconds(Math.max(0, Math.ceil(Number(result.match.remainingSeconds))));
+    }
     if (result.match?.status === "completed" && ["forfeit", "disconnect"].includes(result.match.endReason ?? "")) {
       setOutcome(result.match);
       setPublishOpen(false);
@@ -621,7 +668,7 @@ function Voting({ navigate, toast }: { navigate: (s: Screen) => void; toast: (m:
   );
 }
 
-function ProfileModal({ close, auth }: { close: () => void; auth: AuthState }) {
+function ProfileModal({ close, auth, logout, logoutLoading }: { close: () => void; auth: AuthState; logout: () => void; logoutLoading: boolean }) {
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="profile-title">
       <section className="modal profile-modal">
@@ -633,7 +680,7 @@ function ProfileModal({ close, auth }: { close: () => void; auth: AuthState }) {
           <a href="/api/auth/github/start">⌘ GitHub <span>{auth.github ? `@${auth.github.login}` : "connect ↗"}</span></a>
         </div>
         <small>Completed builds are published open source to GitHub and deployed to GitHub Pages.</small>
-        {auth.user && <form action="/api/auth/logout" method="post" className="logout-form"><button type="submit">sign out</button></form>}
+        {auth.user && <div className="logout-form"><button type="button" onClick={logout} disabled={logoutLoading}>{logoutLoading ? "clearing site data…" : "log out & clear site data"}</button></div>}
       </section>
     </div>
   );
@@ -647,6 +694,7 @@ export default function RankedApp() {
   const [activeMatch, setActiveMatch] = useState<ActiveMatch | null>(null);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [mediaPrefs, setMediaPrefs] = useState<MediaPrefs>({ mic: true, video: true });
+  const [logoutLoading, setLogoutLoading] = useState(false);
 
   const toast = useCallback((message: string) => {
     setToastMessage(message);
@@ -687,6 +735,24 @@ export default function RankedApp() {
 
   const onMatched = useCallback((match: ActiveMatch, media: MediaPrefs = { mic: true, video: true }) => { setMediaPrefs(media); setActiveMatch(match); setScreen("match"); window.scrollTo({ top: 0 }); }, []);
 
+  const logout = useCallback(async () => {
+    if (logoutLoading) return;
+    setLogoutLoading(true);
+    try {
+      const response = await fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "include",
+        headers: { Accept: "application/json" },
+      });
+      if (!response.ok) throw new Error("Logout failed");
+      await clearBrowserSiteData();
+      window.location.replace("/");
+    } catch {
+      setLogoutLoading(false);
+      toast("Could not log out — please try again");
+    }
+  }, [logoutLoading, toast]);
+
   return (
     <div className={`app-shell screen-${screen}`}>
       {screen !== "match" && <SiteHeader screen={screen} navigate={navigate} onProfile={() => setProfileOpen(true)} balance={auth.user?.hBucks ?? 0} avatar={auth.user?.avatar} />}
@@ -698,7 +764,7 @@ export default function RankedApp() {
       {screen === "vote" && <Voting navigate={navigate} toast={toast} />}
       {screen === "leaderboard" && <Leaderboard navigate={navigate} />}
       {screen === "shop" && <Shop navigate={navigate} toast={toast} auth={auth} />}
-      {profileOpen && <ProfileModal close={() => setProfileOpen(false)} auth={auth} />}
+      {profileOpen && <ProfileModal close={() => setProfileOpen(false)} auth={auth} logout={() => void logout()} logoutLoading={logoutLoading} />}
       {onboardingOpen && <ExperienceModal close={() => setOnboardingOpen(false)} select={experience => void saveExperience(experience)} />}
       <div className={`toast ${toastMessage ? "show" : ""}`} role="status">{toastMessage}<span>✦</span></div>
     </div>

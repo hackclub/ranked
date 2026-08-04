@@ -39,3 +39,24 @@ test("includes product navigation and share metadata", async () => {
   assert.match(html, /og\.png/);
   assert.match(html, /Build fast\. Ship open\./);
 });
+
+test("logout expires site cookies and requests browser storage cleanup", async () => {
+  const response = await handler.fetch(
+    new Request("https://ranked.example/api/auth/logout", {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        cookie: "ranked_session=session; ranked_github_state=state; site_preference=value",
+      },
+    }),
+    { waitUntil() {} },
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("clear-site-data"), '"cache", "cookies", "storage"');
+  const setCookies = response.headers.getSetCookie().join("\n");
+  assert.match(setCookies, /ranked_session=;/);
+  assert.match(setCookies, /ranked_github_state=;/);
+  assert.match(setCookies, /site_preference=;/);
+  assert.match(setCookies, /Max-Age=0/i);
+});

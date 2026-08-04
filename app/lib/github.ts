@@ -11,7 +11,7 @@ export function githubAuthorizationUrl(state: string, challenge: string, redirec
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: process.env.GITHUB_REDIRECT_URI ?? redirectUri,
-    scope: process.env.GITHUB_OAUTH_SCOPE ?? "public_repo",
+    scope: process.env.GITHUB_OAUTH_SCOPE ?? "repo",
     state,
     code_challenge: challenge,
     code_challenge_method: "S256",

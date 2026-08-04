@@ -41,7 +41,7 @@ Create a GitHub OAuth App and configure:
 
 - Callback: `http://localhost:3000/api/auth/github/callback`
 - Environment: `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`
-- Scope: `public_repo`
+- Scope: `repo` (GitHub requires this classic OAuth scope to configure Pages, even though Ranked creates public repositories)
 
 When the timer ends, every participant chooses an exact repository name. Ranked creates that public repository in the participant’s connected GitHub account, commits the deployable `index.html`, README, `.nojekyll`, and original HTML/CSS/JS source files, then enables GitHub Pages from the `main` branch. Duo teammates publish the same finished team build independently to their own accounts; voting opens after every player has published.
 
