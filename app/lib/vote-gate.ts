@@ -25,7 +25,7 @@ export async function getVoteGate(userId: string, matchesPlayed: number): Promis
           )=2
       ) AS available`;
   const cast = Number(rows[0]?.cast ?? 0);
-  const required = Math.floor(matchesPlayed / 3);
+  const required = matchesPlayed >= 3 ? 5 : 0;
   const available = Boolean(rows[0]?.available);
   const owed = cast < required;
   return {
