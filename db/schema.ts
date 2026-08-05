@@ -17,6 +17,7 @@ export const matchModeEnum = pgEnum("match_mode", ["solo", "duo"]);
 export const matchStatusEnum = pgEnum("match_status", ["active", "voting", "finalizing", "completed", "cancelled"]);
 export const teamEnum = pgEnum("match_team", ["blue", "red"]);
 export const friendshipStatusEnum = pgEnum("friendship_status", ["pending", "accepted", "declined", "blocked"]);
+export const duoInviteStatusEnum = pgEnum("duo_invite_status", ["pending", "accepted", "declined"]);
 export const orderStatusEnum = pgEnum("order_status", ["pending", "approved", "shipped", "cancelled"]);
 export const challengeTypeEnum = pgEnum("challenge_type", ["play_matches", "code_seconds", "add_friends"]);
 
@@ -75,8 +76,18 @@ export const matchmakingQueue = pgTable("matchmaking_queue", {
   durationMinutes: integer("duration_minutes").notNull(),
   experience: experienceEnum("experience").notNull(),
   elo: integer("elo").notNull(),
+  partyKey: text("party_key"),
   joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
 }, table => [index("queue_match_idx").on(table.mode, table.durationMinutes, table.joinedAt)]);
+
+export const duoInvites = pgTable("duo_invites", {
+  id: text("id").primaryKey(),
+  fromUserId: text("from_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  toUserId: text("to_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  status: duoInviteStatusEnum("status").notNull().default("pending"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, table => [index("duo_invites_from_idx").on(table.fromUserId), index("duo_invites_to_idx").on(table.toUserId)]);
 
 export const votes = pgTable("votes", {
   id: text("id").primaryKey(),
