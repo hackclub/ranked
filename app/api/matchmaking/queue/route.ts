@@ -37,25 +37,36 @@ export async function POST(request: NextRequest) {
   if (voteGate.due) {
     return NextResponse.json({ error: "Vote on a finished match to keep playing.", code: "vote_required" }, { status: 403 });
   }
+  const acceptedPartner = mode === "duo" ? await getSql()`
+    SELECT (CASE WHEN from_user_id=${user.id} THEN to_user_id ELSE from_user_id END) AS "partnerId"
+    FROM duo_invites WHERE status='accepted' AND (from_user_id=${user.id} OR to_user_id=${user.id}) LIMIT 1
+  ` : [];
+  const partnerId = acceptedPartner[0]?.partnerId as string | undefined;
+  const partyKey = partnerId ? [user.id, partnerId].sort().join(":") : null;
+
   await getSql()`UPDATE users SET experience = ${experience}::experience_level WHERE id = ${user.id}`;
-  await getSql()`INSERT INTO matchmaking_queue (user_id, mode, duration_minutes, experience, elo)
-    VALUES (${user.id}, ${mode}::match_mode, ${duration}, ${experience}::experience_level, ${user.elo})
+  await getSql()`INSERT INTO matchmaking_queue (user_id, mode, duration_minutes, experience, elo, party_key)
+    VALUES (${user.id}, ${mode}::match_mode, ${duration}, ${experience}::experience_level, ${user.elo}, ${partyKey})
     ON CONFLICT (user_id) DO UPDATE SET mode=EXCLUDED.mode, duration_minutes=EXCLUDED.duration_minutes,
-      experience=EXCLUDED.experience, elo=EXCLUDED.elo, joined_at=NOW()`;
+      experience=EXCLUDED.experience, elo=EXCLUDED.elo, party_key=EXCLUDED.party_key, joined_at=NOW()`;
 
   const matchId = crypto.randomUUID();
   const needed = mode === "duo" ? 4 : 2;
   const theme = themes[Math.floor(Math.random() * themes.length)];
   await getSql()`
     WITH candidates AS (
-      SELECT q.user_id, q.joined_at FROM matchmaking_queue q JOIN users u ON u.id=q.user_id
+      SELECT q.user_id, q.joined_at, COALESCE(${partyKey}::text IS NOT NULL AND q.party_key=${partyKey}, false) AS is_party
+      FROM matchmaking_queue q JOIN users u ON u.id=q.user_id
       WHERE q.user_id <> ${user.id} AND q.mode=${mode}::match_mode AND q.duration_minutes=${duration}
-        AND ((u.matches_played < 3 AND q.experience=${experience}::experience_level)
-          OR (u.matches_played >= 3 AND ${user.matchesPlayed} >= 3 AND ABS(q.elo-${user.elo}) <= 400))
-      ORDER BY q.joined_at LIMIT ${needed - 1} FOR UPDATE OF q SKIP LOCKED
+        AND (
+          (${partyKey}::text IS NOT NULL AND q.party_key=${partyKey})
+          OR (u.matches_played < 3 AND q.experience=${experience}::experience_level)
+          OR (u.matches_played >= 3 AND ${user.matchesPlayed} >= 3 AND ABS(q.elo-${user.elo}) <= 400)
+        )
+      ORDER BY is_party DESC, q.joined_at LIMIT ${needed - 1} FOR UPDATE OF q SKIP LOCKED
     ), selected AS (
       SELECT ${user.id}::text AS user_id, 0 AS ord UNION ALL
-      SELECT user_id, ROW_NUMBER() OVER (ORDER BY joined_at)::int AS ord FROM candidates
+      SELECT user_id, ROW_NUMBER() OVER (ORDER BY is_party DESC, joined_at)::int AS ord FROM candidates
     ), made AS (
       INSERT INTO matches (id, mode, duration_minutes, theme, ends_at)
       SELECT ${matchId}, ${mode}::match_mode, ${duration}, ${theme}, NOW() + (${duration} || ' minutes')::interval

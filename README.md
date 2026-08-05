@@ -41,9 +41,9 @@ Create a GitHub OAuth App and configure:
 
 - Callback: `http://localhost:3000/api/auth/github/callback`
 - Environment: `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`
-- Scope: `repo` (GitHub requires this classic OAuth scope to configure Pages, even though Ranked creates public repositories)
+- Scope: `repo` (GitHub requires this classic OAuth scope to configure Pages, even though Ranked creates a public repository)
 
-When the timer ends, every participant chooses an exact repository name. Ranked creates that public repository in the participant’s connected GitHub account, commits the deployable `index.html`, README, `.nojekyll`, and original HTML/CSS/JS source files, then enables GitHub Pages from the `main` branch. Duo teammates publish the same finished team build independently to their own accounts; voting opens after every player has published.
+When the timer ends, every participant chooses a build name. Ranked commits the build into a folder of that name inside a single `hackclubranked` repository in the participant's connected GitHub account — creating that repo and enabling GitHub Pages from its `main` branch the first time a player publishes — with the deployable `index.html`, a per-build README, `.nojekyll`, and the original HTML/CSS/JS source files. Every later match adds another folder to the same repo instead of creating a new one. Duo teammates publish the same finished team build independently to their own accounts; voting opens after every player has published.
 
 ## Realtime rooms and calls
 

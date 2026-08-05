@@ -47,38 +47,84 @@ async function githubRequest<T>(token: string, url: string, init?: RequestInit):
   return response.json() as Promise<T>;
 }
 
-export async function publishWebsite(token: string, login: string, requestedName: string, html: string, sourceFiles?: Record<string, string>) {
-  const repoName = requestedName.trim();
-  if (!/^[A-Za-z0-9._-]{1,100}$/.test(repoName) || repoName === "." || repoName === "..") {
-    throw new Error("Repository names may only use letters, numbers, periods, underscores, and hyphens.");
+const RANKED_REPO = "hackclubranked";
+const isNotFound = (error: unknown) => error instanceof Error && error.message.includes("(404)");
+
+function repoContentsPath(login: string, path = "") {
+  return `https://api.github.com/repos/${login}/${RANKED_REPO}/contents/${path}`;
+}
+
+async function pathExists(token: string, login: string, path: string) {
+  try {
+    await githubRequest(token, repoContentsPath(login, path));
+    return true;
+  } catch (error) {
+    if (isNotFound(error)) return false;
+    throw error;
   }
+}
+
+// Every player's builds live in one shared "hackclubranked" repo, one folder per match,
+// instead of a fresh repo per match cluttering their GitHub account.
+async function ensureRankedRepo(token: string, login: string) {
+  try {
+    return await githubRequest<{ html_url: string }>(token, `https://api.github.com/repos/${login}/${RANKED_REPO}`);
+  } catch (error) {
+    if (!isNotFound(error)) throw error;
+  }
+
   const repository = await githubRequest<{ html_url: string }>(token, "https://api.github.com/user/repos", {
     method: "POST",
-    body: JSON.stringify({ name: repoName, description: "An open-source website built live on Ranked.", homepage: `https://${login}.github.io/${repoName}/`, private: false, has_issues: true, auto_init: false }),
+    body: JSON.stringify({
+      name: RANKED_REPO,
+      description: "Live-coded Ranked builds — one folder per match.",
+      homepage: `https://${login}.github.io/${RANKED_REPO}/`,
+      private: false,
+      has_issues: true,
+      auto_init: true,
+    }),
   });
+  await githubRequest(token, repoContentsPath(login, ".nojekyll"), {
+    method: "PUT",
+    body: JSON.stringify({ message: "Configure GitHub Pages", content: "", branch: "main" }),
+  });
+  try {
+    await githubRequest(token, `https://api.github.com/repos/${login}/${RANKED_REPO}/pages`, {
+      method: "POST",
+      body: JSON.stringify({ source: { branch: "main", path: "/" } }),
+    });
+  } catch (error) {
+    if (!(error instanceof Error) || !error.message.includes("409")) throw error;
+  }
+  return repository;
+}
 
-  const putFile = (path: string, content: string, message: string) => githubRequest(token, `https://api.github.com/repos/${login}/${repoName}/contents/${path}`, {
+export async function publishWebsite(token: string, login: string, requestedName: string, html: string, sourceFiles?: Record<string, string>) {
+  const folderName = requestedName.trim();
+  if (!/^[A-Za-z0-9._-]{1,100}$/.test(folderName) || folderName === "." || folderName === "..") {
+    throw new Error("Build names may only use letters, numbers, periods, underscores, and hyphens.");
+  }
+  const repository = await ensureRankedRepo(token, login);
+  if (await pathExists(token, login, folderName)) {
+    throw new Error(`"${folderName}" is already used in your ${RANKED_REPO} repo. Choose another name.`);
+  }
+
+  const putFile = (path: string, content: string, message: string) => githubRequest(token, repoContentsPath(login, path), {
     method: "PUT",
     body: JSON.stringify({ message, content: Buffer.from(content, "utf8").toString("base64"), branch: "main" }),
   });
 
-  await putFile("index.html", html, "Publish finished Ranked build");
-  await putFile("README.md", `# ${requestedName}\n\nBuilt live on Ranked and published open source.\n`, "Add project README");
-  await putFile(".nojekyll", "", "Configure GitHub Pages");
+  await putFile(`${folderName}/index.html`, html, `Publish ${folderName}`);
+  await putFile(`${folderName}/README.md`, `# ${folderName}\n\nBuilt live on Ranked and published open source.\n`, `Add README for ${folderName}`);
   for (const [name, content] of Object.entries(sourceFiles ?? {})) {
     if (!["index.html", "styles.css", "script.js"].includes(name)) continue;
-    await putFile(`source/${name}`, content, `Publish ${name} source`);
+    await putFile(`${folderName}/source/${name}`, content, `Publish ${folderName} ${name} source`);
   }
 
-  let pagesUrl = `https://${login}.github.io/${repoName}/`;
-  try {
-    const pages = await githubRequest<{ html_url?: string }>(token, `https://api.github.com/repos/${login}/${repoName}/pages`, {
-      method: "POST",
-      body: JSON.stringify({ source: { branch: "main", path: "/" } }),
-    });
-    pagesUrl = pages.html_url ?? pagesUrl;
-  } catch (error) {
-    if (!(error instanceof Error) || !error.message.includes("409")) throw error;
-  }
-  return { repositoryUrl: repository.html_url, pagesUrl, repoName };
+  return {
+    repositoryUrl: `${repository.html_url}/tree/main/${folderName}`,
+    pagesUrl: `https://${login}.github.io/${RANKED_REPO}/${folderName}/`,
+    repoName: RANKED_REPO,
+    folderName,
+  };
 }
