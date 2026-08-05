@@ -1175,6 +1175,8 @@ function Lobby({
   });
   const [inviteBusy, setInviteBusy] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const [challenges, setChallenges] = useState<DashboardData["challenges"]>([]);
+  const resetsIn = useCountdownToUtcMidnight();
 
   const acceptQueueResult = useCallback(
     (result: {
@@ -1335,6 +1337,13 @@ function Lobby({
       .catch(() => undefined);
   }, []);
 
+  useEffect(() => {
+    fetch("/api/dashboard")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => data && setChallenges(data.challenges ?? []))
+      .catch(() => undefined);
+  }, []);
+
   const fetchDuoState = useCallback(() => {
     fetch("/api/duo-invites")
       .then((response) => response.json())
@@ -1399,7 +1408,218 @@ function Lobby({
       </div>
 
       <section className="lobby-stage">
-        <aside className="hud-panel hud-panel-left">
+        <div className="lobby-col-left">
+          <aside className="hud-panel hud-panel-challenges">
+            {mode === "duo" && duoState.incoming.length > 0 && (
+              <div className="invite-banner">
+                <span className="hud-label">duo invite</span>
+                <ul className="invite-list">
+                  {duoState.incoming.map((invite) => (
+                    <li className="invite-row" key={invite.id}>
+                      <ScribbleAvatar
+                        size="sm"
+                        color={invite.partnerAvatar.color}
+                        eyes={invite.partnerAvatar.eyes}
+                        mouths={invite.partnerAvatar.mouths}
+                      />
+                      <div>
+                        <strong>{invite.partnerName}</strong>
+                        <span>wants to duo with you</span>
+                      </div>
+                      <div className="invite-actions">
+                        <button
+                          aria-label={`Accept ${invite.partnerName}'s invite`}
+                          onClick={() => void respondInvite(invite.id, "accept")}
+                        >
+                          <Icon name="check" size={13} />
+                        </button>
+                        <button
+                          aria-label={`Decline ${invite.partnerName}'s invite`}
+                          onClick={() => void respondInvite(invite.id, "decline")}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            <span className="hud-label">daily challenges</span>
+            <div className="challenge-list">
+              {challenges.map((challenge) => (
+                <Challenge
+                  key={challenge.type}
+                  label={
+                    challenge.type === "play_matches"
+                      ? "Play 2 matches"
+                      : challenge.type === "code_seconds"
+                        ? "Code for 3 hours"
+                        : "Add 2 friends"
+                  }
+                  value={`${Math.min(challenge.progress, challenge.target)} / ${challenge.target}`}
+                  progress={Math.min(
+                    100,
+                    (challenge.progress / challenge.target) * 100,
+                  )}
+                  reward={
+                    challenge.rewardElo
+                      ? `+${challenge.rewardElo} ELO`
+                      : `+${challenge.rewardHBucks} Ħ`
+                  }
+                />
+              ))}
+            </div>
+            <small className="resets">resets in {resetsIn}</small>
+          </aside>
+
+          <div className="match-dock">
+            <div className="match-dock-summary">
+              <span>{mode === "duo" ? "2 vs 2" : "1 vs 1"}</span>
+              <span>{length} min</span>
+              <span>open theme</span>
+            </div>
+            <button
+              className={`primary-button match-dock-button ${matching ? "matching" : ""}`}
+              onClick={() => void ready()}
+            >
+              {matching ? (
+                <>
+                  <i className="spinner" /> searching… tap to cancel
+                </>
+              ) : (
+                <>
+                  ready up <Icon name="external" size={16} />
+                </>
+              )}
+            </button>
+            {matching && (
+              <p className="match-dock-status">
+                <i className="dock-dot" /> contacting matchmaking service…
+              </p>
+            )}
+          </div>
+        </div>
+
+        <section className="lobby-hero">
+          <div className="pedestal-row">
+            <div className={`pedestal ${matching ? "ready" : ""}`}>
+              <div className="pedestal-ring" />
+              <div className="pedestal-avatar">
+                <ScribbleAvatar
+                  color={user.avatar.color}
+                  eyes={user.avatar.eyes}
+                  mouths={user.avatar.mouths}
+                  size={mode === "duo" ? "md" : "lg"}
+                />
+                {matching && (
+                  <span className="ready-badge">
+                    <Icon name="check" size={12} />
+                  </span>
+                )}
+              </div>
+              <strong>{user.name}</strong>
+            </div>
+            {mode === "duo" && (
+              <div
+                className={`pedestal ${duoState.partner ? "" : duoState.outgoing ? "pending" : "empty"} ${duoState.partner?.partnerQueued ? "ready" : ""}`}
+              >
+                {duoState.partner ? (
+                  <>
+                    <div className="pedestal-ring" />
+                    <div className="pedestal-avatar">
+                      <ScribbleAvatar
+                        color={duoState.partner.partnerAvatar.color}
+                        eyes={duoState.partner.partnerAvatar.eyes}
+                        mouths={duoState.partner.partnerAvatar.mouths}
+                        size="md"
+                      />
+                      {duoState.partner.partnerQueued && (
+                        <span className="ready-badge">
+                          <Icon name="check" size={12} />
+                        </span>
+                      )}
+                    </div>
+                    <strong>{duoState.partner.partnerName}</strong>
+                    <button className="invite-cancel" onClick={() => void cancelDuo()}>
+                      leave
+                    </button>
+                  </>
+                ) : duoState.outgoing ? (
+                  <>
+                    <div className="pedestal-ring dashed" />
+                    <ScribbleAvatar
+                      color={duoState.outgoing.partnerAvatar.color}
+                      eyes={duoState.outgoing.partnerAvatar.eyes}
+                      mouths={duoState.outgoing.partnerAvatar.mouths}
+                      size="md"
+                    />
+                    <span className="pending-badge">invited</span>
+                    <strong>{duoState.outgoing.partnerName}</strong>
+                    <button className="invite-cancel" onClick={() => void cancelDuo()}>
+                      cancel
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <div className="pedestal-ring dashed" />
+                    <button
+                      type="button"
+                      className="invite-plus"
+                      aria-label="Invite a friend to duo"
+                      aria-expanded={addOpen}
+                      onClick={() => setAddOpen((open) => !open)}
+                    >
+                      <Icon name="plus" size={22} />
+                    </button>
+                    <strong>open slot</strong>
+                    {addOpen && (
+                      <>
+                        <div
+                          className="popover-backdrop"
+                          onClick={() => setAddOpen(false)}
+                        />
+                        <div className="invite-popover" role="dialog" aria-label="Invite a friend">
+                          <span className="invite-popover-title">invite a friend</span>
+                          {friends.length ? (
+                            <ul className="invite-friend-list">
+                              {friends.map((friend) => (
+                                <li key={friend.userId}>
+                                  <ScribbleAvatar
+                                    size="sm"
+                                    color={friend.avatar.color}
+                                    eyes={friend.avatar.eyes}
+                                    mouths={friend.avatar.mouths}
+                                  />
+                                  <strong>{friend.name}</strong>
+                                  <button
+                                    disabled={inviteBusy}
+                                    onClick={() => {
+                                      void sendInvite(friend.userId);
+                                      setAddOpen(false);
+                                    }}
+                                  >
+                                    invite
+                                  </button>
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <p className="invite-empty">
+                              Add friends from a recent match first.
+                            </p>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        </section>
+
+        <aside className="hud-panel hud-panel-right">
           <div className="hud-block">
             <span className="hud-label">team size</span>
             <div className="segmented">
@@ -1531,188 +1751,9 @@ function Lobby({
             </div>
           </div>
         </aside>
-
-        <section className="lobby-hero">
-          <div className="pedestal-row">
-            <div className={`pedestal ${matching ? "ready" : ""}`}>
-              <div className="pedestal-ring" />
-              <div className="pedestal-avatar">
-                <ScribbleAvatar
-                  color={user.avatar.color}
-                  eyes={user.avatar.eyes}
-                  mouths={user.avatar.mouths}
-                  size={mode === "duo" ? "md" : "lg"}
-                />
-                {matching && (
-                  <span className="ready-badge">
-                    <Icon name="check" size={12} />
-                  </span>
-                )}
-              </div>
-              <strong>{user.name}</strong>
-            </div>
-            {mode === "duo" && (
-              <div
-                className={`pedestal ${duoState.partner ? "" : duoState.outgoing ? "pending" : "empty"} ${duoState.partner?.partnerQueued ? "ready" : ""}`}
-              >
-                {duoState.partner ? (
-                  <>
-                    <div className="pedestal-ring" />
-                    <div className="pedestal-avatar">
-                      <ScribbleAvatar
-                        color={duoState.partner.partnerAvatar.color}
-                        eyes={duoState.partner.partnerAvatar.eyes}
-                        mouths={duoState.partner.partnerAvatar.mouths}
-                        size="md"
-                      />
-                      {duoState.partner.partnerQueued && (
-                        <span className="ready-badge">
-                          <Icon name="check" size={12} />
-                        </span>
-                      )}
-                    </div>
-                    <strong>{duoState.partner.partnerName}</strong>
-                  </>
-                ) : duoState.outgoing ? (
-                  <>
-                    <div className="pedestal-ring dashed" />
-                    <ScribbleAvatar
-                      color={duoState.outgoing.partnerAvatar.color}
-                      eyes={duoState.outgoing.partnerAvatar.eyes}
-                      mouths={duoState.outgoing.partnerAvatar.mouths}
-                      size="md"
-                    />
-                    <span className="pending-badge">invited</span>
-                    <strong>{duoState.outgoing.partnerName}</strong>
-                  </>
-                ) : (
-                  <>
-                    <div className="pedestal-ring dashed" />
-                    <button
-                      type="button"
-                      className="invite-plus"
-                      aria-label="Invite a friend to duo"
-                      aria-expanded={addOpen}
-                      onClick={() => setAddOpen((open) => !open)}
-                    >
-                      <Icon name="plus" size={22} />
-                    </button>
-                    <strong>open slot</strong>
-                    {addOpen && (
-                      <>
-                        <div
-                          className="popover-backdrop"
-                          onClick={() => setAddOpen(false)}
-                        />
-                        <div className="invite-popover" role="dialog" aria-label="Invite a friend">
-                          <span className="invite-popover-title">invite a friend</span>
-                          {friends.length ? (
-                            <ul className="invite-friend-list">
-                              {friends.map((friend) => (
-                                <li key={friend.userId}>
-                                  <ScribbleAvatar
-                                    size="sm"
-                                    color={friend.avatar.color}
-                                    eyes={friend.avatar.eyes}
-                                    mouths={friend.avatar.mouths}
-                                  />
-                                  <strong>{friend.name}</strong>
-                                  <button
-                                    disabled={inviteBusy}
-                                    onClick={() => {
-                                      void sendInvite(friend.userId);
-                                      setAddOpen(false);
-                                    }}
-                                  >
-                                    invite
-                                  </button>
-                                </li>
-                              ))}
-                            </ul>
-                          ) : (
-                            <p className="invite-empty">
-                              Add friends from a recent match first.
-                            </p>
-                          )}
-                        </div>
-                      </>
-                    )}
-                  </>
-                )}
-              </div>
-            )}
-          </div>
-        </section>
-
-        <aside className="hud-panel hud-panel-right">
-          <span className="hud-label">team up</span>
-          {mode === "duo" ? (
-            <>
-              {duoState.incoming.length > 0 && (
-                <ul className="invite-list">
-                  {duoState.incoming.map((invite) => (
-                    <li className="invite-row" key={invite.id}>
-                      <ScribbleAvatar
-                        size="sm"
-                        color={invite.partnerAvatar.color}
-                        eyes={invite.partnerAvatar.eyes}
-                        mouths={invite.partnerAvatar.mouths}
-                      />
-                      <div>
-                        <strong>{invite.partnerName}</strong>
-                        <span>wants to duo with you</span>
-                      </div>
-                      <div className="invite-actions">
-                        <button
-                          aria-label={`Accept ${invite.partnerName}'s invite`}
-                          onClick={() => void respondInvite(invite.id, "accept")}
-                        >
-                          <Icon name="check" size={13} />
-                        </button>
-                        <button
-                          aria-label={`Decline ${invite.partnerName}'s invite`}
-                          onClick={() => void respondInvite(invite.id, "decline")}
-                        >
-                          ×
-                        </button>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {duoState.partner ? (
-                <p className="hud-helper">
-                  Queueing together with <strong>{duoState.partner.partnerName}</strong>.
-                  {duoState.partner.partnerQueued ? "" : " Waiting for them to ready up."}{" "}
-                  <button className="invite-cancel" onClick={() => void cancelDuo()}>
-                    leave
-                  </button>
-                </p>
-              ) : duoState.outgoing ? (
-                <p className="hud-helper">
-                  Invite sent to <strong>{duoState.outgoing.partnerName}</strong> — waiting
-                  for them to accept.{" "}
-                  <button className="invite-cancel" onClick={() => void cancelDuo()}>
-                    cancel
-                  </button>
-                </p>
-              ) : (
-                <p className="hud-helper">
-                  Tap the <span className="inline-plus"><Icon name="plus" size={9} /></span>{" "}
-                  on the open slot to invite a friend, or wait for an invite here.
-                </p>
-              )}
-            </>
-          ) : (
-            <p className="hud-helper">
-              Solo matches are 1 vs 1 — no teammate slot needed. Switch to duos to squad up
-              with a friend.
-            </p>
-          )}
-        </aside>
       </section>
 
-      <div className="lobby-dock-row">
+      <div className="lobby-footer">
         <small className="lobby-fineprint">
           By joining, you agree to abide by the{" "}
           <a href="https://hackclub.com/conduct" className="black bold">
@@ -1720,32 +1761,6 @@ function Lobby({
           </a>{" "}
           and be cool
         </small>
-        <div className="match-dock">
-          <div className="match-dock-summary">
-            <span>{mode === "duo" ? "2 vs 2" : "1 vs 1"}</span>
-            <span>{length} min</span>
-            <span>open theme</span>
-          </div>
-          <button
-            className={`primary-button match-dock-button ${matching ? "matching" : ""}`}
-            onClick={() => void ready()}
-          >
-            {matching ? (
-              <>
-                <i className="spinner" /> searching… tap to cancel
-              </>
-            ) : (
-              <>
-                ready up <Icon name="external" size={16} />
-              </>
-            )}
-          </button>
-          {matching && (
-            <p className="match-dock-status">
-              <i className="dock-dot" /> contacting matchmaking service…
-            </p>
-          )}
-        </div>
       </div>
 
       {experienceOpen && (
