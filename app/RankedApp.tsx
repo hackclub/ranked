@@ -1174,6 +1174,7 @@ function Lobby({
     incoming: [],
   });
   const [inviteBusy, setInviteBusy] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
 
   const acceptQueueResult = useCallback(
     (result: {
@@ -1379,28 +1380,34 @@ function Lobby({
   };
 
   return (
-    <main className="lobby-screen screen-pad">
-      <button className="back-button" onClick={() => navigate("home")}>
-        ← back to base
-      </button>
-      <div className="lobby-heading">
-        <span className="eyebrow">ready room</span>
-        <h1>Set your match up.</h1>
-        <p>
-          We’ll find builders close to your skill. Change anything before you
-          jump in.
-        </p>
+    <main className="lobby-screen">
+      <div className="lobby-hud-bar">
+        <button className="back-button" onClick={() => navigate("home")}>
+          ← back to base
+        </button>
+        <div className="lobby-hud-title">
+          <span className="eyebrow">ready room</span>
+          <h1>Set your match up.</h1>
+        </div>
+        <div className="lobby-hud-chip">
+          <Icon name="target" size={13} />
+          <span>
+            matching by <b>{experience}</b> · elo <b>{user.elo}</b>
+          </span>
+          <button onClick={() => setExperienceOpen(true)}>change</button>
+        </div>
       </div>
-      <section className="lobby-grid">
-        <div className="settings-panel">
-          <div className="setting-block">
-            <label>team size</label>
+
+      <section className="lobby-stage">
+        <aside className="hud-panel hud-panel-left">
+          <div className="hud-block">
+            <span className="hud-label">team size</span>
             <div className="segmented">
               <button
                 className={mode === "solo" ? "active" : ""}
                 onClick={() => setMode("solo")}
               >
-                <Icon name="person" size={20} />
+                <Icon name="person" size={18} />
                 <span>
                   solo<small>1 vs 1</small>
                 </span>
@@ -1409,15 +1416,15 @@ function Lobby({
                 className={mode === "duo" ? "active" : ""}
                 onClick={() => setMode("duo")}
               >
-                <Icon name="people" size={20} />
+                <Icon name="people" size={18} />
                 <span>
                   duos<small>2 vs 2</small>
                 </span>
               </button>
             </div>
           </div>
-          <div className="setting-block">
-            <label>match length</label>
+          <div className="hud-block">
+            <span className="hud-label">match length</span>
             <div className="time-options">
               {[10, 30, 60].map((time) => (
                 <button
@@ -1431,8 +1438,8 @@ function Lobby({
               ))}
             </div>
           </div>
-          <div className="setting-block devices-block">
-            <label>camera & microphone</label>
+          <div className="hud-block hud-block-tight">
+            <span className="hud-label">camera & microphone</span>
             <div className="camera-preview">
               {video && previewStream && !previewError ? (
                 <video
@@ -1464,7 +1471,7 @@ function Lobby({
                   aria-label={mic ? "Mute microphone" : "Unmute microphone"}
                   aria-pressed={mic}
                 >
-                  <Icon name={mic ? "mic" : "mic-off"} size={16} />
+                  <Icon name={mic ? "mic" : "mic-off"} size={15} />
                 </button>
                 <button
                   className={video ? "on" : "off"}
@@ -1472,7 +1479,7 @@ function Lobby({
                   aria-label={video ? "Turn camera off" : "Turn camera on"}
                   aria-pressed={video}
                 >
-                  <Icon name={video ? "camera" : "camera-off"} size={16} />
+                  <Icon name={video ? "camera" : "camera-off"} size={15} />
                 </button>
               </div>
             </div>
@@ -1486,57 +1493,165 @@ function Lobby({
                 />
               </div>
             </div>
-            <div className="device-row">
-              <span>mic</span>
-              <select
-                aria-label="Microphone"
-                value={micDeviceId}
-                onChange={(event) => setMicDeviceId(event.target.value)}
-              >
-                <option value="">Default microphone</option>
-                {devices
-                  .filter((device) => device.kind === "audioinput")
-                  .map((device, index) => (
-                    <option key={device.deviceId} value={device.deviceId}>
-                      {device.label || `Microphone ${index + 1}`}
-                    </option>
-                  ))}
-              </select>
-            </div>
-            <div className="device-row">
-              <span>camera</span>
-              <select
-                aria-label="Camera"
-                value={videoDeviceId}
-                onChange={(event) => setVideoDeviceId(event.target.value)}
-              >
-                <option value="">Default camera</option>
-                {devices
-                  .filter((device) => device.kind === "videoinput")
-                  .map((device, index) => (
-                    <option key={device.deviceId} value={device.deviceId}>
-                      {device.label || `Camera ${index + 1}`}
-                    </option>
-                  ))}
-              </select>
+            <div className="device-row-group">
+              <div className="device-row">
+                <span>mic</span>
+                <select
+                  aria-label="Microphone"
+                  value={micDeviceId}
+                  onChange={(event) => setMicDeviceId(event.target.value)}
+                >
+                  <option value="">Default</option>
+                  {devices
+                    .filter((device) => device.kind === "audioinput")
+                    .map((device, index) => (
+                      <option key={device.deviceId} value={device.deviceId}>
+                        {device.label || `Microphone ${index + 1}`}
+                      </option>
+                    ))}
+                </select>
+              </div>
+              <div className="device-row">
+                <span>camera</span>
+                <select
+                  aria-label="Camera"
+                  value={videoDeviceId}
+                  onChange={(event) => setVideoDeviceId(event.target.value)}
+                >
+                  <option value="">Default</option>
+                  {devices
+                    .filter((device) => device.kind === "videoinput")
+                    .map((device, index) => (
+                      <option key={device.deviceId} value={device.deviceId}>
+                        {device.label || `Camera ${index + 1}`}
+                      </option>
+                    ))}
+                </select>
+              </div>
             </div>
           </div>
-          <div className="matchmaking-note">
-            <Icon name="target" size={14} />
-            <p>
-              Matching by <strong>{experience}</strong> + ELO <b>{user.elo}</b>
-            </p>
-            <button onClick={() => setExperienceOpen(true)}>change</button>
+        </aside>
+
+        <section className="lobby-hero">
+          <div className="pedestal-row">
+            <div className={`pedestal ${matching ? "ready" : ""}`}>
+              <div className="pedestal-ring" />
+              <div className="pedestal-avatar">
+                <ScribbleAvatar
+                  color={user.avatar.color}
+                  eyes={user.avatar.eyes}
+                  mouths={user.avatar.mouths}
+                  size={mode === "duo" ? "md" : "lg"}
+                />
+                {matching && (
+                  <span className="ready-badge">
+                    <Icon name="check" size={12} />
+                  </span>
+                )}
+              </div>
+              <strong>{user.name}</strong>
+            </div>
+            {mode === "duo" && (
+              <div
+                className={`pedestal ${duoState.partner ? "" : duoState.outgoing ? "pending" : "empty"} ${duoState.partner?.partnerQueued ? "ready" : ""}`}
+              >
+                {duoState.partner ? (
+                  <>
+                    <div className="pedestal-ring" />
+                    <div className="pedestal-avatar">
+                      <ScribbleAvatar
+                        color={duoState.partner.partnerAvatar.color}
+                        eyes={duoState.partner.partnerAvatar.eyes}
+                        mouths={duoState.partner.partnerAvatar.mouths}
+                        size="md"
+                      />
+                      {duoState.partner.partnerQueued && (
+                        <span className="ready-badge">
+                          <Icon name="check" size={12} />
+                        </span>
+                      )}
+                    </div>
+                    <strong>{duoState.partner.partnerName}</strong>
+                  </>
+                ) : duoState.outgoing ? (
+                  <>
+                    <div className="pedestal-ring dashed" />
+                    <ScribbleAvatar
+                      color={duoState.outgoing.partnerAvatar.color}
+                      eyes={duoState.outgoing.partnerAvatar.eyes}
+                      mouths={duoState.outgoing.partnerAvatar.mouths}
+                      size="md"
+                    />
+                    <span className="pending-badge">invited</span>
+                    <strong>{duoState.outgoing.partnerName}</strong>
+                  </>
+                ) : (
+                  <>
+                    <div className="pedestal-ring dashed" />
+                    <button
+                      type="button"
+                      className="invite-plus"
+                      aria-label="Invite a friend to duo"
+                      aria-expanded={addOpen}
+                      onClick={() => setAddOpen((open) => !open)}
+                    >
+                      <Icon name="plus" size={22} />
+                    </button>
+                    <strong>open slot</strong>
+                    {addOpen && (
+                      <>
+                        <div
+                          className="popover-backdrop"
+                          onClick={() => setAddOpen(false)}
+                        />
+                        <div className="invite-popover" role="dialog" aria-label="Invite a friend">
+                          <span className="invite-popover-title">invite a friend</span>
+                          {friends.length ? (
+                            <ul className="invite-friend-list">
+                              {friends.map((friend) => (
+                                <li key={friend.userId}>
+                                  <ScribbleAvatar
+                                    size="sm"
+                                    color={friend.avatar.color}
+                                    eyes={friend.avatar.eyes}
+                                    mouths={friend.avatar.mouths}
+                                  />
+                                  <strong>{friend.name}</strong>
+                                  <button
+                                    disabled={inviteBusy}
+                                    onClick={() => {
+                                      void sendInvite(friend.userId);
+                                      setAddOpen(false);
+                                    }}
+                                  >
+                                    invite
+                                  </button>
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <p className="invite-empty">
+                              Add friends from a recent match first.
+                            </p>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
           </div>
-        </div>
-        <div className="ready-column">
-          {mode === "duo" && (
-            <div className="duo-invite-card">
-              <span className="eyebrow">team up</span>
-              {duoState.incoming.length > 0 && !duoState.partner && (
-                <div className="invite-list">
+        </section>
+
+        <aside className="hud-panel hud-panel-right">
+          <span className="hud-label">team up</span>
+          {mode === "duo" ? (
+            <>
+              {duoState.incoming.length > 0 && (
+                <ul className="invite-list">
                   {duoState.incoming.map((invite) => (
-                    <div className="invite-row" key={invite.id}>
+                    <li className="invite-row" key={invite.id}>
                       <ScribbleAvatar
                         size="sm"
                         color={invite.partnerAvatar.color}
@@ -1561,134 +1676,58 @@ function Lobby({
                           ×
                         </button>
                       </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {duoState.partner ? (
-                <div className="invite-row confirmed">
-                  <ScribbleAvatar
-                    size="sm"
-                    color={duoState.partner.partnerAvatar.color}
-                    eyes={duoState.partner.partnerAvatar.eyes}
-                    mouths={duoState.partner.partnerAvatar.mouths}
-                  />
-                  <div>
-                    <strong>{duoState.partner.partnerName}</strong>
-                    <span>teamed up · queueing together</span>
-                  </div>
-                  <button className="invite-cancel" onClick={() => void cancelDuo()}>
-                    leave
-                  </button>
-                </div>
-              ) : duoState.outgoing ? (
-                <div className="invite-row pending">
-                  <ScribbleAvatar
-                    size="sm"
-                    color={duoState.outgoing.partnerAvatar.color}
-                    eyes={duoState.outgoing.partnerAvatar.eyes}
-                    mouths={duoState.outgoing.partnerAvatar.mouths}
-                  />
-                  <div>
-                    <strong>{duoState.outgoing.partnerName}</strong>
-                    <span>invite sent · waiting to accept</span>
-                  </div>
-                  <button className="invite-cancel" onClick={() => void cancelDuo()}>
-                    cancel
-                  </button>
-                </div>
-              ) : friends.length ? (
-                <ul className="invite-friend-list">
-                  {friends.map((friend) => (
-                    <li key={friend.userId}>
-                      <ScribbleAvatar
-                        size="sm"
-                        color={friend.avatar.color}
-                        eyes={friend.avatar.eyes}
-                        mouths={friend.avatar.mouths}
-                      />
-                      <strong>{friend.name}</strong>
-                      <button
-                        disabled={inviteBusy}
-                        onClick={() => void sendInvite(friend.userId)}
-                      >
-                        invite
-                      </button>
                     </li>
                   ))}
                 </ul>
+              )}
+              {duoState.partner ? (
+                <p className="hud-helper">
+                  Queueing together with <strong>{duoState.partner.partnerName}</strong>.
+                  {duoState.partner.partnerQueued ? "" : " Waiting for them to ready up."}{" "}
+                  <button className="invite-cancel" onClick={() => void cancelDuo()}>
+                    leave
+                  </button>
+                </p>
+              ) : duoState.outgoing ? (
+                <p className="hud-helper">
+                  Invite sent to <strong>{duoState.outgoing.partnerName}</strong> — waiting
+                  for them to accept.{" "}
+                  <button className="invite-cancel" onClick={() => void cancelDuo()}>
+                    cancel
+                  </button>
+                </p>
               ) : (
-                <p className="invite-empty">
-                  Add friends from a recent match to invite them into your duo.
+                <p className="hud-helper">
+                  Tap the <span className="inline-plus"><Icon name="plus" size={9} /></span>{" "}
+                  on the open slot to invite a friend, or wait for an invite here.
                 </p>
               )}
-            </div>
-          )}
-          <div className="ready-stage">
-            <span className="eyebrow">
-              {mode === "duo" ? "your duo" : "your slot"}
-            </span>
-            <div className="pedestal-row">
-              <div className={`pedestal ${matching ? "ready" : ""}`}>
-                <div className="pedestal-ring" />
-                <ScribbleAvatar
-                  color={user.avatar.color}
-                  eyes={user.avatar.eyes}
-                  mouths={user.avatar.mouths}
-                  size="md"
-                />
-                {matching && (
-                  <span className="ready-badge">
-                    <Icon name="check" size={12} />
-                  </span>
-                )}
-                <strong>{user.name}</strong>
-              </div>
-              {mode === "duo" && (
-                <div
-                  className={`pedestal ${duoState.partner ? "" : "empty"} ${duoState.partner?.partnerQueued ? "ready" : ""}`}
-                >
-                  {duoState.partner ? (
-                    <>
-                      <div className="pedestal-ring" />
-                      <ScribbleAvatar
-                        color={duoState.partner.partnerAvatar.color}
-                        eyes={duoState.partner.partnerAvatar.eyes}
-                        mouths={duoState.partner.partnerAvatar.mouths}
-                        size="md"
-                      />
-                      {duoState.partner.partnerQueued && (
-                        <span className="ready-badge">
-                          <Icon name="check" size={12} />
-                        </span>
-                      )}
-                      <strong>{duoState.partner.partnerName}</strong>
-                    </>
-                  ) : (
-                    <>
-                      <div className="pedestal-ring dashed" />
-                      <div className="empty-avatar">?</div>
-                      <strong>open slot</strong>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-            <p className="ready-stage-note">
-              {mode === "duo"
-                ? duoState.partner
-                  ? `Queueing together with ${duoState.partner.partnerName}.`
-                  : `We’ll fill this slot close to ${user.elo} ELO, or invite a friend above.`
-                : "Solo matches are 1 vs 1, no teammate slot needed."}
+            </>
+          ) : (
+            <p className="hud-helper">
+              Solo matches are 1 vs 1 — no teammate slot needed. Switch to duos to squad up
+              with a friend.
             </p>
-          </div>
-          <div className="summary-ticket">
+          )}
+        </aside>
+      </section>
+
+      <div className="lobby-dock-row">
+        <small className="lobby-fineprint">
+          By joining, you agree to abide by the{" "}
+          <a href="https://hackclub.com/conduct" className="black bold">
+            Hack Club Code of Conduct
+          </a>{" "}
+          and be cool
+        </small>
+        <div className="match-dock">
+          <div className="match-dock-summary">
             <span>{mode === "duo" ? "2 vs 2" : "1 vs 1"}</span>
-            <span>{length} minutes</span>
+            <span>{length} min</span>
             <span>open theme</span>
           </div>
           <button
-            className={`primary-button ready-button ${matching ? "matching" : ""}`}
+            className={`primary-button match-dock-button ${matching ? "matching" : ""}`}
             onClick={() => void ready()}
           >
             {matching ? (
@@ -1701,11 +1740,14 @@ function Lobby({
               </>
             )}
           </button>
-          <small className="ready-fineprint">
-            By joining, you agree to abide by the <a href="https://hackclub.com/conduct" className="black bold">Hack Club Code of Conduct</a> and be cool
-          </small>
+          {matching && (
+            <p className="match-dock-status">
+              <i className="dock-dot" /> contacting matchmaking service…
+            </p>
+          )}
         </div>
-      </section>
+      </div>
+
       {experienceOpen && (
         <OnboardingModal
           step="placement"
