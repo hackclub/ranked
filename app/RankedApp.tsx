@@ -815,9 +815,14 @@ function Home({
           <div className="hero-copy">
             <button
               className="primary-button start-button"
-              onClick={() => {
+              onClick={async () => {
                 if (!auth.user) return startOnboarding();
-                if (dashboard?.voteGate.due) return setVoteGateOpen(true);
+                const fresh = await fetch("/api/dashboard")
+                  .then((r) => (r.ok ? r.json() : null))
+                  .catch(() => null);
+                if (fresh) setDashboard(fresh);
+                if ((fresh ?? dashboard)?.voteGate.due)
+                  return setVoteGateOpen(true);
                 navigate("lobby");
               }}
             >
@@ -2896,6 +2901,8 @@ function Voting({
     voteGate: typeof voteGate;
   } | null>(null);
 
+  const [everVoted, setEverVoted] = useState(false);
+
   const loadNext = useCallback(() => {
     return fetch("/api/votes")
       .then((r) => r.json())
@@ -2914,6 +2921,10 @@ function Voting({
   const remaining = voteGate ? Math.max(0, voteGate.required - voteGate.cast) : 0;
   const stillOwed = Boolean(voteGate && voteGate.required > 0 && remaining > 0);
 
+  useEffect(() => {
+    if (!match && stillOwed && !everVoted) navigate("lobby");
+  }, [match, stillOwed, everVoted, navigate]);
+
   const vote = async (choice: "blue" | "red") => {
     if (!match) return;
     const response = await fetch("/api/votes", {
@@ -2924,6 +2935,7 @@ function Voting({
     const result = await response.json();
     if (!response.ok) return toast(result.error ?? "Vote failed");
     setVoted(choice);
+    setEverVoted(true);
     toast("Vote counted");
     const next = await fetch("/api/votes")
       .then((r) => r.json())
