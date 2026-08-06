@@ -543,6 +543,7 @@ function Home({
   } | null>(null);
   const [slackSuggestionsOpen, setSlackSuggestionsOpen] = useState(false);
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
+  const [voteGateOpen, setVoteGateOpen] = useState(false);
   const slackMatches = useMemo(() => {
     const q = slackQuery.replace(/^@/, "").trim().toLowerCase();
     if (!q || selectedFriend) return [];
@@ -814,9 +815,11 @@ function Home({
           <div className="hero-copy">
             <button
               className="primary-button start-button"
-              onClick={() =>
-                auth.user ? navigate("lobby") : startOnboarding()
-              }
+              onClick={() => {
+                if (!auth.user) return startOnboarding();
+                if (dashboard?.voteGate.due) return setVoteGateOpen(true);
+                navigate("lobby");
+              }}
             >
               {auth.user ? "find a match" : "sign in to play"}{" "}
               <Icon name="external" size={18} />
@@ -857,15 +860,60 @@ function Home({
                       : "Fresh matchups will appear here"}
               </span>
             </div>
-            <button
-              onClick={() => navigate("vote")}
-              disabled={!dashboard?.voteGate.available}
-            >
-              vote now
-            </button>
+            {dashboard?.voteGate.available && (
+              <button onClick={() => navigate("vote")}>vote now</button>
+            )}
           </div>
         </aside>
       </section>
+      {voteGateOpen && (
+        <div className="modal-backdrop" onClick={() => setVoteGateOpen(false)}>
+          <section
+            className="modal vote-gate-modal"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="close-button"
+              onClick={() => setVoteGateOpen(false)}
+              aria-label="Close"
+            >
+              ×
+            </button>
+            <span className="eyebrow">community voting</span>
+            <h2>
+              Vote on{" "}
+              {Math.max(
+                0,
+                (dashboard?.voteGate.required ?? 0) -
+                  (dashboard?.voteGate.cast ?? 0),
+              )}{" "}
+              other match
+              {Math.max(
+                0,
+                (dashboard?.voteGate.required ?? 0) -
+                  (dashboard?.voteGate.cast ?? 0),
+              ) === 1
+                ? ""
+                : "es"}{" "}
+              to start a new match.
+            </h2>
+            <p>
+              Every 3 matches you play, Ranked asks you to help judge 5 other
+              finished builds before you can queue again.
+            </p>
+            <button
+              className="primary-button"
+              onClick={() => {
+                setVoteGateOpen(false);
+                navigate("vote");
+              }}
+            >
+              vote now <Icon name="external" size={16} />
+            </button>
+          </section>
+        </div>
+      )}
     </main>
   );
 }
@@ -2839,12 +2887,33 @@ function Voting({
     durationMinutes: number;
     sites: Record<"blue" | "red", { pagesUrl: string; repositoryUrl: string }>;
   } | null>(null);
-  useEffect(() => {
-    fetch("/api/votes")
+  const [voteGate, setVoteGate] = useState<{
+    required: number;
+    cast: number;
+  } | null>(null);
+  const [pendingNext, setPendingNext] = useState<{
+    match: typeof match;
+    voteGate: typeof voteGate;
+  } | null>(null);
+
+  const loadNext = useCallback(() => {
+    return fetch("/api/votes")
       .then((r) => r.json())
-      .then((data) => setMatch(data.match ?? null))
+      .then((data) => {
+        setMatch(data.match ?? null);
+        setVoteGate(data.voteGate ?? null);
+        setVoted(null);
+        setPendingNext(null);
+      })
       .catch(() => undefined);
   }, []);
+  useEffect(() => {
+    void loadNext();
+  }, [loadNext]);
+
+  const remaining = voteGate ? Math.max(0, voteGate.required - voteGate.cast) : 0;
+  const stillOwed = Boolean(voteGate && voteGate.required > 0 && remaining > 0);
+
   const vote = async (choice: "blue" | "red") => {
     if (!match) return;
     const response = await fetch("/api/votes", {
@@ -2855,7 +2924,26 @@ function Voting({
     const result = await response.json();
     if (!response.ok) return toast(result.error ?? "Vote failed");
     setVoted(choice);
-    toast("Vote counted, your next match is unlocked");
+    toast("Vote counted");
+    const next = await fetch("/api/votes")
+      .then((r) => r.json())
+      .catch(() => null);
+    setPendingNext(
+      next ? { match: next.match ?? null, voteGate: next.voteGate ?? null } : null,
+    );
+  };
+  const continueVoting = () => {
+    if (pendingNext?.match) {
+      setMatch(pendingNext.match);
+      setVoteGate(pendingNext.voteGate);
+      setVoted(null);
+      setPendingNext(null);
+    } else {
+      setVoteGate(pendingNext?.voteGate ?? voteGate);
+      setMatch(null);
+      setVoted(null);
+      setPendingNext(null);
+    }
   };
   return (
     <main className="vote-page screen-pad">
@@ -2865,12 +2953,17 @@ function Voting({
       <div className="vote-heading">
         <span className="eyebrow">
           community vote{match ? ` · theme: ${match.theme}` : ""}
+          {voteGate && voteGate.required > 0
+            ? ` · ${Math.min(voteGate.cast, voteGate.required)}/${voteGate.required} voted`
+            : ""}
         </span>
         <h1>{match ? "Which build hits harder?" : "You’re caught up."}</h1>
         <p>
           {match
             ? "Judge the finished site, not the player. Open both, explore, then cast one vote."
-            : "There are no eligible finished matches waiting for your vote right now."}
+            : stillOwed
+              ? "No more finished matchups need your vote right now — you're clear to keep playing."
+              : "There are no eligible finished matches waiting for your vote right now."}
         </p>
       </div>
       {match && (
@@ -2951,12 +3044,27 @@ function Voting({
                 Results reveal when the vote closes. Both builds will be
                 open-sourced on GitHub.
               </span>
-              <button onClick={() => navigate("lobby")}>
-                play another <Icon name="external" size={11} />
+              <button onClick={continueVoting}>
+                {pendingNext?.match ? (
+                  <>
+                    vote on next matchup <Icon name="external" size={11} />
+                  </>
+                ) : (
+                  <>
+                    play another <Icon name="external" size={11} />
+                  </>
+                )}
               </button>
             </div>
           )}
         </>
+      )}
+      {!match && (
+        <div className="vote-caught-up-action">
+          <button className="primary-button" onClick={() => navigate("lobby")}>
+            play another <Icon name="external" size={16} />
+          </button>
+        </div>
       )}
     </main>
   );

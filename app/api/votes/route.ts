@@ -1,20 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import { currentUser } from "@/app/lib/current-user";
 import { addChallengeProgress } from "@/app/lib/progression";
+import { getVoteGate } from "@/app/lib/vote-gate";
 import { getSql } from "@/db";
 
 export async function GET(request: NextRequest) {
   const user = await currentUser(request);
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const rows = await getSql()`WITH canonical AS (
-      SELECT DISTINCT ON (match_id,team) match_id,team,pages_url,repository_url FROM publications ORDER BY match_id,team,created_at
-    ) SELECT m.id, m.theme, m.mode, m.duration_minutes AS "durationMinutes",
-      json_object_agg(p.team, json_build_object('pagesUrl',p.pages_url,'repositoryUrl',p.repository_url)) AS sites
-    FROM matches m JOIN canonical p ON p.match_id=m.id
-    WHERE m.status='voting' AND NOT EXISTS (SELECT 1 FROM match_players mp WHERE mp.match_id=m.id AND mp.user_id=${user.id})
-      AND NOT EXISTS (SELECT 1 FROM votes v WHERE v.match_id=m.id AND v.voter_id=${user.id})
-    GROUP BY m.id HAVING COUNT(p.id)=2 ORDER BY m.voting_ends_at NULLS LAST, m.created_at LIMIT 1`;
-  return NextResponse.json({ match: rows[0] ?? null });
+  const [rows, voteGate] = await Promise.all([
+    getSql()`WITH canonical AS (
+        SELECT DISTINCT ON (match_id,team) match_id,team,pages_url,repository_url FROM publications ORDER BY match_id,team,created_at
+      ) SELECT m.id, m.theme, m.mode, m.duration_minutes AS "durationMinutes",
+        json_object_agg(p.team, json_build_object('pagesUrl',p.pages_url,'repositoryUrl',p.repository_url)) AS sites
+      FROM matches m JOIN canonical p ON p.match_id=m.id
+      WHERE m.status='voting' AND NOT EXISTS (SELECT 1 FROM match_players mp WHERE mp.match_id=m.id AND mp.user_id=${user.id})
+        AND NOT EXISTS (SELECT 1 FROM votes v WHERE v.match_id=m.id AND v.voter_id=${user.id})
+      GROUP BY m.id HAVING COUNT(p.id)=2 ORDER BY m.voting_ends_at NULLS LAST, m.created_at LIMIT 1`,
+    getVoteGate(user.id, user.matchesPlayed),
+  ]);
+  return NextResponse.json({ match: rows[0] ?? null, voteGate });
 }
 
 export async function POST(request: NextRequest) {
