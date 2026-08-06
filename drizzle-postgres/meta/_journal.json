@@ -29,6 +29,13 @@
       "when": 1785960221109,
       "tag": "0003_same_maverick",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1786036562908,
+      "tag": "0004_whole_doctor_spectrum",
+      "breakpoints": true
     }
   ]
 }

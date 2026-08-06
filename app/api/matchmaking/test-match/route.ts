@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
   const duration = 10;
   await getSql()`DELETE FROM matchmaking_queue WHERE user_id = ${user.id}`;
   await getSql()`INSERT INTO matches (id, mode, duration_minutes, theme, ends_at)
-    VALUES (${matchId}, 'solo'::match_mode, ${duration}, ${theme}, NOW() + (${duration} || ' minutes')::interval)`;
+    VALUES (${matchId}, 'admin'::match_mode, ${duration}, ${theme}, NOW() + (${duration} || ' minutes')::interval)`;
   await getSql()`INSERT INTO match_players (match_id, user_id, team, slot, pre_elo, last_heartbeat_at)
     VALUES (${matchId}, ${user.id}, 'blue'::match_team, 0, ${user.elo}, NOW())`;
 

@@ -28,7 +28,7 @@ type AuthState = {
 };
 type ActiveMatch = {
   id: string;
-  mode: Mode;
+  mode: Mode | "admin";
   durationMinutes: number;
   theme: string;
   status: string;
@@ -561,8 +561,28 @@ function Home({
   startOnboarding: () => void;
 }) {
   const [friendRequests, setFriendRequests] = useState<string[]>([]);
-  const [friendName, setFriendName] = useState("");
+  const [friendDirectory, setFriendDirectory] = useState<
+    Array<{ id: string; name: string; email: string }>
+  >([]);
+  const [slackQuery, setSlackQuery] = useState("");
+  const [selectedFriend, setSelectedFriend] = useState<{
+    id: string;
+    name: string;
+    email: string;
+  } | null>(null);
+  const [slackSuggestionsOpen, setSlackSuggestionsOpen] = useState(false);
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
+  const slackMatches = useMemo(() => {
+    const q = slackQuery.replace(/^@/, "").trim().toLowerCase();
+    if (!q || selectedFriend) return [];
+    return friendDirectory
+      .filter(
+        (member) =>
+          member.name.toLowerCase().includes(q) ||
+          member.email.toLowerCase().includes(q),
+      )
+      .slice(0, 6);
+  }, [friendDirectory, slackQuery, selectedFriend]);
   const resetsIn = useCountdownToUtcMidnight();
   const recentInteractions =
     dashboard?.recent
@@ -584,6 +604,14 @@ function Home({
       .catch(() => undefined);
   }, [auth.user]);
 
+  useEffect(() => {
+    if (!auth.user) return;
+    fetch("/api/friends/directory")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => data && setFriendDirectory(data.members ?? []))
+      .catch(() => undefined);
+  }, [auth.user]);
+
   const addFriend = async (id: string, name: string) => {
     if (friendRequests.includes(id))
       return toast(`You already nudged @${name}`);
@@ -601,16 +629,25 @@ function Home({
 
   const addSlackFriend = async (event: React.FormEvent) => {
     event.preventDefault();
-    const response = await fetch("/api/friends", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ slackUsername: friendName }),
-    });
-    const result = await response.json();
-    if (!response.ok)
-      return toast(result.error ?? "Could not find that Slack user");
-    setFriendName("");
-    toast("Friend request sent");
+    if (selectedFriend) {
+      const response = await fetch("/api/friends", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targetUserId: selectedFriend.id }),
+      });
+      const result = await response.json();
+      if (!response.ok)
+        return toast(result.error ?? "Could not send that friend request");
+      setSlackQuery("");
+      setSelectedFriend(null);
+      return toast("Friend request sent");
+    }
+    const handle = slackQuery.replace(/^@/, "").trim();
+    if (!handle) return;
+    const message = `${auth.user?.name ?? "Someone"} has invited you to match-up on Hack Club Ranked! Join the match: <https://ranked.hackclub.com?utm_source=game_invite|ranked.hackclub.com>`;
+    void navigator.clipboard.writeText(message);
+    setSlackQuery("");
+    toast(`@${handle} hasn't joined Ranked yet — copied invite to clipboard`);
   };
 
   const acceptFriend = async (friendshipId: string) => {
@@ -693,13 +730,44 @@ function Home({
               className="friend-search"
               onSubmit={(event) => void addSlackFriend(event)}
             >
-              <input
-                value={friendName}
-                onChange={(event) => setFriendName(event.target.value)}
-                placeholder="@slack username"
-                required
-              />
-              <button type="submit">add</button>
+              <div className="slack-picker">
+                <input
+                  value={slackQuery}
+                  onChange={(event) => {
+                    setSlackQuery(event.target.value);
+                    setSelectedFriend(null);
+                    setSlackSuggestionsOpen(true);
+                  }}
+                  onFocus={() => setSlackSuggestionsOpen(true)}
+                  onBlur={() => setSlackSuggestionsOpen(false)}
+                  placeholder="@slack username"
+                  autoComplete="off"
+                  required
+                />
+                {slackSuggestionsOpen && slackMatches.length > 0 && (
+                  <ul className="slack-suggestions">
+                    {slackMatches.map((member) => (
+                      <li key={member.id}>
+                        <button
+                          type="button"
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => {
+                            setSelectedFriend(member);
+                            setSlackQuery(member.name);
+                            setSlackSuggestionsOpen(false);
+                          }}
+                        >
+                          <strong>{member.name}</strong>
+                          <small>{member.email}</small>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <button type="submit" disabled={!slackQuery.trim()}>
+                add
+              </button>
             </form>
           </div>
           <div className="paper-card interactions-card">
@@ -740,8 +808,8 @@ function Home({
                   <div>
                     <strong>No interactions yet</strong>
                     <small>
-                      Opponents and teammates will show up here after your
-                      first match.
+                      Opponents and teammates will show up here after your first
+                      match.
                     </small>
                   </div>
                 </li>
@@ -782,38 +850,10 @@ function Home({
         </section>
 
         <aside className="home-right">
-          <div className="paper-card daily-card">
-            <div className="burst">
-              <Icon name="star" size={18} />
-            </div>
-            <CardTitle>daily challenges</CardTitle>
-            <div className="burst right">
-              <Icon name="star" size={18} />
-            </div>
-            {(dashboard?.challenges ?? []).map((challenge) => (
-              <Challenge
-                key={challenge.type}
-                label={
-                  challenge.type === "play_matches"
-                    ? "Play 2 matches"
-                    : challenge.type === "code_seconds"
-                      ? "Code for 3 hours"
-                      : "Add 2 friends"
-                }
-                value={`${Math.min(challenge.progress, challenge.target)} / ${challenge.target}`}
-                progress={Math.min(
-                  100,
-                  (challenge.progress / challenge.target) * 100,
-                )}
-                reward={
-                  challenge.rewardElo
-                    ? `+${challenge.rewardElo} ELO`
-                    : `+${challenge.rewardHBucks} Ħ`
-                }
-              />
-            ))}
-            <small className="resets">resets in {resetsIn}</small>
-          </div>
+          <DailyChallenges
+            challenges={dashboard?.challenges ?? []}
+            resetsIn={resetsIn}
+          />
           <div className="paper-card vote-nudge">
             <div className="vote-icon">
               <Icon name="vote" size={16} />
@@ -870,6 +910,44 @@ function Challenge({
         <i style={{ width: `${progress}%` }} />
       </div>
       <small>{reward}</small>
+    </div>
+  );
+}
+
+function DailyChallenges({
+  challenges,
+  resetsIn,
+}: {
+  challenges: DashboardData["challenges"];
+  resetsIn: string;
+}) {
+  return (
+    <div className="paper-card daily-card">
+      <CardTitle>daily challenges</CardTitle>
+
+      {challenges.map((challenge) => (
+        <Challenge
+          key={challenge.type}
+          label={
+            challenge.type === "play_matches"
+              ? "Play 2 matches"
+              : challenge.type === "code_seconds"
+                ? "Code for 3 hours"
+                : "Add 2 friends"
+          }
+          value={`${Math.min(challenge.progress, challenge.target)} / ${challenge.target}`}
+          progress={Math.min(
+            100,
+            (challenge.progress / challenge.target) * 100,
+          )}
+          reward={
+            challenge.rewardElo
+              ? `+${challenge.rewardElo} ELO`
+              : `+${challenge.rewardHBucks} Ħ`
+          }
+        />
+      ))}
+      <small className="resets">resets in {resetsIn}</small>
     </div>
   );
 }
@@ -966,8 +1044,8 @@ function OnboardingModal({
             <h2 id="onboarding-title">Connect Hack Club.</h2>
             <p>
               Ranked runs on Hack Club identity. Connecting links your ELO,
-              matches, and H-Bucks to your actual Hack Club account, no
-              separate password to lose.
+              matches, and H-Bucks to your actual Hack Club account, no separate
+              password to lose.
             </p>
             <div className="avatar-preview-note">
               <ScribbleAvatar
@@ -1163,9 +1241,7 @@ function Lobby({
   const [experience, setExperience] = useState<Experience>(
     user.experience ?? "beginner",
   );
-  const [previewStream, setPreviewStream] = useState<MediaStream | null>(
-    null,
-  );
+  const [previewStream, setPreviewStream] = useState<MediaStream | null>(null);
   const [previewError, setPreviewError] = useState(false);
   const previewVideoRef = useRef<HTMLVideoElement>(null);
   const meterFillRef = useRef<HTMLDivElement>(null);
@@ -1231,9 +1307,12 @@ function Lobby({
   };
 
   const testEmptyLobby = async () => {
-    const response = await fetch("/api/matchmaking/test-match", { method: "POST" });
+    const response = await fetch("/api/matchmaking/test-match", {
+      method: "POST",
+    });
     const result = await response.json();
-    if (!response.ok) return toast(result.error ?? "Could not start a test lobby");
+    if (!response.ok)
+      return toast(result.error ?? "Could not start a test lobby");
     acceptQueueResult(result);
   };
 
@@ -1381,7 +1460,10 @@ function Lobby({
     toast(`Invite sent to ${result.outgoing.partnerName}`);
   };
 
-  const respondInvite = async (inviteId: string, action: "accept" | "decline") => {
+  const respondInvite = async (
+    inviteId: string,
+    action: "accept" | "decline",
+  ) => {
     const response = await fetch("/api/duo-invites", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -1399,14 +1481,7 @@ function Lobby({
 
   return (
     <main className="lobby-screen">
-      <div className="lobby-hud-bar">
-        <button className="back-button" onClick={() => navigate("home")}>
-          ← back to base
-        </button>
-        <div className="lobby-hud-title">
-          <span className="eyebrow">ready room</span>
-          <h1>Set your match up.</h1>
-        </div>
+      <div className="w-full justify-end">
         <div className="lobby-hud-chip">
           <Icon name="target" size={13} />
           <span>
@@ -1417,77 +1492,45 @@ function Lobby({
       </div>
 
       <section className="lobby-stage">
-        <div className="lobby-col-left">
-          <aside className="hud-panel hud-panel-challenges">
-            {mode === "duo" && duoState.incoming.length > 0 && (
-              <div className="invite-banner">
-                <span className="hud-label">duo invite</span>
-                <ul className="invite-list">
-                  {duoState.incoming.map((invite) => (
-                    <li className="invite-row" key={invite.id}>
-                      <ScribbleAvatar
-                        size="sm"
-                        color={invite.partnerAvatar.color}
-                        eyes={invite.partnerAvatar.eyes}
-                        mouths={invite.partnerAvatar.mouths}
-                      />
-                      <div>
-                        <strong>{invite.partnerName}</strong>
-                        <span>wants to duo with you</span>
-                      </div>
-                      <div className="invite-actions">
-                        <button
-                          aria-label={`Accept ${invite.partnerName}'s invite`}
-                          onClick={() => void respondInvite(invite.id, "accept")}
-                        >
-                          <Icon name="check" size={13} />
-                        </button>
-                        <button
-                          aria-label={`Decline ${invite.partnerName}'s invite`}
-                          onClick={() => void respondInvite(invite.id, "decline")}
-                        >
-                          ×
-                        </button>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            <span className="hud-label">daily challenges</span>
-            <div className="challenge-list">
-              {challenges.map((challenge) => (
-                <Challenge
-                  key={challenge.type}
-                  label={
-                    challenge.type === "play_matches"
-                      ? "Play 2 matches"
-                      : challenge.type === "code_seconds"
-                        ? "Code for 3 hours"
-                        : "Add 2 friends"
-                  }
-                  value={`${Math.min(challenge.progress, challenge.target)} / ${challenge.target}`}
-                  progress={Math.min(
-                    100,
-                    (challenge.progress / challenge.target) * 100,
-                  )}
-                  reward={
-                    challenge.rewardElo
-                      ? `+${challenge.rewardElo} ELO`
-                      : `+${challenge.rewardHBucks} Ħ`
-                  }
-                />
-              ))}
-            </div>
-            <small className="resets">resets in {resetsIn}</small>
-          </aside>
+        <div className="flex flex-col gap-4">
+          {mode === "duo" && duoState.incoming.length > 0 && (
+            <aside className="hud-panel">
+              <span className="hud-label">duo invite</span>
+              <ul className="invite-list">
+                {duoState.incoming.map((invite) => (
+                  <li className="invite-row" key={invite.id}>
+                    <ScribbleAvatar
+                      size="sm"
+                      color={invite.partnerAvatar.color}
+                      eyes={invite.partnerAvatar.eyes}
+                      mouths={invite.partnerAvatar.mouths}
+                    />
+                    <div>
+                      <strong>{invite.partnerName}</strong>
+                      <span>wants to duo with you</span>
+                    </div>
+                    <div className="invite-actions">
+                      <button
+                        aria-label={`Accept ${invite.partnerName}'s invite`}
+                        onClick={() => void respondInvite(invite.id, "accept")}
+                      >
+                        <Icon name="check" size={13} />
+                      </button>
+                      <button
+                        aria-label={`Decline ${invite.partnerName}'s invite`}
+                        onClick={() => void respondInvite(invite.id, "decline")}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </aside>
+          )}
+          <DailyChallenges challenges={challenges} resetsIn={resetsIn} />
 
           <div className="match-dock">
-            <div className="match-dock-summary">
-              <span>{mode === "duo" ? "2 vs 2" : "1 vs 1"}</span>
-              <span>{length} min</span>
-              <span>open theme</span>
-            </div>
             <button
               className={`primary-button match-dock-button ${matching ? "matching" : ""}`}
               onClick={() => void ready()}
@@ -1508,7 +1551,10 @@ function Lobby({
               </p>
             )}
             {canUseTestLobby(user.email) && !matching && (
-              <button className="test-lobby-button" onClick={() => void testEmptyLobby()}>
+              <button
+                className="test-lobby-button"
+                onClick={() => void testEmptyLobby()}
+              >
                 enter empty lobby (test)
               </button>
             )}
@@ -1555,7 +1601,10 @@ function Lobby({
                       )}
                     </div>
                     <strong>{duoState.partner.partnerName}</strong>
-                    <button className="invite-cancel" onClick={() => void cancelDuo()}>
+                    <button
+                      className="invite-cancel"
+                      onClick={() => void cancelDuo()}
+                    >
                       leave
                     </button>
                   </>
@@ -1570,7 +1619,10 @@ function Lobby({
                     />
                     <span className="pending-badge">invited</span>
                     <strong>{duoState.outgoing.partnerName}</strong>
-                    <button className="invite-cancel" onClick={() => void cancelDuo()}>
+                    <button
+                      className="invite-cancel"
+                      onClick={() => void cancelDuo()}
+                    >
                       cancel
                     </button>
                   </>
@@ -1593,8 +1645,14 @@ function Lobby({
                           className="popover-backdrop"
                           onClick={() => setAddOpen(false)}
                         />
-                        <div className="invite-popover" role="dialog" aria-label="Invite a friend">
-                          <span className="invite-popover-title">invite a friend</span>
+                        <div
+                          className="invite-popover"
+                          role="dialog"
+                          aria-label="Invite a friend"
+                        >
+                          <span className="invite-popover-title">
+                            invite a friend
+                          </span>
                           {friends.length ? (
                             <ul className="invite-friend-list">
                               {friends.map((friend) => (
@@ -1875,6 +1933,7 @@ function Match({
   const [publishOpen, setPublishOpen] = useState(false);
   const [forfeitOpen, setForfeitOpen] = useState(false);
   const [forfeitLoading, setForfeitLoading] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [disconnect, setDisconnect] = useState<DisconnectNotice | null>(null);
   const [outcome, setOutcome] = useState<MatchOutcome | null>(null);
   const [buildName, setBuildName] = useState("");
@@ -2136,7 +2195,7 @@ function Match({
       window.setTimeout(() => setPublishOpen(true), 0);
   }, [outcome, seconds]);
 
-  const isTestMatch = match.mode === "solo" && match.playerCount === 1;
+  const isTestMatch = match.mode === "admin";
   const canSkipPublish = isTestMatch && canUseTestLobby(auth.user?.email ?? "");
 
   const disconnectSeconds = disconnect
@@ -2161,49 +2220,53 @@ function Match({
           R/
         </button>
         <div className="theme-tag">
-          <span>THEME</span>
+          <span>theme</span>
           <strong>{match.theme}</strong>
         </div>
         <div className="timer" aria-label={`${time} remaining`}>
           <span>{time}</span>
           <small>remaining</small>
         </div>
-        <div className="match-score">
-          <span>
-            <b className="blue-dot" /> your{" "}
-            {match.mode === "duo" ? "duo" : "side"}{" "}
-            <strong>{auth.user?.elo}</strong>
-          </span>
-          <i>VS</i>
-          <span>
-            <b className="red-dot" /> opponents
-          </span>
-        </div>
+        <div />
         <div className="match-actions">
           <button
-            className="forfeit-match"
-            onClick={() => setForfeitOpen(true)}
-            disabled={Boolean(outcome) || forfeitLoading}
+            className="settings-gear"
+            onClick={() => setSettingsOpen(true)}
+            aria-label="Match settings"
           >
-            forfeit
-          </button>
-          <button
-            className="exit-match"
-            onClick={() => setPublishOpen(true)}
-            disabled={seconds > 0 || publishState.loading || Boolean(outcome)}
-          >
-            {publishState.loading ? (
-              "publishing…"
-            ) : seconds > 0 ? (
-              "publishes after match"
-            ) : (
-              <>
-                publish to GitHub <Icon name="external" size={11} />
-              </>
-            )}
+            <Icon name="settings" size={17} />
           </button>
         </div>
       </header>
+      {settingsOpen && (
+        <div className="modal-backdrop" onClick={() => setSettingsOpen(false)}>
+          <section
+            className="modal settings-modal"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="close-button"
+              onClick={() => setSettingsOpen(false)}
+              aria-label="Close settings"
+            >
+              ×
+            </button>
+            <span className="eyebrow">match settings</span>
+            <h2>Settings</h2>
+            <button
+              className="danger-button"
+              onClick={() => {
+                setSettingsOpen(false);
+                setForfeitOpen(true);
+              }}
+              disabled={Boolean(outcome) || forfeitLoading}
+            >
+              forfeit match
+            </button>
+          </section>
+        </div>
+      )}
       {disconnect && !outcome && (
         <div
           className={`disconnect-banner ${disconnect.team === team ? "danger" : ""}`}
@@ -2218,7 +2281,9 @@ function Match({
       )}
       <section className="call-strip">
         <div className={`call-team ${match.mode === "duo" ? "" : "solo"}`}>
-          <span className="call-label">{match.mode === "duo" ? "YOUR DUO" : "YOU"}</span>
+          <span className="call-label">
+            {match.mode === "duo" ? "YOUR DUO" : "YOU"}
+          </span>
           <VideoTile
             name={auth.user?.name ?? "you"}
             team={`${team} · you`}
@@ -2239,8 +2304,12 @@ function Match({
             />
           )}
         </div>
-        <div className={`call-team opponents ${match.mode === "duo" ? "" : "solo"}`}>
-          <span className="call-label">{match.mode === "duo" ? "OPPONENTS" : "OPPONENT"}</span>
+        <div
+          className={`call-team opponents ${match.mode === "duo" ? "" : "solo"}`}
+        >
+          <span className="call-label">
+            {match.mode === "duo" ? "OPPONENTS" : "OPPONENT"}
+          </span>
           {(match.mode === "duo" ? [0, 1] : [0]).map((index) => {
             const peer = opponents[index];
             return (
@@ -2287,15 +2356,6 @@ function Match({
               everyone
             </button>
           </div>
-          <button
-            onClick={() => {
-              void navigator.clipboard.writeText(window.location.href);
-              toast("Room link copied, open it in another browser to join");
-            }}
-          >
-            <Icon name="link" size={16} />
-            <span>invite</span>
-          </button>
         </div>
       </section>
       <section className="workspace">
@@ -2358,8 +2418,7 @@ function Match({
         <aside className="preview-panel">
           <div className="preview-head">
             <div>
-              <span className="eyebrow">YOUR BUILD</span>
-              <strong>live preview</strong>
+              <strong>your website</strong>
             </div>
             <div className="browser-dots">
               <i />
@@ -2533,7 +2592,9 @@ function Match({
                     onClick={() => void forfeit()}
                     disabled={forfeitLoading}
                   >
-                    {forfeitLoading ? "closing…" : "skip — end test match without publishing"}
+                    {forfeitLoading
+                      ? "closing…"
+                      : "skip — end test match without publishing"}
                   </button>
                 )}
               </>
@@ -2582,7 +2643,9 @@ function Match({
         >
           <section className="modal publish-modal outcome-modal">
             <span className="eyebrow">
-              {isTestMatch ? "test match closed" : `match closed · ${outcome.endReason}`}
+              {isTestMatch
+                ? "test match closed"
+                : `match closed · ${outcome.endReason}`}
             </span>
             <h2 id="outcome-title">
               {isTestMatch

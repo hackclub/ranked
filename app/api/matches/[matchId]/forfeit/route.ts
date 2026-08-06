@@ -8,17 +8,16 @@ export async function POST(request: NextRequest, context: { params: Promise<{ ma
   const user = await currentUser(request);
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { matchId } = await context.params;
-  const rows = await getSql()`SELECT mp.team,m.status,m.ends_at>NOW() AS "beforeEnd",
-      (SELECT COUNT(*)::int FROM match_players WHERE match_id=${matchId}) AS "playerCount"
+  const rows = await getSql()`SELECT mp.team,m.status,m.mode,m.ends_at>NOW() AS "beforeEnd"
     FROM match_players mp JOIN matches m ON m.id=mp.match_id
     WHERE mp.match_id=${matchId} AND mp.user_id=${user.id}`;
-  const player = rows[0] as { team: MatchTeam; status: string; beforeEnd: boolean; playerCount: number } | undefined;
+  const player = rows[0] as { team: MatchTeam; status: string; mode: string; beforeEnd: boolean } | undefined;
   if (!player) return NextResponse.json({ error: "You are not in this match." }, { status: 403 });
-  const canSkipTimer = player.playerCount === 1 && canUseTestLobby(user.email);
-  if (player.status !== "active" || (!player.beforeEnd && !canSkipTimer)) {
+  const isAdminLobby = player.mode === "admin" && canUseTestLobby(user.email);
+  if (player.status !== "active" || (!player.beforeEnd && !isAdminLobby)) {
     return NextResponse.json({ error: "This match has already ended.", match: await matchOutcome(matchId) }, { status: 409 });
   }
-  const outcome = await finalizeForfeit(matchId, player.team, "forfeit", user.id);
+  const outcome = await finalizeForfeit(matchId, player.team, "forfeit", user.id, isAdminLobby);
   if (!outcome) {
     return NextResponse.json({ error: "This match has already closed.", match: await matchOutcome(matchId) }, { status: 409 });
   }

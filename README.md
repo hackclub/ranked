@@ -55,7 +55,7 @@ For a local multiplayer test, sign in as separate Hack Club users in separate br
 
 ## Other services
 
-- `SLACK_BOT_TOKEN`: optional Slack-name lookup; use `users:read`. The other person must have signed into Ranked before they can be friended.
+- The friend-add picker searches Ranked accounts directly from Postgres (`users.name`/`email`, populated at Hack Club sign-in) — no Slack API calls. Typing a handle that doesn't match anyone copies a Slack DM invite to your clipboard to send yourself.
 - `VOTES_TO_FINALIZE`: community votes needed before server-side ELO settlement; defaults to `3`.
 - `NEXT_PUBLIC_TURN_*`: optional but strongly recommended for reliable WebRTC outside friendly networks.
 - Shop redemptions create `pending` PostgreSQL orders and atomically deduct H-Bucks. Fulfillment/approval remains an admin operation, not an automatic hardware purchase.

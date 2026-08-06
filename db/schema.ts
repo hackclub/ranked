@@ -13,7 +13,7 @@ import {
 } from "drizzle-orm/pg-core";
 
 export const experienceEnum = pgEnum("experience_level", ["beginner", "intermediate", "expert"]);
-export const matchModeEnum = pgEnum("match_mode", ["solo", "duo"]);
+export const matchModeEnum = pgEnum("match_mode", ["solo", "duo", "admin"]);
 export const matchStatusEnum = pgEnum("match_status", ["active", "voting", "finalizing", "completed", "cancelled"]);
 export const teamEnum = pgEnum("match_team", ["blue", "red"]);
 export const friendshipStatusEnum = pgEnum("friendship_status", ["pending", "accepted", "declined", "blocked"]);
