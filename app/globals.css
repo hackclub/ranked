@@ -1518,6 +1518,29 @@ select:focus-visible {
 .connect-step.github .connect-badge {
   background: var(--orange);
 }
+.connect-step.hackatime .connect-badge {
+  background: var(--green);
+}
+.hackatime-recording {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #b8c28b;
+  font: inherit;
+}
+.hackatime-recording i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.hackatime-recording.sending i {
+  animation: pulse 0.8s infinite alternate;
+}
+.hackatime-recording.error {
+  color: #e07d72;
+}
 .connect-step > p {
   max-width: 430px;
   margin: 0 auto 22px;
@@ -2017,6 +2040,9 @@ select:focus-visible {
   margin-left: auto;
   color: #2f7a45;
 }
+.editor-status .hackatime-recording + b {
+  margin-left: 0;
+}
 .preview-panel {
   grid-area: preview;
   min-width: 0;
@@ -2479,14 +2505,19 @@ select:focus-visible {
   display: grid;
   gap: 7px;
 }
+.account-links a,
 .account-links button {
   border: 1px solid var(--ink);
   background: var(--paper);
+  color: var(--ink);
   padding: 13px;
   display: flex;
+  align-items: center;
+  gap: 8px;
   justify-content: space-between;
   font: 650 10px var(--font-geist-mono);
   border-radius: var(--blob);
+  text-decoration: none;
 }
 .account-links span {
   color: #2f7a45;

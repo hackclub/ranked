@@ -14,6 +14,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
+    "db:migrate:hackatime": "node scripts/migrate-hackatime.mjs",
     "db:wipe-users": "node scripts/wipe-users.mjs"
   },
   "dependencies": {

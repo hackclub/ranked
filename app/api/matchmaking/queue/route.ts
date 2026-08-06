@@ -18,6 +18,12 @@ export async function POST(request: NextRequest) {
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const existing = await activeMatch(user.id);
   if (existing) return NextResponse.json({ status: "matched", match: existing });
+  if (!user.hackatimeConnected) {
+    return NextResponse.json(
+      { error: "Connect Hackatime before joining a match.", code: "hackatime_required" },
+      { status: 403 },
+    );
+  }
   const body = await request.json();
   const mode = body.mode === "duo" ? "duo" : "solo";
   const duration = [10, 30, 60].includes(Number(body.durationMinutes)) ? Number(body.durationMinutes) : 10;
