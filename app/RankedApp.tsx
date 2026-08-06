@@ -2219,15 +2219,16 @@ function Match({
         <button className="match-logo" onClick={() => navigate("home")}>
           R/
         </button>
-        <div className="theme-tag">
-          <span>theme</span>
-          <strong>{match.theme}</strong>
+        <div className="match-timer-cluster">
+          <div className="theme-tag">
+            <span>theme</span>
+            <strong>{match.theme}</strong>
+          </div>
+          <div className="timer" aria-label={`${time} remaining`}>
+            <span>{time}</span>
+            <small>remaining</small>
+          </div>
         </div>
-        <div className="timer" aria-label={`${time} remaining`}>
-          <span>{time}</span>
-          <small>remaining</small>
-        </div>
-        <div />
         <div className="match-actions">
           <button
             className="settings-gear"
@@ -2280,81 +2281,51 @@ function Match({
         </div>
       )}
       <section className="call-strip">
-        <div className={`call-team ${match.mode === "duo" ? "" : "solo"}`}>
+        <div className="call-team">
           <span className="call-label">
-            {match.mode === "duo" ? "YOUR DUO" : "YOU"}
+            {match.mode === "duo" ? "your duo" : "you"}
           </span>
-          <VideoTile
-            name={auth.user?.name ?? "you"}
-            team={`${team} · you`}
-            color={auth.user?.avatar.color ?? COLORS[1]}
-            eyes={auth.user?.avatar.eyes}
-            mouths={auth.user?.avatar.mouths}
-            stream={video ? localStream : null}
-            local
-            muted={!mic}
-          />
-          {match.mode === "duo" && (
+          <div className="call-tiles">
             <VideoTile
-              name={teammate?.name ?? "waiting…"}
-              team={teammate ? "teammate · live" : "waiting for teammate"}
-              color={teammate?.color ?? COLORS[2]}
-              stream={teammate?.video ? teammate.stream : null}
-              muted={teammate ? !teammate.mic : false}
+              name={auth.user?.name ?? "you"}
+              team={`${team} · you`}
+              color={auth.user?.avatar.color ?? COLORS[1]}
+              eyes={auth.user?.avatar.eyes}
+              mouths={auth.user?.avatar.mouths}
+              stream={video ? localStream : null}
+              local
+              muted={!mic}
             />
-          )}
-        </div>
-        <div
-          className={`call-team opponents ${match.mode === "duo" ? "" : "solo"}`}
-        >
-          <span className="call-label">
-            {match.mode === "duo" ? "OPPONENTS" : "OPPONENT"}
-          </span>
-          {(match.mode === "duo" ? [0, 1] : [0]).map((index) => {
-            const peer = opponents[index];
-            return (
+            {match.mode === "duo" && (
               <VideoTile
-                key={peer?.connectionId ?? index}
-                name={peer?.name ?? "open slot"}
-                team={peer ? `${peer.team} team` : "waiting for builder"}
-                color={peer?.color ?? COLORS[index + 3]}
-                stream={peer?.video ? peer.stream : null}
-                muted={peer ? !peer.mic : false}
-                audioMuted={scope === "team" && peer?.team !== team}
+                name={teammate?.name ?? "waiting…"}
+                team={teammate ? "teammate · live" : "waiting for teammate"}
+                color={teammate?.color ?? COLORS[2]}
+                stream={teammate?.video ? teammate.stream : null}
+                muted={teammate ? !teammate.mic : false}
               />
-            );
-          })}
+            )}
+          </div>
         </div>
-        <div className="call-controls">
-          <button
-            className={mic ? "active" : ""}
-            onClick={() => setMic(!mic)}
-            aria-label="Toggle microphone"
-          >
-            <Icon name={mic ? "mic" : "mic-off"} size={16} />
-            <span>mic</span>
-          </button>
-          <button
-            className={video ? "active" : ""}
-            onClick={() => setVideo(!video)}
-            aria-label="Toggle camera"
-          >
-            <Icon name={video ? "camera" : "camera-off"} size={16} />
-            <span>camera</span>
-          </button>
-          <div className="scope-toggle">
-            <button
-              className={scope === "team" ? "active" : ""}
-              onClick={() => setScope("team")}
-            >
-              duo only
-            </button>
-            <button
-              className={scope === "everyone" ? "active" : ""}
-              onClick={() => setScope("everyone")}
-            >
-              everyone
-            </button>
+        <div className="call-team">
+          <span className="call-label">
+            {match.mode === "duo" ? "opponents" : "opponent"}
+          </span>
+          <div className="call-tiles">
+            {(match.mode === "duo" ? [0, 1] : [0]).map((index) => {
+              const peer = opponents[index];
+              return (
+                <VideoTile
+                  key={peer?.connectionId ?? index}
+                  name={peer?.name ?? "open slot"}
+                  team={peer ? `${peer.team} team` : "waiting for builder"}
+                  color={peer?.color ?? COLORS[index + 3]}
+                  stream={peer?.video ? peer.stream : null}
+                  muted={peer ? !peer.mic : false}
+                  audioMuted={scope === "team" && peer?.team !== team}
+                />
+              );
+            })}
           </div>
         </div>
       </section>
@@ -2466,6 +2437,38 @@ function Match({
             </button>
           </div>
         </aside>
+        <div className="call-controls">
+          <button
+            className={mic ? "active" : ""}
+            onClick={() => setMic(!mic)}
+            aria-label="Toggle microphone"
+          >
+            <Icon name={mic ? "mic" : "mic-off"} size={16} />
+            <span>mic</span>
+          </button>
+          <button
+            className={video ? "active" : ""}
+            onClick={() => setVideo(!video)}
+            aria-label="Toggle camera"
+          >
+            <Icon name={video ? "camera" : "camera-off"} size={16} />
+            <span>camera</span>
+          </button>
+          <div className="scope-toggle">
+            <button
+              className={scope === "team" ? "active" : ""}
+              onClick={() => setScope("team")}
+            >
+              duo only
+            </button>
+            <button
+              className={scope === "everyone" ? "active" : ""}
+              onClick={() => setScope("everyone")}
+            >
+              everyone
+            </button>
+          </div>
+        </div>
       </section>
       {previewOpen && (
         <div
