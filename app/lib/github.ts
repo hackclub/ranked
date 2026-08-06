@@ -99,10 +99,15 @@ async function ensureRankedRepo(token: string, login: string) {
   return repository;
 }
 
+const RESERVED_FOLDER_NAMES = ["index.html", "readme.md", ".nojekyll"];
+
 export async function publishWebsite(token: string, login: string, requestedName: string, html: string, sourceFiles?: Record<string, string>) {
   const folderName = requestedName.trim();
   if (!/^[A-Za-z0-9._-]{1,100}$/.test(folderName) || folderName === "." || folderName === "..") {
     throw new Error("Build names may only use letters, numbers, periods, underscores, and hyphens.");
+  }
+  if (RESERVED_FOLDER_NAMES.includes(folderName.toLowerCase())) {
+    throw new Error(`"${folderName}" is reserved. Choose another build name.`);
   }
   const repository = await ensureRankedRepo(token, login);
   if (await pathExists(token, login, folderName)) {
@@ -127,4 +132,75 @@ export async function publishWebsite(token: string, login: string, requestedName
     repoName: RANKED_REPO,
     folderName,
   };
+}
+
+const escapeHtml = (value: string) =>
+  value.replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
+
+export type DirectoryBuild = { folderName: string; theme: string; publishedAt: string };
+
+function renderDirectoryIndex(login: string, builds: DirectoryBuild[]) {
+  const items = builds.map(build => `
+      <li>
+        <a href="./${encodeURIComponent(build.folderName)}/">${escapeHtml(build.folderName)}</a>
+        <span>${escapeHtml(build.theme)} · ${escapeHtml(new Date(build.publishedAt).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" }))}</span>
+      </li>`).join("");
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(login)}'s Ranked builds</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; background: #fff8cf; color: #20201f; padding: 48px 24px; }
+  main { max-width: 880px; margin: 0 auto; }
+  h1 { font-size: 28px; margin: 0 0 6px; }
+  p.sub { color: #5c574b; margin: 0 0 32px; font-size: 14px; }
+  ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+  li { border: 2px solid #20201f; border-radius: 14px; padding: 16px; background: #fffdf0; box-shadow: 4px 4px 0 #20201f; }
+  li a { text-decoration: none; color: #20201f; font-weight: 700; font-size: 15px; display: block; margin-bottom: 6px; word-break: break-word; }
+  li span { display: block; font-size: 11px; color: #5c574b; text-transform: uppercase; letter-spacing: .08em; }
+  footer { margin-top: 40px; font-size: 11px; color: #5c574b; }
+  footer a { color: #497cbf; }
+  @media (prefers-color-scheme: dark) {
+    body { background: #171613; color: #f5f3e9; }
+    li { background: #20201f; border-color: #f5f3e9; box-shadow: 4px 4px 0 #f5f3e9; }
+    li a { color: #f5f3e9; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>@${escapeHtml(login)}'s Ranked builds</h1>
+  <p class="sub">${builds.length} site${builds.length === 1 ? "" : "s"} built live on Hack Club Ranked.</p>
+  <ul>${items}
+  </ul>
+  <footer>Built with <a href="https://ranked.hackclub.com">Hack Club Ranked</a></footer>
+</main>
+</body>
+</html>
+`;
+}
+
+export async function updateDirectoryIndex(token: string, login: string, builds: DirectoryBuild[]) {
+  let sha: string | undefined;
+  try {
+    const existing = await githubRequest<{ sha: string }>(token, repoContentsPath(login, "index.html"));
+    sha = existing.sha;
+  } catch (error) {
+    if (!isNotFound(error)) throw error;
+  }
+  const html = renderDirectoryIndex(login, builds);
+  await githubRequest(token, repoContentsPath(login, "index.html"), {
+    method: "PUT",
+    body: JSON.stringify({
+      message: "Update builds directory",
+      content: Buffer.from(html, "utf8").toString("base64"),
+      branch: "main",
+      ...(sha ? { sha } : {}),
+    }),
+  });
 }

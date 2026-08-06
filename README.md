@@ -45,6 +45,8 @@ Create a GitHub OAuth App and configure:
 
 When the timer ends, every participant chooses a build name. Ranked commits the build into a folder of that name inside a single `hackclubranked` repository in the participant's connected GitHub account — creating that repo and enabling GitHub Pages from its `main` branch the first time a player publishes — with the deployable `index.html`, a per-build README, `.nojekyll`, and the original HTML/CSS/JS source files. Every later match adds another folder to the same repo instead of creating a new one. Duo teammates publish the same finished team build independently to their own accounts; voting opens after every player has published.
 
+Every publish also regenerates a root `index.html` in that repo — a directory page linking to every folder (build) the player has published, generated from the `publications` table rather than by listing the repo. This gives each player one stable GitHub Pages URL (`https://<login>.github.io/hackclubranked/`) that lists all of their builds, alongside each individual build's own page.
+
 ## Realtime rooms and calls
 
 Create a Liveblocks project and set `LIVEBLOCKS_SECRET_KEY`. Ranked verifies match membership before authorizing rooms. A match has one call room for all players and a separate code room per team, so opponents cannot read or edit each other’s source. Monaco files synchronize with Liveblocks’ Yjs provider, and call-room events carry WebRTC offer/answer/ICE signaling.

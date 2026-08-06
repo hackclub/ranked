@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { publishWebsite } from "@/app/lib/github";
+import { publishWebsite, updateDirectoryIndex, type DirectoryBuild } from "@/app/lib/github";
 import { decryptSession, SESSION_COOKIE } from "@/app/lib/session";
 import { getSql } from "@/db";
 
@@ -30,6 +30,16 @@ export async function POST(request: NextRequest) {
       WHERE id=${matchId} AND status='active'
         AND (SELECT COUNT(*) FROM publications WHERE match_id=${matchId})=(SELECT COUNT(*) FROM match_players WHERE match_id=${matchId})
         AND (SELECT COUNT(DISTINCT team) FROM publications WHERE match_id=${matchId})=2`;
+
+    const builds = await getSql()`SELECT p.github_repo AS "folderName", m.theme, p.created_at AS "publishedAt"
+      FROM publications p JOIN matches m ON m.id=p.match_id
+      WHERE p.published_by=${session.user.id} ORDER BY p.created_at DESC`;
+    try {
+      await updateDirectoryIndex(session.github.accessToken, session.github.login, builds as DirectoryBuild[]);
+    } catch (error) {
+      console.error("Failed to update builds directory index", error);
+    }
+
     return NextResponse.json(result);
   } catch (error) {
     console.error(error);

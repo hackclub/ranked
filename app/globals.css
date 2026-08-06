@@ -2212,7 +2212,6 @@ select:focus-visible {
   background: var(--paper);
   border: 2px solid var(--ink);
   box-shadow: 8px 8px 0 var(--ink);
-  border-radius: var(--blob);
   overflow: hidden;
 }
 .leader-row {
