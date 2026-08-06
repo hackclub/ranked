@@ -24,8 +24,10 @@ test("server-renders the Ranked product shell", async () => {
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
   const html = await response.text();
-  assert.match(html, /Ranked — livecoding for builders/);
+  assert.match(html, /Hack Club Ranked/);
   assert.match(html, /HACK CLUB/);
+  assert.match(html, /goofy-guy-avatar/);
+  assert.match(html, /goofyguys\/shapes\/2\.png/);
   assert.match(html, /daily challenges/);
   assert.match(html, /sign in to play/);
   assert.match(html, /Hack Club account required/);

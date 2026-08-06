@@ -1,4 +1,4 @@
-@import "tailwindcss";
+@import "tailwindcss/index.css";
 
 :root {
   --cream: #fff8cf;
@@ -418,6 +418,40 @@ select:focus-visible {
 .hero-zone .scribble-avatar {
   z-index: 2;
 }
+.hero-avatar-button {
+  position: relative;
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  padding: 0 0 26px;
+  color: var(--ink);
+}
+.hero-avatar-button > span {
+  position: absolute;
+  z-index: 5;
+  bottom: 0;
+  padding: 6px 11px;
+  border: 1px solid var(--ink);
+  border-radius: 999px;
+  background: var(--paper);
+  box-shadow: 2px 2px 0 var(--ink);
+  font: 650 8px var(--font-geist-mono);
+  letter-spacing: 0.04em;
+}
+.hero-avatar-button > span i {
+  font-style: normal;
+}
+.hero-avatar-button:hover .scribble-avatar {
+  transform: translateY(-4px) rotate(-1deg);
+}
+.hero-avatar-button:hover > span {
+  background: var(--orange);
+}
+.hero-avatar-button:active > span {
+  transform: translate(2px, 2px);
+  box-shadow: none;
+}
 .elo-sticker {
   position: absolute;
   top: 5px;
@@ -580,12 +614,12 @@ select:focus-visible {
 }
 
 .scribble-avatar {
-  --avatar: var(--blue);
   position: relative;
   width: 255px;
   height: 265px;
-  display: grid;
-  place-items: center;
+  flex: 0 0 auto;
+  isolation: isolate;
+  user-select: none;
 }
 .avatar-sm {
   width: 58px;
@@ -599,152 +633,41 @@ select:focus-visible {
   width: 255px;
   height: 265px;
 }
-.avatar-face {
-  position: relative;
-  z-index: 3;
-  width: 38%;
-  min-width: 36px;
-  aspect-ratio: 1;
-  background: var(--avatar);
-  border: 3px solid var(--ink);
-  border-radius: 44% 56% 48% 54%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  transform: rotate(-4deg);
-  box-shadow: inset 7px -6px 0 #00000014;
-}
-.scribble-ring {
+.goofy-guy-layer {
   position: absolute;
+  display: block;
+  pointer-events: none;
+  object-fit: contain;
+}
+.goofy-guy-limbs {
   z-index: 1;
-  width: 65%;
-  height: 58%;
-  border: 5px solid var(--avatar);
-  border-radius: 50% 43% 55% 38%;
-  transform: rotate(33deg);
+  object-fit: fill;
+  transform: translate(-50%, -50%);
 }
-.ring-two {
-  width: 70%;
-  height: 45%;
-  transform: rotate(-28deg);
-  border-radius: 36% 60% 43% 55%;
-}
-.eyes {
-  display: flex;
-  justify-content: center;
-  gap: 3px;
-}
-.eyes i {
-  display: block;
-  width: 9px;
-  height: 13px;
-  border-radius: 50%;
-  background: white;
-  border: 2px solid var(--ink);
-  position: relative;
-}
-.eyes i::after {
-  content: "";
-  position: absolute;
-  width: 3px;
-  height: 5px;
-  background: var(--ink);
-  border-radius: 50%;
-  top: 3px;
-  left: 2px;
-}
-.mouths {
-  margin-top: 4px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.mouths b {
-  display: block;
-  width: 20px;
-  height: 7px;
-  border: 2px solid var(--ink);
-  border-top: 0;
-  border-radius: 0 0 50% 50%;
-}
-.avatar-legs {
-  position: absolute;
+.goofy-guy-shape {
   z-index: 2;
-  bottom: 8%;
-  left: 39%;
-  width: 30%;
-  height: 29%;
-  display: flex;
-  gap: 30%;
+  transform: translate(-50%, -50%);
 }
-.avatar-legs i {
-  display: block;
-  width: 3px;
-  height: 100%;
-  background: var(--ink);
-  transform: rotate(9deg);
-  position: relative;
-}
-.avatar-legs i:last-child {
-  transform: rotate(-9deg);
-}
-.avatar-legs i::after {
-  content: "";
+.goofy-guy-features {
   position: absolute;
-  height: 3px;
-  width: 20px;
-  background: var(--ink);
-  bottom: 0;
-  left: -8px;
-  transform: rotate(-8deg);
+  z-index: 3;
+  transform-origin: 50% 43%;
+  transition: transform 180ms ease;
 }
-.avatar-sm .scribble-ring {
-  border-width: 2px;
+.goofy-guy-features.inverted {
+  transform: rotate(180deg);
 }
-.avatar-sm .avatar-face {
-  border-width: 1px;
+.goofy-guy-hair {
+  z-index: 3;
+  transform: translate(-50%, -50%);
 }
-.avatar-sm .eyes i {
-  width: 4px;
-  height: 6px;
-  border-width: 1px;
+.goofy-guy-eyes {
+  z-index: 4;
+  transform: translate(-50%, -50%);
 }
-.avatar-sm .eyes i::after {
-  display: none;
-}
-.avatar-sm .mouths b {
-  width: 8px;
-  height: 3px;
-  border-width: 1px;
-}
-.avatar-sm .avatar-legs {
-  display: none;
-}
-.avatar-md .scribble-ring {
-  border-width: 3px;
-}
-.avatar-md .avatar-face {
-  border-width: 2px;
-}
-.avatar-md .eyes i {
-  width: 6px;
-  height: 8px;
-  border-width: 1px;
-}
-.avatar-md .eyes i::after {
-  width: 2px;
-  height: 3px;
-  top: 2px;
-  left: 1px;
-}
-.avatar-md .mouths b {
-  width: 12px;
-  height: 4px;
-  border-width: 1px;
-}
-.avatar-md .avatar-legs {
-  bottom: 5%;
+.goofy-guy-mouth {
+  z-index: 4;
+  transform: translate(-50%, -50%);
 }
 
 .back-button {
@@ -1059,53 +982,77 @@ select:focus-visible {
   border-radius: var(--blob);
 }
 .avatar-stage {
-  height: 220px;
+  height: 230px;
   display: grid;
   place-items: center;
   border-bottom: 2px dashed #bcb39b;
-  margin-bottom: 10px;
+  margin: 8px 0 14px;
+  overflow: hidden;
 }
 .avatar-stage .scribble-avatar {
-  transform: scale(0.8);
+  transform: scale(0.82);
 }
-.customize-row {
-  min-height: 42px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  border-bottom: 1px solid #ddd6bc;
-  font: 600 10px var(--font-geist-mono);
-}
-.swatches {
-  display: flex;
-  gap: 7px;
-}
-.swatches button {
-  width: 20px;
-  height: 20px;
-  border: 1px solid var(--ink);
-  padding: 0;
-  border-radius: 50%;
-}
-.swatches button.selected {
-  box-shadow:
-    0 0 0 2px var(--paper),
-    0 0 0 4px var(--ink);
-}
-.stepper {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.stepper button {
-  border: 1px solid var(--ink);
-  background: transparent;
-  width: 23px;
-  height: 23px;
-  padding: 0;
+.avatar-pickers {
   display: grid;
-  place-items: center;
-  border-radius: var(--blob);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+.avatar-part-picker {
+  min-width: 0;
+  margin: 0;
+  padding: 8px;
+  border: 1px solid #cfc7ad;
+  border-radius: 9px;
+  background: #fffdf4;
+  text-align: left;
+}
+.avatar-part-picker legend {
+  padding: 0 4px;
+  font: 650 9px var(--font-geist-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.avatar-part-controls {
+  display: grid;
+  grid-template-columns: 34px minmax(62px, 1fr) 34px;
+  align-items: center;
+  gap: 5px;
+}
+.avatar-part-controls > button {
+  height: 34px;
+  padding: 0;
+  border: 1px solid #cfc7ad;
+  border-radius: 50%;
+  background: var(--paper);
+  color: var(--ink);
+  font: 700 16px var(--font-geist-mono);
+}
+.avatar-part-controls > button:hover {
+  border-color: var(--ink);
+  background: var(--green);
+  transform: translateY(-1px);
+}
+.avatar-part-controls > button:active {
+  transform: none;
+}
+.avatar-current-part {
+  min-width: 0;
+  height: 38px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 5px;
+}
+.avatar-current-part img {
+  justify-self: center;
+  width: 46px;
+  height: 34px;
+  object-fit: contain;
+}
+.avatar-current-part span {
+  white-space: nowrap;
+  font: 650 8px var(--font-geist-mono);
+  color: var(--muted);
 }
 .shuffle-button {
   width: 100%;
@@ -1531,7 +1478,7 @@ select:focus-visible {
 }
 
 .onboarding-modal {
-  width: min(600px, 100%);
+  width: min(720px, 100%);
 }
 .onboarding-modal .avatar-customizer {
   border: 0;
@@ -1540,7 +1487,7 @@ select:focus-visible {
   margin-top: 6px;
 }
 .onboarding-modal .avatar-stage {
-  height: 190px;
+  height: 220px;
 }
 .onboarding-modal .continue-button {
   width: 100%;
@@ -2477,6 +2424,52 @@ select:focus-visible {
   gap: 15px;
   align-items: center;
 }
+.profile-modal.editing-avatar {
+  width: min(620px, 100%);
+  display: block;
+}
+.avatar-editor-title {
+  margin: 0 0 12px;
+  text-align: center;
+  font-size: 22px !important;
+}
+.avatar-edit-button {
+  margin-top: 8px;
+  padding: 0 0 2px;
+  border: 0;
+  border-bottom: 1px solid var(--ink);
+  background: transparent;
+  font: 650 9px var(--font-geist-mono);
+}
+.profile-avatar-editor {
+  grid-column: 1 / -1;
+}
+.profile-avatar-editor .avatar-customizer {
+  box-shadow: none;
+}
+.profile-avatar-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+.profile-avatar-actions button {
+  min-width: 120px;
+  border: 1px solid var(--ink);
+  border-radius: var(--blob);
+  padding: 10px 14px;
+  background: var(--paper);
+  font: 650 9px var(--font-geist-mono);
+}
+.profile-avatar-actions .primary-button {
+  background: var(--green);
+}
+.profile-avatar-editor .avatar-save-error {
+  margin: 8px 0 0;
+  color: var(--red);
+  text-align: right;
+  font: 650 8px var(--font-geist-mono);
+}
 .profile-modal p {
   font: 500 9px var(--font-geist-mono);
   color: var(--muted);
@@ -2959,6 +2952,9 @@ select:focus-visible {
   }
   .avatar-customizer {
     padding: 17px;
+  }
+  .avatar-pickers {
+    grid-template-columns: 1fr;
   }
   .product-card {
     box-shadow: 3px 3px 0 var(--ink);

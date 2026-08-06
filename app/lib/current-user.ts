@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { getSql } from "@/db";
 import { decryptSession, SESSION_COOKIE } from "@/app/lib/session";
+import type { AvatarConfig } from "@/app/lib/avatar";
 
 export type DbUser = {
   id: string;
@@ -13,7 +14,7 @@ export type DbUser = {
   matchesPlayed: number;
   codingSeconds: number;
   hBucks: number;
-  avatar: { color: string; eyes: number; mouths: number; eyeStyle?: string; mouthStyle?: string };
+  avatar: AvatarConfig;
 };
 
 export async function currentUser(request: NextRequest): Promise<DbUser | null> {
@@ -27,4 +28,3 @@ export async function currentUser(request: NextRequest): Promise<DbUser | null> 
   `;
   return (rows[0] as DbUser | undefined) ?? null;
 }
-

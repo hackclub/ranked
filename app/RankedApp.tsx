@@ -6,6 +6,14 @@ import { StreamVideo } from "./realtime/StreamVideo";
 import { useCodeRoom, useRealtimeRoom } from "./realtime/useRealtimeRoom";
 import { getYjsProviderForRoom } from "@liveblocks/yjs";
 import { canUseTestLobby } from "./lib/test-lobby";
+import { AvatarCustomizer, ScribbleAvatar } from "./components/GoofyGuyAvatar";
+import {
+  DEFAULT_AVATAR,
+  avatarAccent,
+  normalizeAvatar,
+  type AvatarConfig,
+  type ResolvedAvatarConfig,
+} from "./lib/avatar";
 
 type Screen = "home" | "lobby" | "match" | "vote" | "leaderboard" | "shop";
 type Mode = "solo" | "duo";
@@ -22,7 +30,7 @@ type AuthState = {
     matchesPlayed: number;
     codingSeconds: number;
     hBucks: number;
-    avatar: { color: string; eyes: number; mouths: number };
+    avatar: AvatarConfig;
   } | null;
   github: { login: string; avatarUrl: string | null } | null;
 };
@@ -418,48 +426,6 @@ function Icon({
   );
 }
 
-function ScribbleAvatar({
-  color = COLORS[1],
-  eyes = 2,
-  mouths = 1,
-  size = "lg",
-  label = "Player avatar",
-}: {
-  color?: string;
-  eyes?: number;
-  mouths?: number;
-  size?: "sm" | "md" | "lg";
-  label?: string;
-}) {
-  return (
-    <div
-      className={`scribble-avatar avatar-${size}`}
-      style={{ "--avatar": color } as React.CSSProperties}
-      role="img"
-      aria-label={label}
-    >
-      <div className="scribble-ring ring-one" />
-      <div className="scribble-ring ring-two" />
-      <div className="avatar-face">
-        <div className="eyes">
-          {Array.from({ length: eyes }).map((_, i) => (
-            <i key={i} />
-          ))}
-        </div>
-        <div className="mouths">
-          {Array.from({ length: mouths }).map((_, i) => (
-            <b key={i} />
-          ))}
-        </div>
-      </div>
-      <div className="avatar-legs">
-        <i />
-        <i />
-      </div>
-    </div>
-  );
-}
-
 function Logo({ compact = false }: { compact?: boolean }) {
   return (
     <button
@@ -505,7 +471,7 @@ function SiteHeader({
   navigate: (s: Screen) => void;
   onProfile: () => void;
   balance: number;
-  avatar?: { color: string; eyes: number; mouths: number };
+  avatar?: AvatarConfig;
 }) {
   return (
     <header className="site-header">
@@ -529,12 +495,7 @@ function SiteHeader({
         onClick={onProfile}
         aria-label="Open profile and account settings"
       >
-        <ScribbleAvatar
-          size="sm"
-          color={avatar?.color}
-          eyes={avatar?.eyes}
-          mouths={avatar?.mouths}
-        />
+        <ScribbleAvatar size="sm" avatar={avatar} />
         <span className="online-dot" />
       </button>
     </header>
@@ -554,11 +515,13 @@ function Home({
   toast,
   auth,
   startOnboarding,
+  customizeAvatar,
 }: {
   navigate: (s: Screen) => void;
   toast: (m: string) => void;
   auth: AuthState;
   startOnboarding: () => void;
+  customizeAvatar: () => void;
 }) {
   const [friendRequests, setFriendRequests] = useState<string[]>([]);
   const [friendDirectory, setFriendDirectory] = useState<
@@ -824,12 +787,22 @@ function Home({
               #{dashboard.globalRank} <span>global</span>
             </div>
           )}
-          <ScribbleAvatar
-            color={auth.user?.avatar.color}
-            eyes={auth.user?.avatar.eyes}
-            mouths={auth.user?.avatar.mouths}
-            label="Your scribble avatar"
-          />
+          <button
+            type="button"
+            className="hero-avatar-button"
+            onClick={customizeAvatar}
+            aria-label={
+              auth.user
+                ? "Customize your Goofy Guy"
+                : "Create your Goofy Guy"
+            }
+          >
+            <ScribbleAvatar
+              avatar={auth.user?.avatar}
+              label="Your scribble avatar"
+            />
+            <span>{auth.user ? "customize" : "make yours"} <i>↗</i></span>
+          </button>
           <div className="hero-copy">
             <button
               className="primary-button start-button"
@@ -953,7 +926,7 @@ function DailyChallenges({
 }
 
 type OnboardingStep = "avatar" | "hackclub" | "github" | "placement";
-type AvatarDraft = { color: string; eyes: number; mouths: number };
+type AvatarDraft = ResolvedAvatarConfig;
 const PENDING_AVATAR_KEY = "ranked_pending_avatar";
 
 function OnboardingModal({
@@ -1017,15 +990,11 @@ function OnboardingModal({
             <h2 id="onboarding-title">Draw your scribble.</h2>
             <p>
               This is you on the ladder, in calls, and on the leaderboard. Make
-              it weird, you won’t be able to change it after today.
+              it weird—you can remix it later from your profile.
             </p>
             <AvatarCustomizer
-              color={avatar.color}
-              setColor={(color) => setAvatar({ ...avatar, color })}
-              eyes={avatar.eyes}
-              setEyes={(eyes) => setAvatar({ ...avatar, eyes })}
-              mouths={avatar.mouths}
-              setMouths={(mouths) => setAvatar({ ...avatar, mouths })}
+              value={avatar}
+              onChange={setAvatar}
             />
             <button
               className="primary-button continue-button"
@@ -1048,13 +1017,7 @@ function OnboardingModal({
               password to lose.
             </p>
             <div className="avatar-preview-note">
-              <ScribbleAvatar
-                size="sm"
-                color={avatar.color}
-                eyes={avatar.eyes}
-                mouths={avatar.mouths}
-                label="Your chosen avatar"
-              />
+              <ScribbleAvatar size="sm" avatar={avatar} label="Your chosen avatar" />
               <span>this scribble is coming with you</span>
             </div>
             <button className="primary-button" onClick={onConnectHackClub}>
@@ -1114,96 +1077,11 @@ function OnboardingModal({
   );
 }
 
-function AvatarCustomizer({
-  color,
-  setColor,
-  eyes,
-  setEyes,
-  mouths,
-  setMouths,
-}: {
-  color: string;
-  setColor: (c: string) => void;
-  eyes: number;
-  setEyes: (n: number) => void;
-  mouths: number;
-  setMouths: (n: number) => void;
-}) {
-  return (
-    <div className="avatar-customizer">
-      <span className="eyebrow">your scribble</span>
-      <div className="avatar-stage">
-        <ScribbleAvatar color={color} eyes={eyes} mouths={mouths} />
-      </div>
-      <div className="customize-row">
-        <span>color</span>
-        <div className="swatches">
-          {COLORS.map((c) => (
-            <button
-              key={c}
-              className={c === color ? "selected" : ""}
-              style={{ background: c }}
-              onClick={() => setColor(c)}
-              aria-label={`Choose ${c}`}
-            />
-          ))}
-        </div>
-      </div>
-      <div className="customize-row">
-        <span>eyes</span>
-        <div className="stepper">
-          <button
-            aria-label="Fewer eyes"
-            onClick={() => setEyes(Math.max(1, eyes - 1))}
-          >
-            <Icon name="minus" size={14} />
-          </button>
-          <b>{eyes}</b>
-          <button
-            aria-label="More eyes"
-            onClick={() => setEyes(Math.min(5, eyes + 1))}
-          >
-            <Icon name="plus" size={14} />
-          </button>
-        </div>
-      </div>
-      <div className="customize-row">
-        <span>mouths</span>
-        <div className="stepper">
-          <button
-            aria-label="Fewer mouths"
-            onClick={() => setMouths(Math.max(1, mouths - 1))}
-          >
-            <Icon name="minus" size={14} />
-          </button>
-          <b>{mouths}</b>
-          <button
-            aria-label="More mouths"
-            onClick={() => setMouths(Math.min(3, mouths + 1))}
-          >
-            <Icon name="plus" size={14} />
-          </button>
-        </div>
-      </div>
-      <button
-        className="shuffle-button"
-        onClick={() => {
-          setColor(COLORS[Math.floor(Math.random() * COLORS.length)]);
-          setEyes(1 + Math.floor(Math.random() * 5));
-          setMouths(1 + Math.floor(Math.random() * 3));
-        }}
-      >
-        <Icon name="shuffle" size={13} /> shuffle me
-      </button>
-    </div>
-  );
-}
-
 type DuoInvitePartner = {
   id: string;
   partnerId: string;
   partnerName: string;
-  partnerAvatar: { color: string; eyes: number; mouths: number };
+  partnerAvatar: AvatarConfig;
   partnerQueued?: boolean;
 };
 type DuoInviteState = {
@@ -1215,7 +1093,7 @@ type LobbyFriend = {
   userId: string;
   name: string;
   status: string;
-  avatar: { color: string; eyes: number; mouths: number };
+  avatar: AvatarConfig;
 };
 
 function Lobby({
@@ -1501,9 +1379,7 @@ function Lobby({
                   <li className="invite-row" key={invite.id}>
                     <ScribbleAvatar
                       size="sm"
-                      color={invite.partnerAvatar.color}
-                      eyes={invite.partnerAvatar.eyes}
-                      mouths={invite.partnerAvatar.mouths}
+                      avatar={invite.partnerAvatar}
                     />
                     <div>
                       <strong>{invite.partnerName}</strong>
@@ -1567,9 +1443,7 @@ function Lobby({
               <div className="pedestal-ring" />
               <div className="pedestal-avatar">
                 <ScribbleAvatar
-                  color={user.avatar.color}
-                  eyes={user.avatar.eyes}
-                  mouths={user.avatar.mouths}
+                  avatar={user.avatar}
                   size={mode === "duo" ? "md" : "lg"}
                 />
                 {matching && (
@@ -1589,9 +1463,7 @@ function Lobby({
                     <div className="pedestal-ring" />
                     <div className="pedestal-avatar">
                       <ScribbleAvatar
-                        color={duoState.partner.partnerAvatar.color}
-                        eyes={duoState.partner.partnerAvatar.eyes}
-                        mouths={duoState.partner.partnerAvatar.mouths}
+                        avatar={duoState.partner.partnerAvatar}
                         size="md"
                       />
                       {duoState.partner.partnerQueued && (
@@ -1612,9 +1484,7 @@ function Lobby({
                   <>
                     <div className="pedestal-ring dashed" />
                     <ScribbleAvatar
-                      color={duoState.outgoing.partnerAvatar.color}
-                      eyes={duoState.outgoing.partnerAvatar.eyes}
-                      mouths={duoState.outgoing.partnerAvatar.mouths}
+                      avatar={duoState.outgoing.partnerAvatar}
                       size="md"
                     />
                     <span className="pending-badge">invited</span>
@@ -1659,9 +1529,7 @@ function Lobby({
                                 <li key={friend.userId}>
                                   <ScribbleAvatar
                                     size="sm"
-                                    color={friend.avatar.color}
-                                    eyes={friend.avatar.eyes}
-                                    mouths={friend.avatar.mouths}
+                                    avatar={friend.avatar}
                                   />
                                   <strong>{friend.name}</strong>
                                   <button
@@ -1744,9 +1612,7 @@ function Lobby({
               ) : (
                 <div className="camera-preview-placeholder">
                   <ScribbleAvatar
-                    color={user.avatar.color}
-                    eyes={user.avatar.eyes}
-                    mouths={user.avatar.mouths}
+                    avatar={user.avatar}
                     size="sm"
                   />
                   <small>
@@ -1853,9 +1719,8 @@ function Lobby({
 function VideoTile({
   name,
   team,
+  avatar,
   color,
-  eyes = 2,
-  mouths = 1,
   muted = false,
   stream,
   local = false,
@@ -1863,9 +1728,8 @@ function VideoTile({
 }: {
   name: string;
   team: string;
-  color: string;
-  eyes?: number;
-  mouths?: number;
+  avatar?: AvatarConfig;
+  color?: string;
   muted?: boolean;
   stream?: MediaStream | null;
   local?: boolean;
@@ -1874,7 +1738,7 @@ function VideoTile({
   return (
     <div
       className="video-tile"
-      style={{ "--tile": color } as React.CSSProperties}
+      style={{ "--tile": color ?? avatarAccent(avatar) } as React.CSSProperties}
     >
       {stream ? (
         <StreamVideo
@@ -1884,9 +1748,7 @@ function VideoTile({
         />
       ) : (
         <ScribbleAvatar
-          color={color}
-          eyes={eyes}
-          mouths={mouths}
+          avatar={avatar}
           size="md"
           label={`${name}'s camera placeholder`}
         />
@@ -2289,9 +2151,7 @@ function Match({
             <VideoTile
               name={auth.user?.name ?? "you"}
               team={`${team} · you`}
-              color={auth.user?.avatar.color ?? COLORS[1]}
-              eyes={auth.user?.avatar.eyes}
-              mouths={auth.user?.avatar.mouths}
+              avatar={auth.user?.avatar}
               stream={video ? localStream : null}
               local
               muted={!mic}
@@ -2301,6 +2161,7 @@ function Match({
                 name={teammate?.name ?? "waiting…"}
                 team={teammate ? "teammate · live" : "waiting for teammate"}
                 color={teammate?.color ?? COLORS[2]}
+                avatar={teammate?.avatar}
                 stream={teammate?.video ? teammate.stream : null}
                 muted={teammate ? !teammate.mic : false}
               />
@@ -2320,6 +2181,7 @@ function Match({
                   name={peer?.name ?? "open slot"}
                   team={peer ? `${peer.team} team` : "waiting for builder"}
                   color={peer?.color ?? COLORS[index + 3]}
+                  avatar={peer?.avatar}
                   stream={peer?.video ? peer.stream : null}
                   muted={peer ? !peer.mic : false}
                   audioMuted={scope === "team" && peer?.team !== team}
@@ -3032,14 +2894,49 @@ function Voting({
 function ProfileModal({
   close,
   auth,
+  onAvatarUpdated,
   logout,
   logoutLoading,
+  startEditingAvatar = false,
 }: {
   close: () => void;
   auth: AuthState;
+  onAvatarUpdated: (avatar: ResolvedAvatarConfig) => void;
   logout: () => void;
   logoutLoading: boolean;
+  startEditingAvatar?: boolean;
 }) {
+  const [editingAvatar, setEditingAvatar] = useState(startEditingAvatar);
+  const [avatarDraft, setAvatarDraft] = useState<ResolvedAvatarConfig>(() =>
+    normalizeAvatar(auth.user?.avatar),
+  );
+  const [avatarSaving, setAvatarSaving] = useState(false);
+  const [avatarSaveError, setAvatarSaveError] = useState("");
+
+  const saveAvatar = async () => {
+    if (!auth.user || avatarSaving) return;
+    setAvatarSaving(true);
+    setAvatarSaveError("");
+    try {
+      const response = await fetch("/api/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ avatar: avatarDraft }),
+      });
+      if (!response.ok) throw new Error("Could not save avatar");
+      const result = (await response.json()) as {
+        user: { avatar: AvatarConfig };
+      };
+      onAvatarUpdated(normalizeAvatar(result.user.avatar));
+      if (startEditingAvatar) close();
+      else setEditingAvatar(false);
+    } catch {
+      setAvatarSaveError("Could not save your Goofy Guy. Try again.");
+    } finally {
+      setAvatarSaving(false);
+    }
+  };
+
   return (
     <div
       className="modal-backdrop"
@@ -3047,63 +2944,110 @@ function ProfileModal({
       aria-modal="true"
       aria-labelledby="profile-title"
     >
-      <section className="modal profile-modal">
+      <section className={`modal profile-modal${editingAvatar ? " editing-avatar" : ""}`}>
         <button className="close-button" onClick={close}>
           ×
         </button>
-        <ScribbleAvatar
-          color={auth.user?.avatar.color}
-          eyes={auth.user?.avatar.eyes}
-          mouths={auth.user?.avatar.mouths}
-          size="md"
-        />
-        <div>
-          <span className="eyebrow">your account</span>
-          <h2 id="profile-title">{auth.user?.name ?? "Guest builder"}</h2>
-          <p>
-            {auth.user
-              ? `${auth.user.email} · ${auth.user.elo} ELO · ${Math.round(auth.user.codingSeconds / 360) / 10}h`
-              : "Sign in to join matches"}
-          </p>
-        </div>
-        <div className="account-links">
-          <a href="/api/auth/hackclub/start">
-            <Icon name="flag" size={14} /> Hack Club Auth{" "}
-            <span>
-              {auth.user ? (
-                `connected${auth.user.slackId ? ` · ${auth.user.slackId}` : ""}`
-              ) : (
-                <>
-                  connect <Icon name="external" size={10} />
-                </>
+        {!editingAvatar && (
+          <>
+            <ScribbleAvatar avatar={auth.user?.avatar} size="md" />
+            <div>
+              <span className="eyebrow">your account</span>
+              <h2 id="profile-title">{auth.user?.name ?? "Guest builder"}</h2>
+              <p>
+                {auth.user
+                  ? `${auth.user.email} · ${auth.user.elo} ELO · ${Math.round(auth.user.codingSeconds / 360) / 10}h`
+                  : "Sign in to join matches"}
+              </p>
+              {auth.user && (
+                <button
+                  type="button"
+                  className="avatar-edit-button"
+                  onClick={() => setEditingAvatar(true)}
+                >
+                  remix goofy guy
+                </button>
               )}
-            </span>
-          </a>
-          <a href="/api/auth/github/start">
-            <Icon name="github" size={14} /> GitHub{" "}
-            <span>
-              {auth.github ? (
-                `@${auth.github.login}`
-              ) : (
-                <>
-                  connect <Icon name="external" size={10} />
-                </>
+            </div>
+          </>
+        )}
+        {auth.user && editingAvatar && (
+          <>
+            <h2 id="profile-title" className="avatar-editor-title">
+              remix your goofy guy
+            </h2>
+            <div className="profile-avatar-editor">
+              <AvatarCustomizer value={avatarDraft} onChange={setAvatarDraft} />
+              <div className="profile-avatar-actions">
+                <button
+                  type="button"
+                  onClick={() =>
+                    startEditingAvatar ? close() : setEditingAvatar(false)
+                  }
+                >
+                  cancel
+                </button>
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={() => void saveAvatar()}
+                  disabled={avatarSaving}
+                >
+                  {avatarSaving ? "saving…" : "save goofy guy"}
+                </button>
+              </div>
+              {avatarSaveError && (
+                <p className="avatar-save-error">{avatarSaveError}</p>
               )}
-            </span>
-          </a>
-        </div>
-        <small>
-          Completed builds are published open source to GitHub and deployed to
-          GitHub Pages.
-        </small>
-        {auth.user && (
-          <div className="logout-form">
-            <button type="button" onClick={logout} disabled={logoutLoading}>
-              {logoutLoading
-                ? "clearing site data…"
-                : "log out & clear site data"}
-            </button>
-          </div>
+            </div>
+          </>
+        )}
+        {!editingAvatar && (
+          <>
+            <div className="account-links">
+              <a href="/api/auth/hackclub/start">
+                <Icon name="flag" size={14} /> Hack Club Auth{" "}
+                <span>
+                  {auth.user ? (
+                    `connected${auth.user.slackId ? ` · ${auth.user.slackId}` : ""}`
+                  ) : (
+                    <>
+                      connect <Icon name="external" size={10} />
+                    </>
+                  )}
+                </span>
+              </a>
+              <a href="/api/auth/github/start">
+                <Icon name="github" size={14} /> GitHub{" "}
+                <span>
+                  {auth.github ? (
+                    `@${auth.github.login}`
+                  ) : (
+                    <>
+                      connect <Icon name="external" size={10} />
+                    </>
+                  )}
+                </span>
+              </a>
+            </div>
+            <small>
+              Completed builds are published open source to GitHub and deployed
+              to GitHub Pages.
+            </small>
+            {auth.user && (
+              <div className="logout-form">
+                <button
+                  type="button"
+                  onClick={logout}
+                  disabled={logoutLoading}
+                >
+                  {logoutLoading
+                    ? "clearing site data…"
+                    : "log out & clear site data"}
+                </button>
+              </div>
+            )}
+          </>
         )}
       </section>
     </div>
@@ -3114,6 +3058,7 @@ export default function RankedApp() {
   const [screen, setScreen] = useState<Screen>("home");
   const [toastMessage, setToastMessage] = useState("");
   const [profileOpen, setProfileOpen] = useState(false);
+  const [profileEditAvatar, setProfileEditAvatar] = useState(false);
   const [auth, setAuth] = useState<AuthState>({ user: null, github: null });
   const [activeMatch, setActiveMatch] = useState<ActiveMatch | null>(null);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
@@ -3122,9 +3067,7 @@ export default function RankedApp() {
     "avatar",
   );
   const [avatarDraft, setAvatarDraft] = useState<AvatarDraft>({
-    color: COLORS[1],
-    eyes: 2,
-    mouths: 1,
+    ...DEFAULT_AVATAR,
   });
   const [mediaPrefs, setMediaPrefs] = useState<MediaPrefs>({
     mic: true,
@@ -3147,7 +3090,9 @@ export default function RankedApp() {
         if (pendingAvatarRaw) {
           window.localStorage.removeItem(PENDING_AVATAR_KEY);
           try {
-            const pendingAvatar = JSON.parse(pendingAvatarRaw) as AvatarDraft;
+            const pendingAvatar = normalizeAvatar(
+              JSON.parse(pendingAvatarRaw) as AvatarConfig,
+            );
             const response = await fetch("/api/profile", {
               method: "PATCH",
               headers: { "Content-Type": "application/json" },
@@ -3262,7 +3207,10 @@ export default function RankedApp() {
         <SiteHeader
           screen={screen}
           navigate={navigate}
-          onProfile={() => setProfileOpen(true)}
+          onProfile={() => {
+            setProfileEditAvatar(false);
+            setProfileOpen(true);
+          }}
           balance={auth.user?.hBucks ?? 0}
           avatar={auth.user?.avatar}
         />
@@ -3273,6 +3221,15 @@ export default function RankedApp() {
           toast={toast}
           auth={auth}
           startOnboarding={() => setPreAuthOpen(true)}
+          customizeAvatar={() => {
+            if (!auth.user) {
+              setPreAuthStep("avatar");
+              setPreAuthOpen(true);
+              return;
+            }
+            setProfileEditAvatar(true);
+            setProfileOpen(true);
+          }}
         />
       )}
       {screen === "lobby" && auth.user && (
@@ -3289,6 +3246,10 @@ export default function RankedApp() {
           toast={toast}
           auth={auth}
           startOnboarding={() => setPreAuthOpen(true)}
+          customizeAvatar={() => {
+            setPreAuthStep("avatar");
+            setPreAuthOpen(true);
+          }}
         />
       )}
       {screen === "match" && activeMatch && (
@@ -3306,6 +3267,15 @@ export default function RankedApp() {
           toast={toast}
           auth={auth}
           startOnboarding={() => setPreAuthOpen(true)}
+          customizeAvatar={() => {
+            if (!auth.user) {
+              setPreAuthStep("avatar");
+              setPreAuthOpen(true);
+              return;
+            }
+            setProfileEditAvatar(true);
+            setProfileOpen(true);
+          }}
         />
       )}
       {screen === "vote" && <Voting navigate={navigate} toast={toast} />}
@@ -3315,8 +3285,19 @@ export default function RankedApp() {
       )}
       {profileOpen && (
         <ProfileModal
-          close={() => setProfileOpen(false)}
+          close={() => {
+            setProfileOpen(false);
+            setProfileEditAvatar(false);
+          }}
           auth={auth}
+          startEditingAvatar={profileEditAvatar}
+          onAvatarUpdated={(avatar) =>
+            setAuth((current) =>
+              current.user
+                ? { ...current, user: { ...current.user, avatar } }
+                : current,
+            )
+          }
           logout={() => void logout()}
           logoutLoading={logoutLoading}
         />

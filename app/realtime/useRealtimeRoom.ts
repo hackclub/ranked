@@ -2,6 +2,7 @@
 
 import { createClient, type Room } from "@liveblocks/client";
 import { useEffect, useRef, useState } from "react";
+import type { ResolvedAvatarConfig } from "@/app/lib/avatar";
 
 let sharedClient: ReturnType<typeof createClient> | null = null;
 
@@ -35,6 +36,7 @@ type RemotePeer = {
   connectionId: number;
   name: string;
   color: string;
+  avatar?: ResolvedAvatarConfig;
   stream: MediaStream;
   mic: boolean;
   video: boolean;
@@ -85,6 +87,7 @@ export function useRealtimeRoom(roomId: string, mic: boolean, video: boolean, sc
         connectionId,
         name: other?.info?.name ?? "builder",
         color: other?.info?.color ?? "#D99F6C",
+        avatar: other?.info?.avatarConfig,
         stream,
         mic: other?.presence.mic ?? true,
         video: other?.presence.video ?? true,

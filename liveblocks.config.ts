@@ -1,3 +1,5 @@
+import type { ResolvedAvatarConfig } from "./app/lib/avatar";
+
 export {};
 
 declare global {
@@ -15,6 +17,7 @@ declare global {
         name: string;
         color: string;
         slackId: string;
+        avatarConfig: ResolvedAvatarConfig;
       };
     };
     RoomEvent: {
