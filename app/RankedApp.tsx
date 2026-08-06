@@ -1034,12 +1034,10 @@ function OnboardingModal({
             <div className="connect-badge">
               <Icon name="github" size={30} />
             </div>
-            <h2 id="onboarding-title">Connect GitHub.</h2>
+            <h2 id="onboarding-title">Connect GitHub</h2>
             <p>
-              Every finished match gets published as a folder inside{" "}
-              <strong>hackclubranked</strong>, one shared repo on your account,
-              and deployed live with GitHub Pages. Connect it now so publishing
-              is instant the moment your first match ends.
+              Every finished match gets published as a folder inside{" "} one monorepo on your account
+              and deployed with GitHub Pages.
             </p>
             <a className="primary-button" href="/api/auth/github/start">
               <Icon name="github" size={16} /> connect GitHub
@@ -2563,25 +2561,20 @@ function Leaderboard({ navigate }: { navigate: (s: Screen) => void }) {
         ← back to base
       </button>
       <div className="subpage-head">
-        <span className="eyebrow">global rankings</span>
-        <h1>Builders on a roll.</h1>
-        <p>
-          Win community votes, climb the ladder, and keep shipping strange
-          little websites.
-        </p>
+        <h1>Leaderboard</h1>
       </div>
       <div className="board-toggle">
         <button
           className={board === "elo" ? "active" : ""}
           onClick={() => setBoard("elo")}
         >
-          highest ELO
+          elo
         </button>
         <button
           className={board === "hours" ? "active" : ""}
           onClick={() => setBoard("hours")}
         >
-          most hours
+          hours
         </button>
       </div>
       <section className="leader-card">
@@ -2679,14 +2672,9 @@ function Shop({
         ← back to base
       </button>
       <div className="subpage-head">
-        <span className="eyebrow">the H-Bucks shop</span>
-        <h1>Code time pays.</h1>
-        <p>
-          Earn 10 H-Bucks for every focused hour. Save up for real tech,
-          stickers, and hacker gear.
-        </p>
+        <h1>Store</h1>
         <div className="balance">
-          your balance <strong>{balance} Ħ</strong>
+          you have <strong>{balance} Ħ</strong>
         </div>
       </div>
       <section className="product-grid">
