@@ -5,6 +5,7 @@ import { CollaborativeEditor } from "./realtime/CollaborativeEditor";
 import { StreamVideo } from "./realtime/StreamVideo";
 import { useCodeRoom, useRealtimeRoom } from "./realtime/useRealtimeRoom";
 import { getYjsProviderForRoom } from "@liveblocks/yjs";
+import { canUseTestLobby } from "./lib/test-lobby";
 
 type Screen = "home" | "lobby" | "match" | "vote" | "leaderboard" | "shop";
 type Mode = "solo" | "duo";
@@ -35,6 +36,7 @@ type ActiveMatch = {
   endsAt: string;
   remainingSeconds: number;
   team: "blue" | "red";
+  playerCount?: number;
 };
 type MatchOutcome = {
   status: string;
@@ -1228,6 +1230,13 @@ function Lobby({
     acceptQueueResult(result);
   };
 
+  const testEmptyLobby = async () => {
+    const response = await fetch("/api/matchmaking/test-match", { method: "POST" });
+    const result = await response.json();
+    if (!response.ok) return toast(result.error ?? "Could not start a test lobby");
+    acceptQueueResult(result);
+  };
+
   useEffect(() => {
     if (!matching) return;
     const poll = window.setInterval(
@@ -1497,6 +1506,11 @@ function Lobby({
               <p className="match-dock-status">
                 <i className="dock-dot" /> contacting matchmaking service…
               </p>
+            )}
+            {canUseTestLobby(user.email) && !matching && (
+              <button className="test-lobby-button" onClick={() => void testEmptyLobby()}>
+                enter empty lobby (test)
+              </button>
             )}
           </div>
         </div>
@@ -2122,6 +2136,9 @@ function Match({
       window.setTimeout(() => setPublishOpen(true), 0);
   }, [outcome, seconds]);
 
+  const isTestMatch = match.mode === "solo" && match.playerCount === 1;
+  const canSkipPublish = isTestMatch && canUseTestLobby(auth.user?.email ?? "");
+
   const disconnectSeconds = disconnect
     ? Math.max(0, disconnect.secondsRemaining)
     : 0;
@@ -2200,8 +2217,8 @@ function Match({
         </div>
       )}
       <section className="call-strip">
-        <div className="call-team">
-          <span className="call-label">YOUR DUO</span>
+        <div className={`call-team ${match.mode === "duo" ? "" : "solo"}`}>
+          <span className="call-label">{match.mode === "duo" ? "YOUR DUO" : "YOU"}</span>
           <VideoTile
             name={auth.user?.name ?? "you"}
             team={`${team} · you`}
@@ -2212,17 +2229,19 @@ function Match({
             local
             muted={!mic}
           />
-          <VideoTile
-            name={teammate?.name ?? "waiting…"}
-            team={teammate ? "teammate · live" : "waiting for teammate"}
-            color={teammate?.color ?? COLORS[2]}
-            stream={teammate?.video ? teammate.stream : null}
-            muted={teammate ? !teammate.mic : false}
-          />
+          {match.mode === "duo" && (
+            <VideoTile
+              name={teammate?.name ?? "waiting…"}
+              team={teammate ? "teammate · live" : "waiting for teammate"}
+              color={teammate?.color ?? COLORS[2]}
+              stream={teammate?.video ? teammate.stream : null}
+              muted={teammate ? !teammate.mic : false}
+            />
+          )}
         </div>
-        <div className="call-team opponents">
-          <span className="call-label">OPPONENTS</span>
-          {[0, 1].map((index) => {
+        <div className={`call-team opponents ${match.mode === "duo" ? "" : "solo"}`}>
+          <span className="call-label">{match.mode === "duo" ? "OPPONENTS" : "OPPONENT"}</span>
+          {(match.mode === "duo" ? [0, 1] : [0]).map((index) => {
             const peer = opponents[index];
             return (
               <VideoTile
@@ -2508,6 +2527,15 @@ function Match({
                   Includes the finished site plus the original HTML, CSS, and
                   JavaScript files.
                 </small>
+                {canSkipPublish && (
+                  <button
+                    className="skip-publish-button"
+                    onClick={() => void forfeit()}
+                    disabled={forfeitLoading}
+                  >
+                    {forfeitLoading ? "closing…" : "skip — end test match without publishing"}
+                  </button>
+                )}
               </>
             )}
           </section>
@@ -2553,17 +2581,27 @@ function Match({
           aria-labelledby="outcome-title"
         >
           <section className="modal publish-modal outcome-modal">
-            <span className="eyebrow">match closed · {outcome.endReason}</span>
+            <span className="eyebrow">
+              {isTestMatch ? "test match closed" : `match closed · ${outcome.endReason}`}
+            </span>
             <h2 id="outcome-title">
-              {outcome.winningTeam === team
-                ? "You win by forfeit."
-                : "Your team forfeited."}
+              {isTestMatch
+                ? "Test match ended."
+                : outcome.winningTeam === team
+                  ? "You win by forfeit."
+                  : "Your team forfeited."}
             </h2>
             <p>
-              {outcome.endReason === "disconnect"
-                ? "A player did not reconnect during the 10-second grace period."
-                : "A player chose to end the match early."}{" "}
-              ELO has been updated for both teams.
+              {isTestMatch ? (
+                "No ELO changes, nothing published. Start another empty lobby anytime."
+              ) : (
+                <>
+                  {outcome.endReason === "disconnect"
+                    ? "A player did not reconnect during the 10-second grace period."
+                    : "A player chose to end the match early."}{" "}
+                  ELO has been updated for both teams.
+                </>
+              )}
             </p>
             <button className="primary-button" onClick={() => navigate("home")}>
               return home

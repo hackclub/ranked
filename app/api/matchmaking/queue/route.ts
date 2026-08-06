@@ -1,18 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { currentUser } from "@/app/lib/current-user";
+import { activeMatch, MATCH_THEMES } from "@/app/lib/match-lifecycle";
 import { getVoteGate } from "@/app/lib/vote-gate";
 import { getSql } from "@/db";
-
-const themes = ["solar system", "tiny arcade", "midnight garden", "future transit", "friendly monsters", "music festival"];
-
-async function activeMatch(userId: string) {
-  const rows = await getSql()`SELECT m.id, m.mode, m.duration_minutes AS "durationMinutes", m.theme, m.status,
-      m.started_at AS "startedAt", m.ends_at AS "endsAt",
-      GREATEST(0,CEIL(EXTRACT(EPOCH FROM (m.ends_at-NOW()))))::int AS "remainingSeconds",mp.team
-    FROM match_players mp JOIN matches m ON m.id = mp.match_id
-    WHERE mp.user_id = ${userId} AND m.status='active' ORDER BY m.created_at DESC LIMIT 1`;
-  return rows[0] ?? null;
-}
 
 export async function GET(request: NextRequest) {
   const user = await currentUser(request);
@@ -52,7 +42,7 @@ export async function POST(request: NextRequest) {
 
   const matchId = crypto.randomUUID();
   const needed = mode === "duo" ? 4 : 2;
-  const theme = themes[Math.floor(Math.random() * themes.length)];
+  const theme = MATCH_THEMES[Math.floor(Math.random() * MATCH_THEMES.length)];
   await getSql()`
     WITH candidates AS (
       SELECT q.user_id, q.joined_at, COALESCE(${partyKey}::text IS NOT NULL AND q.party_key=${partyKey}, false) AS is_party
