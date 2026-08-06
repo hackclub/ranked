@@ -7,9 +7,15 @@ import { getSql } from "@/db";
 export async function POST(request: NextRequest) {
   const user = await currentUser(request);
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!canUseTestLobby(user.email)) return NextResponse.json({ error: "Not available for your account." }, { status: 403 });
   const existing = await activeMatch(user.id);
   if (existing) return NextResponse.json({ status: "matched", match: existing });
+  if (!user.hackatimeConnected) {
+    return NextResponse.json(
+      { error: "Connect Hackatime before starting a test match.", code: "hackatime_required" },
+      { status: 403 },
+    );
+  }
+  if (!canUseTestLobby(user.email)) return NextResponse.json({ error: "Not available for your account." }, { status: 403 });
 
   const matchId = crypto.randomUUID();
   const theme = MATCH_THEMES[Math.floor(Math.random() * MATCH_THEMES.length)];

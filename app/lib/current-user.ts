@@ -15,16 +15,25 @@ export type DbUser = {
   codingSeconds: number;
   hBucks: number;
   avatar: AvatarConfig;
+  hackatimeConnected: boolean;
+  hackatimeUserId: string | null;
+  hackatimeEmail: string | null;
 };
 
 export async function currentUser(request: NextRequest): Promise<DbUser | null> {
   const session = await decryptSession(request.cookies.get(SESSION_COOKIE)?.value);
   if (!session?.user) return null;
   const rows = await getSql()`
-    SELECT id, email, name, slack_id AS "slackId", verification_status AS "verificationStatus",
-      experience, elo, matches_played AS "matchesPlayed", coding_seconds AS "codingSeconds",
-      h_bucks AS "hBucks", avatar
-    FROM users WHERE id = ${session.user.id} LIMIT 1
+    SELECT u.id, u.email, u.name, u.slack_id AS "slackId",
+      u.verification_status AS "verificationStatus", u.experience, u.elo,
+      u.matches_played AS "matchesPlayed", u.coding_seconds AS "codingSeconds",
+      u.h_bucks AS "hBucks", u.avatar,
+      (hc.user_id IS NOT NULL) AS "hackatimeConnected",
+      hc.hackatime_user_id AS "hackatimeUserId",
+      hc.primary_email AS "hackatimeEmail"
+    FROM users u
+    LEFT JOIN hackatime_connections hc ON hc.user_id = u.id
+    WHERE u.id = ${session.user.id} LIMIT 1
   `;
   return (rows[0] as DbUser | undefined) ?? null;
 }

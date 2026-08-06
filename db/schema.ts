@@ -37,6 +37,21 @@ export const users = pgTable("users", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+export const hackatimeConnections = pgTable("hackatime_connections", {
+  userId: text("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  hackatimeUserId: text("hackatime_user_id").notNull().unique(),
+  accessTokenEncrypted: text("access_token_encrypted").notNull(),
+  apiKeyEncrypted: text("api_key_encrypted").notNull(),
+  scopes: text("scopes").notNull().default("profile read"),
+  primaryEmail: text("primary_email"),
+  slackId: text("slack_id"),
+  githubUsername: text("github_username"),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
+  lastHeartbeatAt: timestamp("last_heartbeat_at", { withTimezone: true }),
+  connectedAt: timestamp("connected_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, table => [index("hackatime_connections_slack_idx").on(table.slackId)]);
+
 export const matches = pgTable("matches", {
   id: text("id").primaryKey(),
   mode: matchModeEnum("mode").notNull(),

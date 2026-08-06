@@ -12,6 +12,7 @@ export async function POST(request: NextRequest) {
     "ranked_hca_state",
     "ranked_github_state",
     "ranked_github_verifier",
+    "ranked_hackatime_state",
     ...request.cookies.getAll().map(cookie => cookie.name),
   ]);
   for (const name of cookieNames) {

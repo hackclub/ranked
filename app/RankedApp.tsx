@@ -33,6 +33,7 @@ type AuthState = {
     avatar: AvatarConfig;
   } | null;
   github: { login: string; avatarUrl: string | null } | null;
+  hackatime: { id: string | null; email: string | null } | null;
 };
 type ActiveMatch = {
   id: string;
@@ -238,6 +239,7 @@ type IconName =
   | "ipad"
   | "macbook"
   | "github"
+  | "clock"
   | "star";
 
 const FILLED_ICONS = new Set<IconName>(["github", "star"]);
@@ -394,6 +396,12 @@ const ICON_PATHS: Record<IconName, React.ReactNode> = {
   ),
   github: (
     <path d="M8 0c4.42 0 8 3.58 8 8a8 8 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.66-.21-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.54-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A8.013 8.013 0 0 1 0 8c0-4.42 3.58-8 8-8Z" />
+  ),
+  clock: (
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M12 7v5l3.5 2" />
+    </>
   ),
   star: <path d="M12 2l2.4 6.6L21 11l-6.6 2.4L12 20l-2.4-6.6L3 11l6.6-2.4Z" />,
 };
@@ -925,7 +933,12 @@ function DailyChallenges({
   );
 }
 
-type OnboardingStep = "avatar" | "hackclub" | "github" | "placement";
+type OnboardingStep =
+  | "avatar"
+  | "hackclub"
+  | "github"
+  | "hackatime"
+  | "placement";
 type AvatarDraft = ResolvedAvatarConfig;
 const PENDING_AVATAR_KEY = "ranked_pending_avatar";
 
@@ -1041,6 +1054,23 @@ function OnboardingModal({
             </p>
             <a className="primary-button" href="/api/auth/github/start">
               <Icon name="github" size={16} /> connect GitHub
+            </a>
+          </div>
+        )}
+
+        {step === "hackatime" && (
+          <div className="connect-step hackatime">
+            <div className="connect-badge">
+              <Icon name="clock" size={32} />
+            </div>
+            <h2 id="onboarding-title">Connect Hackatime</h2>
+            <p>
+              Hackatime verifies your coding identity and keeps Ranked ready to
+              credit real coding activity. It is required before you can queue
+              for a round.
+            </p>
+            <a className="primary-button" href="/api/auth/hackatime/start">
+              <Icon name="clock" size={18} /> connect Hackatime
             </a>
           </div>
         )}
@@ -1174,6 +1204,10 @@ function Lobby({
       body: JSON.stringify({ mode, durationMinutes: length, experience }),
     });
     const result = await response.json();
+    if (result.code === "hackatime_required") {
+      window.location.assign("/api/auth/hackatime/start");
+      return;
+    }
     if (!response.ok && result.code !== "vote_required") {
       setMatching(false);
       toast(result.error ?? "Could not join the queue");
@@ -1187,6 +1221,10 @@ function Lobby({
       method: "POST",
     });
     const result = await response.json();
+    if (result.code === "hackatime_required") {
+      window.location.assign("/api/auth/hackatime/start");
+      return;
+    }
     if (!response.ok)
       return toast(result.error ?? "Could not start a test lobby");
     acceptQueueResult(result);
@@ -1794,6 +1832,10 @@ function Match({
   const [forfeitOpen, setForfeitOpen] = useState(false);
   const [forfeitLoading, setForfeitLoading] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [hackatimeRecording, setHackatimeRecording] = useState<
+    "ready" | "sending" | "recorded" | "error"
+  >("ready");
+  const lastHackatimeHeartbeatRef = useRef(0);
   const [disconnect, setDisconnect] = useState<DisconnectNotice | null>(null);
   const [outcome, setOutcome] = useState<MatchOutcome | null>(null);
   const [buildName, setBuildName] = useState("");
@@ -1888,6 +1930,43 @@ function Match({
       setFiles((current) => ({ ...current, [tab]: value }));
     },
     [tab],
+  );
+  const reportHackatimeActivity = useCallback(
+    async (activity: {
+      file: string;
+      lines: number;
+      line: number;
+      cursorPosition: number;
+    }) => {
+      const now = Date.now();
+      if (now - lastHackatimeHeartbeatRef.current < 30_000) return;
+      lastHackatimeHeartbeatRef.current = now;
+      setHackatimeRecording("sending");
+      try {
+        const response = await fetch("/api/hackatime/heartbeat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ matchId: match.id, ...activity }),
+        });
+        const result = (await response.json()) as {
+          error?: string;
+          code?: string;
+        };
+        if (!response.ok) throw Object.assign(new Error(result.error), result);
+        setHackatimeRecording("recorded");
+      } catch (error) {
+        setHackatimeRecording("error");
+        if (
+          typeof error === "object" &&
+          error &&
+          "code" in error &&
+          error.code === "hackatime_reconnect"
+        ) {
+          toast("Hackatime disconnected — reconnect before your next round");
+        }
+      }
+    },
+    [match.id, toast],
   );
 
   const publish = useCallback(async () => {
@@ -2237,12 +2316,16 @@ function Match({
               file={tab}
               initialValue={starterFiles[tab]}
               onChange={updateCurrentFile}
+              onLocalEdit={(activity) => void reportHackatimeActivity(activity)}
             />
           </div>
           <footer className="editor-status">
             <span>main*</span>
             <span>spaces: 2</span>
             <span>utf-8</span>
+            <strong className={`hackatime-recording ${hackatimeRecording}`}>
+              <i /> Hackatime · {hackatimeRecording === "recorded" ? "recording" : hackatimeRecording}
+            </strong>
             <b>Liveblocks · {status}</b>
           </footer>
         </div>
@@ -3017,6 +3100,18 @@ function ProfileModal({
                   )}
                 </span>
               </a>
+              <a href="/api/auth/hackatime/start">
+                <Icon name="clock" size={14} /> Hackatime{" "}
+                <span>
+                  {auth.hackatime ? (
+                    `connected${auth.hackatime.email ? ` · ${auth.hackatime.email}` : ""}`
+                  ) : (
+                    <>
+                      connect <Icon name="external" size={10} />
+                    </>
+                  )}
+                </span>
+              </a>
             </div>
             <small>
               Completed builds are published open source to GitHub and deployed
@@ -3047,7 +3142,11 @@ export default function RankedApp() {
   const [toastMessage, setToastMessage] = useState("");
   const [profileOpen, setProfileOpen] = useState(false);
   const [profileEditAvatar, setProfileEditAvatar] = useState(false);
-  const [auth, setAuth] = useState<AuthState>({ user: null, github: null });
+  const [auth, setAuth] = useState<AuthState>({
+    user: null,
+    github: null,
+    hackatime: null,
+  });
   const [activeMatch, setActiveMatch] = useState<ActiveMatch | null>(null);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [preAuthOpen, setPreAuthOpen] = useState(false);
@@ -3098,7 +3197,10 @@ export default function RankedApp() {
         }
         setAuth(next);
         setOnboardingOpen(
-          Boolean(next.user && (!next.github || !next.user.experience)),
+          Boolean(
+            next.user &&
+              (!next.github || !next.hackatime || !next.user.experience),
+          ),
         );
         if (next.user) {
           const queue = await fetch("/api/matchmaking/queue")
@@ -3110,7 +3212,9 @@ export default function RankedApp() {
           }
         }
       })
-      .catch(() => setAuth({ user: null, github: null }));
+      .catch(() =>
+        setAuth({ user: null, github: null, hackatime: null }),
+      );
     const params = new URLSearchParams(window.location.search);
     if (params.get("auth") === "connected")
       window.setTimeout(() => toast("Hack Club account connected"), 0);
@@ -3119,12 +3223,23 @@ export default function RankedApp() {
         () => toast("GitHub connected, publishing is ready"),
         0,
       );
-    if (params.get("auth") === "failed" || params.get("github") === "failed")
+    if (params.get("hackatime") === "connected")
+      window.setTimeout(() => toast("Hackatime connected — matchmaking unlocked"), 0);
+    if (params.get("hackatime") === "identity_mismatch")
+      window.setTimeout(
+        () => toast("That Hackatime account does not match your Hack Club identity"),
+        0,
+      );
+    if (
+      params.get("auth") === "failed" ||
+      params.get("github") === "failed" ||
+      params.get("hackatime") === "failed"
+    )
       window.setTimeout(
         () => toast("Connection failed, check your OAuth settings"),
         0,
       );
-    if (["auth", "github"].some((key) => params.has(key)))
+    if (["auth", "github", "hackatime"].some((key) => params.has(key)))
       window.history.replaceState({}, "", window.location.pathname);
   }, [toast]);
 
@@ -3303,7 +3418,13 @@ export default function RankedApp() {
       )}
       {onboardingOpen && auth.user && (
         <OnboardingModal
-          step={!auth.github ? "github" : "placement"}
+          step={
+            !auth.github
+              ? "github"
+              : !auth.hackatime
+                ? "hackatime"
+                : "placement"
+          }
           onSelectExperience={(experience) => void saveExperience(experience)}
           close={() => setOnboardingOpen(false)}
         />
