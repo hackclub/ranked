@@ -122,10 +122,28 @@ export function useRealtimeRoom(roomId: string, mic: boolean, video: boolean, sc
         if (!stream) return;
         setRemotePeers(current => [...current.filter(peer => peer.connectionId !== connectionId), peerDetails(connectionId, stream)]);
       };
+      let disconnectTimer: number | undefined;
       state.pc.onconnectionstatechange = () => {
-        if (["failed", "closed", "disconnected"].includes(state.pc.connectionState)) {
-          setRemotePeers(current => current.filter(peer => peer.connectionId !== connectionId));
+        const current = state.pc.connectionState;
+        if (current === "failed" || current === "closed") {
+          window.clearTimeout(disconnectTimer);
+          setRemotePeers(peers => peers.filter(peer => peer.connectionId !== connectionId));
+          return;
         }
+        if (current === "disconnected") {
+          // "disconnected" is often transient (e.g. a brief ICE keepalive miss right
+          // after the initial handshake) and commonly self-heals back to "connected"
+          // a moment later. Only drop the tile if it hasn't recovered after a grace
+          // period, instead of tearing it down immediately.
+          window.clearTimeout(disconnectTimer);
+          disconnectTimer = window.setTimeout(() => {
+            if (state.pc.connectionState !== "connected") {
+              setRemotePeers(peers => peers.filter(peer => peer.connectionId !== connectionId));
+            }
+          }, 8000);
+          return;
+        }
+        window.clearTimeout(disconnectTimer);
       };
       state.pc.onnegotiationneeded = async () => {
         try {

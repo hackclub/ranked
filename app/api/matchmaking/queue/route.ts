@@ -37,8 +37,48 @@ export async function POST(request: NextRequest) {
     SELECT (CASE WHEN from_user_id=${user.id} THEN to_user_id ELSE from_user_id END) AS "partnerId"
     FROM duo_invites WHERE status='accepted' AND (from_user_id=${user.id} OR to_user_id=${user.id}) LIMIT 1
   ` : [];
-  const partnerId = acceptedPartner[0]?.partnerId as string | undefined;
-  const partyKey = partnerId ? [user.id, partnerId].sort().join(":") : null;
+  let partnerId = acceptedPartner[0]?.partnerId as string | undefined;
+  let partyKey = partnerId ? [user.id, partnerId].sort().join(":") : null;
+
+  // Duo player readied up with their partner slot open: auto-pair them with another
+  // partner-less duo queuer using the same experience/elo eligibility as opponent matching,
+  // so they get a partner instead of waiting for four strangers to queue at once.
+  if (mode === "duo" && !partnerId) {
+    const claimed = await getSql()`
+      WITH partner_candidate AS (
+        SELECT q.user_id
+        FROM matchmaking_queue q JOIN users u ON u.id = q.user_id
+        WHERE q.party_key IS NULL AND q.mode = 'duo'::match_mode AND q.duration_minutes = ${duration}
+          AND q.user_id <> ${user.id}
+          AND (
+            (u.matches_played < 3 AND q.experience = ${experience}::experience_level)
+            OR (u.matches_played >= 3 AND ${user.matchesPlayed} >= 3 AND ABS(q.elo - ${user.elo}) <= 400)
+          )
+        ORDER BY q.joined_at LIMIT 1 FOR UPDATE OF q SKIP LOCKED
+      ), key AS (
+        SELECT user_id AS "partnerId", LEAST(${user.id}, user_id) || ':' || GREATEST(${user.id}, user_id) AS "partyKey"
+        FROM partner_candidate
+      ), cleanup AS (
+        DELETE FROM duo_invites di USING key
+        WHERE di.status IN ('pending','accepted')
+          AND (di.from_user_id IN (${user.id}, key."partnerId") OR di.to_user_id IN (${user.id}, key."partnerId"))
+        RETURNING 1
+      ), invite AS (
+        INSERT INTO duo_invites (id, from_user_id, to_user_id, status)
+        SELECT ${crypto.randomUUID()}, ${user.id}, "partnerId", 'accepted' FROM key
+        RETURNING 1
+      ), claimed AS (
+        UPDATE matchmaking_queue q SET party_key = key."partyKey"
+        FROM key WHERE q.user_id = key."partnerId"
+        RETURNING 1
+      )
+      SELECT "partnerId", "partyKey" FROM key
+    `;
+    if (claimed[0]) {
+      partnerId = claimed[0].partnerId as string;
+      partyKey = claimed[0].partyKey as string;
+    }
+  }
 
   await getSql()`UPDATE users SET experience = ${experience}::experience_level WHERE id = ${user.id}`;
   await getSql()`INSERT INTO matchmaking_queue (user_id, mode, duration_minutes, experience, elo, party_key)

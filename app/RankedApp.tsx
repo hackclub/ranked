@@ -820,9 +820,9 @@ function Home({
                 const fresh = await fetch("/api/dashboard")
                   .then((r) => (r.ok ? r.json() : null))
                   .catch(() => null);
-                if (fresh) setDashboard(fresh);
-                if ((fresh ?? dashboard)?.voteGate.due)
-                  return setVoteGateOpen(true);
+                if (!fresh) return toast("Could not reach the server, try again.");
+                setDashboard(fresh);
+                if (fresh.voteGate.due) return setVoteGateOpen(true);
                 navigate("lobby");
               }}
             >
@@ -2401,6 +2401,7 @@ function Match({
             title="Your website live preview"
             srcDoc={previewDoc}
             sandbox="allow-scripts"
+            referrerPolicy="no-referrer"
           />
           <div className="opponent-snapshot">
             <div>
@@ -2412,6 +2413,7 @@ function Match({
                 title="Opponent website snapshot"
                 srcDoc={opponentSnapshot}
                 sandbox="allow-scripts"
+                referrerPolicy="no-referrer"
               />
             ) : (
               <div className="snapshot-art">
@@ -2480,6 +2482,7 @@ function Match({
               title="Expanded live preview"
               srcDoc={previewDoc}
               sandbox="allow-scripts"
+              referrerPolicy="no-referrer"
             />
           </div>
         </div>
@@ -2987,6 +2990,7 @@ function Voting({
                   title="Build A"
                   src={match.sites.blue.pagesUrl}
                   sandbox="allow-scripts allow-same-origin"
+                  referrerPolicy="no-referrer"
                 />
               </div>
               <footer>
@@ -3021,6 +3025,7 @@ function Voting({
                   title="Build B"
                   src={match.sites.red.pagesUrl}
                   sandbox="allow-scripts allow-same-origin"
+                  referrerPolicy="no-referrer"
                 />
               </div>
               <footer>

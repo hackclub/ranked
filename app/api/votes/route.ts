@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
       FROM matches m JOIN canonical p ON p.match_id=m.id
       WHERE m.status='voting' AND NOT EXISTS (SELECT 1 FROM match_players mp WHERE mp.match_id=m.id AND mp.user_id=${user.id})
         AND NOT EXISTS (SELECT 1 FROM votes v WHERE v.match_id=m.id AND v.voter_id=${user.id})
-      GROUP BY m.id HAVING COUNT(p.id)=2 ORDER BY m.voting_ends_at NULLS LAST, m.created_at LIMIT 1`,
+      GROUP BY m.id HAVING COUNT(*)=2 ORDER BY m.voting_ends_at NULLS LAST, m.created_at LIMIT 1`,
     getVoteGate(user.id, user.matchesPlayed),
   ]);
   return NextResponse.json({ match: rows[0] ?? null, voteGate });
