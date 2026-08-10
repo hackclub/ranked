@@ -17,6 +17,11 @@ export function CollaborativeEditor({
   initialValue,
   onChange,
   onLocalEdit,
+  wordWrap = true,
+  minimapEnabled = false,
+  fontSize = 14,
+  tabSize = 2,
+  revealRequest,
 }: {
   room: Room | null;
   file: string;
@@ -28,6 +33,11 @@ export function CollaborativeEditor({
     line: number;
     cursorPosition: number;
   }) => void;
+  wordWrap?: boolean;
+  minimapEnabled?: boolean;
+  fontSize?: number;
+  tabSize?: number;
+  revealRequest?: { file: string; line: number } | null;
 }) {
   const editorRef = useRef<MonacoEditorApi.IStandaloneCodeEditor | null>(null);
   const fileRef = useRef(file);
@@ -54,6 +64,20 @@ export function CollaborativeEditor({
     },
     [],
   );
+
+  useEffect(() => {
+    if (!revealRequest || revealRequest.file !== file || !editorRef.current || !mounted)
+      return;
+    const editor = editorRef.current;
+    const reveal = () => {
+      editor.revealLineInCenter(revealRequest.line);
+      editor.setPosition({ lineNumber: revealRequest.line, column: 1 });
+      editor.focus();
+    };
+    reveal();
+    const settle = window.setTimeout(reveal, 150);
+    return () => window.clearTimeout(settle);
+  }, [revealRequest, file, mounted]);
 
   useEffect(() => {
     if (!room || !editorRef.current || !mounted) return;
@@ -132,7 +156,16 @@ export function CollaborativeEditor({
         setMounted(true);
       }}
       theme="vs-dark"
-      options={{ minimap: { enabled: false }, fontSize: 14, fontFamily: "var(--font-geist-mono)", padding: { top: 16 }, lineNumbersMinChars: 3, scrollBeyondLastLine: false, wordWrap: "on", tabSize: 2 }}
+      options={{
+        minimap: { enabled: minimapEnabled },
+        fontSize,
+        fontFamily: "var(--font-geist-mono)",
+        padding: { top: 16 },
+        lineNumbersMinChars: 3,
+        scrollBeyondLastLine: false,
+        wordWrap: wordWrap ? "on" : "off",
+        tabSize,
+      }}
     />
   );
 }
