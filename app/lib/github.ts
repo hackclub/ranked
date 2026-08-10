@@ -100,14 +100,18 @@ async function ensureRankedRepo(token: string, login: string) {
 }
 
 const RESERVED_FOLDER_NAMES = ["index.html", "readme.md", ".nojekyll"];
+export const PUBLISHABLE_FILE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*\.(html|css|js)$/;
 
-export async function publishWebsite(token: string, login: string, requestedName: string, html: string, sourceFiles?: Record<string, string>) {
+export async function publishWebsite(token: string, login: string, requestedName: string, pages: Record<string, string>, sourceFiles?: Record<string, string>) {
   const folderName = requestedName.trim();
   if (!/^[A-Za-z0-9._-]{1,100}$/.test(folderName) || folderName === "." || folderName === "..") {
     throw new Error("Build names may only use letters, numbers, periods, underscores, and hyphens.");
   }
   if (RESERVED_FOLDER_NAMES.includes(folderName.toLowerCase())) {
     throw new Error(`"${folderName}" is reserved. Choose another build name.`);
+  }
+  if (!pages["index.html"]) {
+    throw new Error("An index.html page is required.");
   }
   const repository = await ensureRankedRepo(token, login);
   if (await pathExists(token, login, folderName)) {
@@ -119,10 +123,13 @@ export async function publishWebsite(token: string, login: string, requestedName
     body: JSON.stringify({ message, content: Buffer.from(content, "utf8").toString("base64"), branch: "main" }),
   });
 
-  await putFile(`${folderName}/index.html`, html, `Publish ${folderName}`);
+  for (const [name, content] of Object.entries(pages)) {
+    if (!PUBLISHABLE_FILE_NAME.test(name) || !name.endsWith(".html")) continue;
+    await putFile(`${folderName}/${name}`, content, `Publish ${folderName} ${name}`);
+  }
   await putFile(`${folderName}/README.md`, `# ${folderName}\n\nBuilt live on Ranked and published open source.\n`, `Add README for ${folderName}`);
   for (const [name, content] of Object.entries(sourceFiles ?? {})) {
-    if (!["index.html", "styles.css", "script.js"].includes(name)) continue;
+    if (!PUBLISHABLE_FILE_NAME.test(name)) continue;
     await putFile(`${folderName}/source/${name}`, content, `Publish ${folderName} ${name} source`);
   }
 

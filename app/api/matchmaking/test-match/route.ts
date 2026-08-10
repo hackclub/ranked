@@ -17,9 +17,10 @@ export async function POST(request: NextRequest) {
   }
   if (!canUseTestLobby(user.email)) return NextResponse.json({ error: "Not available for your account." }, { status: 403 });
 
+  const body = await request.json().catch(() => ({}));
+  const duration = [10, 30, 60].includes(Number(body.durationMinutes)) ? Number(body.durationMinutes) : 10;
   const matchId = crypto.randomUUID();
   const theme = MATCH_THEMES[Math.floor(Math.random() * MATCH_THEMES.length)];
-  const duration = 10;
   await getSql()`DELETE FROM matchmaking_queue WHERE user_id = ${user.id}`;
   await getSql()`INSERT INTO matches (id, mode, duration_minutes, theme, ends_at)
     VALUES (${matchId}, 'admin'::match_mode, ${duration}, ${theme}, NOW() + (${duration} || ' minutes')::interval)`;

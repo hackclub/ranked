@@ -214,6 +214,42 @@ h1 { font-size: 36px; transform: rotate(-4deg); }`,
 });`,
 };
 
+const FILE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*\.(html|css|js)$/;
+const FILE_TEMPLATES: Record<"html" | "css" | "js", string> = {
+  html: `<!doctype html>
+<html>
+  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width"></head>
+  <body>
+
+  </body>
+</html>`,
+  css: `/* styles */\n`,
+  js: `// script\n`,
+};
+
+// Assembles one HTML page for preview/publish by inlining every CSS file (as
+// <style>) and every JS file (as <script>) alongside the requested page's markup,
+// so multiple stylesheets/scripts can be split into separate files while still
+// producing a single runnable document (there's no real server to resolve
+// <link>/<script src> references against inside a sandboxed srcDoc iframe).
+function buildPage(files: Record<string, string>, fileOrder: string[], htmlName: string) {
+  const base = files[htmlName] ?? "";
+  const styles = fileOrder
+    .filter((name) => name.endsWith(".css"))
+    .map((name) => files[name] ?? "")
+    .join("\n");
+  const scripts = fileOrder
+    .filter((name) => name.endsWith(".js"))
+    .map((name) => files[name] ?? "")
+    .join("\n");
+  const withStyles = base.includes("</head>")
+    ? base.replace("</head>", `<style>${styles}</style></head>`)
+    : `<style>${styles}</style>${base}`;
+  return withStyles.includes("</body>")
+    ? withStyles.replace("</body>", `<script>${scripts}<\/script></body>`)
+    : `${withStyles}<script>${scripts}<\/script>`;
+}
+
 type IconName =
   | "external"
   | "link"
@@ -240,7 +276,8 @@ type IconName =
   | "macbook"
   | "github"
   | "clock"
-  | "star";
+  | "star"
+  | "arrow-left";
 
 const FILLED_ICONS = new Set<IconName>(["github", "star"]);
 
@@ -404,6 +441,12 @@ const ICON_PATHS: Record<IconName, React.ReactNode> = {
     </>
   ),
   star: <path d="M12 2l2.4 6.6L21 11l-6.6 2.4L12 20l-2.4-6.6L3 11l6.6-2.4Z" />,
+  "arrow-left": (
+    <>
+      <path d="M19 12H5" />
+      <path d="M11 6 5 12l6 6" />
+    </>
+  ),
 };
 
 function Icon({
@@ -885,7 +928,6 @@ function Home({
             >
               ×
             </button>
-            <span className="eyebrow">community voting</span>
             <h2>
               Vote on{" "}
               {Math.max(
@@ -1272,6 +1314,8 @@ function Lobby({
   const testEmptyLobby = async () => {
     const response = await fetch("/api/matchmaking/test-match", {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ durationMinutes: length }),
     });
     const result = await response.json();
     if (result.code === "hackatime_required") {
@@ -1446,9 +1490,22 @@ function Lobby({
     setDuoState({ partner: null, outgoing: null, incoming: [] });
   };
 
+  const leaveLobby = async () => {
+    if (matching) {
+      setMatching(false);
+      await fetch("/api/matchmaking/queue", { method: "DELETE" });
+    }
+    navigate("home");
+  };
+
   return (
     <main className="lobby-screen">
-      <div className="w-full justify-end">
+      <div className="lobby-top-row">
+        <button className="lobby-exit-button" onClick={() => void leaveLobby()}>
+          <Icon name="arrow-left" size={14} />
+          leave lobby
+        </button>
+        <Logo compact />
         <div className="lobby-hud-chip">
           <Icon name="target" size={13} />
           <span>
@@ -1533,7 +1590,7 @@ function Lobby({
               <div className="pedestal-avatar">
                 <ScribbleAvatar
                   avatar={user.avatar}
-                  size={mode === "duo" ? "md" : "lg"}
+                  size={mode === "duo" ? "lg" : "lg"}
                 />
                 {matching && (
                   <span className="ready-badge">
@@ -1553,7 +1610,7 @@ function Lobby({
                     <div className="pedestal-avatar">
                       <ScribbleAvatar
                         avatar={duoState.partner.partnerAvatar}
-                        size="md"
+                        size="lg"
                       />
                       {duoState.partner.partnerQueued && (
                         <span className="ready-badge">
@@ -1700,10 +1757,6 @@ function Lobby({
                 />
               ) : (
                 <div className="camera-preview-placeholder">
-                  <ScribbleAvatar
-                    avatar={user.avatar}
-                    size="sm"
-                  />
                   <small>
                     {previewError
                       ? "Camera or mic blocked, check browser permissions"
@@ -1874,7 +1927,10 @@ function Match({
       : match.durationMinutes * 60;
   });
   const [files, setFiles] = useState(starterFiles);
+  const [fileOrder, setFileOrder] = useState<string[]>(Object.keys(starterFiles));
   const [tab, setTab] = useState("index.html");
+  const [addingFile, setAddingFile] = useState(false);
+  const [newFileName, setNewFileName] = useState("");
   const [mic, setMic] = useState(media.mic);
   const [video, setVideo] = useState(media.video);
   const [scope, setScope] = useState<"team" | "everyone">("team");
@@ -1882,6 +1938,7 @@ function Match({
   const [syncIn, setSyncIn] = useState(18);
   const [opponentSnapshot, setOpponentSnapshot] = useState<string | null>(null);
   const [publishOpen, setPublishOpen] = useState(false);
+  const [resultsOpen, setResultsOpen] = useState(false);
   const [forfeitOpen, setForfeitOpen] = useState(false);
   const [forfeitLoading, setForfeitLoading] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -1915,33 +1972,95 @@ function Match({
     const provider = getYjsProviderForRoom(room, {
       offlineSupport_experimental: true,
     });
-    const texts = Object.keys(starterFiles).map((name) => ({
-      name,
-      text: provider.getYDoc().getText(`file:${name}`),
-    }));
-    const syncAll = () =>
-      setFiles((current) =>
-        Object.fromEntries(
-          texts.map(({ name, text }) => [
-            name,
-            text.length ? text.toString() : current[name],
-          ]),
-        ),
-      );
+    const doc = provider.getYDoc();
+    const fileList = doc.getArray<string>("file-list");
+    const tracked = new Map<string, { text: ReturnType<typeof doc.getText>; sync: () => void }>();
+
+    const trackFile = (name: string) => {
+      if (tracked.has(name)) return;
+      const text = doc.getText(`file:${name}`);
+      const sync = () =>
+        setFiles((current) => (text.length ? { ...current, [name]: text.toString() } : current));
+      text.observe(sync);
+      tracked.set(name, { text, sync });
+      if (text.length) sync();
+    };
+
+    const syncFileOrder = () => {
+      const names = fileList.toArray();
+      setFileOrder(names.length ? names : Object.keys(starterFiles));
+      for (const name of names) trackFile(name);
+    };
+
     const seedAll = (synced: boolean) => {
       if (!synced) return;
-      for (const { name, text } of texts)
-        if (!text.length) text.insert(0, starterFiles[name]);
-      syncAll();
+      if (fileList.length === 0) {
+        doc.transact(() => {
+          for (const name of Object.keys(starterFiles)) fileList.push([name]);
+        });
+      }
+      syncFileOrder();
+      doc.transact(() => {
+        for (const name of fileList.toArray()) {
+          const text = tracked.get(name)?.text ?? doc.getText(`file:${name}`);
+          if (!text.length && starterFiles[name]) text.insert(0, starterFiles[name]);
+        }
+      });
+      for (const { sync } of tracked.values()) sync();
     };
-    for (const { text } of texts) text.observe(syncAll);
+
+    fileList.observe(syncFileOrder);
+    syncFileOrder();
     provider.on("sync", seedAll);
     seedAll(provider.synced);
     return () => {
-      for (const { text } of texts) text.unobserve(syncAll);
+      fileList.unobserve(syncFileOrder);
       provider.off("sync", seedAll);
+      for (const { text, sync } of tracked.values()) text.unobserve(sync);
     };
   }, [room]);
+
+  const addFile = useCallback(
+    (rawName: string) => {
+      const name = rawName.trim();
+      if (!FILE_NAME_PATTERN.test(name)) {
+        toast("File names must look like name.html, name.css, or name.js");
+        return;
+      }
+      if (fileOrder.includes(name)) {
+        toast("A file with that name already exists");
+        return;
+      }
+      if (!room) return;
+      const provider = getYjsProviderForRoom(room, { offlineSupport_experimental: true });
+      const doc = provider.getYDoc();
+      const fileList = doc.getArray<string>("file-list");
+      if (fileList.toArray().includes(name)) return;
+      const ext = name.split(".").pop() as "html" | "css" | "js";
+      doc.transact(() => {
+        fileList.push([name]);
+        const text = doc.getText(`file:${name}`);
+        if (text.length === 0) text.insert(0, FILE_TEMPLATES[ext]);
+      });
+      setTab(name);
+      setAddingFile(false);
+      setNewFileName("");
+    },
+    [fileOrder, room, toast],
+  );
+
+  const removeFile = useCallback(
+    (name: string) => {
+      if (name === "index.html" || !room) return;
+      const provider = getYjsProviderForRoom(room, { offlineSupport_experimental: true });
+      const doc = provider.getYDoc();
+      const fileList = doc.getArray<string>("file-list");
+      const index = fileList.toArray().indexOf(name);
+      if (index !== -1) fileList.delete(index, 1);
+      setTab((current) => (current === name ? "index.html" : current));
+    },
+    [room],
+  );
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -1961,19 +2080,9 @@ function Match({
 
   const time = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
   const previewDoc = useMemo(() => {
-    const withStyles = files["index.html"].includes("</head>")
-      ? files["index.html"].replace(
-          "</head>",
-          `<style>${files["styles.css"]}</style></head>`,
-        )
-      : `<style>${files["styles.css"]}</style>${files["index.html"]}`;
-    return withStyles.includes("</body>")
-      ? withStyles.replace(
-          "</body>",
-          `<script>${files["script.js"]}<\/script></body>`,
-        )
-      : `${withStyles}<script>${files["script.js"]}<\/script>`;
-  }, [files]);
+    const activeHtmlFile = tab.endsWith(".html") && files[tab] !== undefined ? tab : "index.html";
+    return buildPage(files, fileOrder, activeHtmlFile);
+  }, [files, fileOrder, tab]);
   const previewDocRef = useRef(previewDoc);
   useEffect(() => {
     previewDocRef.current = previewDoc;
@@ -2042,13 +2151,18 @@ function Match({
     }
     setPublishState({ loading: true });
     try {
+      const pages = Object.fromEntries(
+        fileOrder
+          .filter((name) => name.endsWith(".html"))
+          .map((name) => [name, buildPage(files, fileOrder, name)]),
+      );
       const response = await fetch("/api/github/publish", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           matchId: match.id,
           name: buildName,
-          html: previewDoc,
+          pages,
           files,
         }),
       });
@@ -2074,8 +2188,8 @@ function Match({
   }, [
     auth.github,
     files,
+    fileOrder,
     match.id,
-    previewDoc,
     publishState.loading,
     publishState.repositoryUrl,
     buildName,
@@ -2158,6 +2272,22 @@ function Match({
     }
   }, [applyLifecycle, forfeitLoading, match.id, outcome, toast]);
 
+  const forceEndTimer = useCallback(async () => {
+    try {
+      const response = await fetch(`/api/matches/${match.id}/end-timer`, {
+        method: "POST",
+      });
+      const result = (await response.json()) as {
+        error?: string;
+        match?: MatchOutcome | null;
+      };
+      if (!response.ok) throw new Error(result.error ?? "Could not end the timer.");
+      applyLifecycle(result);
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Could not end the timer.");
+    }
+  }, [applyLifecycle, match.id, toast]);
+
   useEffect(() => {
     const sync = async () => {
       await fetch(`/api/matches/${match.id}/snapshot`, {
@@ -2184,7 +2314,7 @@ function Match({
 
   useEffect(() => {
     if (seconds === 0 && !outcome)
-      window.setTimeout(() => setPublishOpen(true), 0);
+      window.setTimeout(() => setResultsOpen(true), 0);
   }, [outcome, seconds]);
 
   const isTestMatch = match.mode === "admin";
@@ -2257,6 +2387,18 @@ function Match({
             >
               forfeit match
             </button>
+            {canSkipPublish && (
+              <button
+                className="danger-button"
+                onClick={() => {
+                  setSettingsOpen(false);
+                  void forceEndTimer();
+                }}
+                disabled={Boolean(outcome) || seconds === 0}
+              >
+                force timer to end
+              </button>
+            )}
           </section>
         </div>
       )}
@@ -2325,17 +2467,57 @@ function Match({
         <div className="editor-shell">
           <div className="editor-toolbar">
             <div className="file-tabs">
-              {["index.html", "styles.css", "script.js"].map((file) => (
+              {fileOrder.map((file) => (
                 <button
                   key={file}
                   onClick={() => setTab(file)}
                   className={tab === file ? "active" : ""}
                 >
-                  <i className={`file-dot ${file.split(".")[1]}`} />
+                  <i className={`file-dot ${file.split(".").pop()}`} />
                   {file}
-                  {tab === file && <span>×</span>}
+                  {file !== "index.html" && (
+                    <span
+                      className="delete-file"
+                      role="button"
+                      aria-label={`Delete ${file}`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        removeFile(file);
+                      }}
+                    >
+                      ×
+                    </span>
+                  )}
                 </button>
               ))}
+              {addingFile ? (
+                <form
+                  className="new-file-form"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    addFile(newFileName);
+                  }}
+                >
+                  <input
+                    autoFocus
+                    value={newFileName}
+                    onChange={(event) => setNewFileName(event.target.value)}
+                    onBlur={() => {
+                      if (!newFileName) setAddingFile(false);
+                    }}
+                    placeholder="name.html"
+                    maxLength={60}
+                  />
+                </form>
+              ) : (
+                <button
+                  className="add-file-button"
+                  onClick={() => setAddingFile(true)}
+                  aria-label="Add file"
+                >
+                  +
+                </button>
+              )}
             </div>
             <div className="collab-state">
               <div className="face-stack">
@@ -2367,7 +2549,10 @@ function Match({
             <CollaborativeEditor
               room={room}
               file={tab}
-              initialValue={starterFiles[tab]}
+              initialValue={
+                starterFiles[tab] ??
+                FILE_TEMPLATES[(tab.split(".").pop() as "html" | "css" | "js") ?? "html"]
+              }
               onChange={updateCurrentFile}
               onLocalEdit={(activity) => void reportHackatimeActivity(activity)}
             />
@@ -2485,6 +2670,64 @@ function Match({
               referrerPolicy="no-referrer"
             />
           </div>
+        </div>
+      )}
+      {resultsOpen && !outcome && (
+        <div
+          className="modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="results-title"
+        >
+          <section className="modal results-modal">
+            <span className="eyebrow">match complete · theme: {match.theme}</span>
+            <div className="vote-grid results-grid">
+              <article>
+                <div className="vote-site">
+                  <iframe
+                    title="Your build"
+                    srcDoc={previewDoc}
+                    sandbox="allow-scripts"
+                    referrerPolicy="no-referrer"
+                  />
+                </div>
+                <footer>
+                  <span>YOUR BUILD</span>
+                </footer>
+              </article>
+              <div className="versus">VS</div>
+              <article>
+                <div className="vote-site">
+                  {opponentSnapshot ? (
+                    <iframe
+                      title="Opponent's build"
+                      srcDoc={opponentSnapshot}
+                      sandbox="allow-scripts"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <div className="snapshot-art">
+                      <span className="planet-one" />
+                      <span className="planet-two" />
+                      <b>no snapshot synced yet</b>
+                    </div>
+                  )}
+                </div>
+                <footer>
+                  <span>OPPONENT&apos;S BUILD</span>
+                </footer>
+              </article>
+            </div>
+            <button
+              className="primary-button"
+              onClick={() => {
+                setResultsOpen(false);
+                setPublishOpen(true);
+              }}
+            >
+              publish to GitHub <Icon name="external" size={13} />
+            </button>
+          </section>
         </div>
       )}
       {(publishOpen || publishState.repositoryUrl) && !outcome && (
@@ -2719,9 +2962,9 @@ function Leaderboard({ navigate }: { navigate: (s: Screen) => void }) {
       <section className="leader-card">
         <div className="leader-row leader-head">
           <span>rank</span>
-          <span>builder</span>
+          <span>name</span>
           <span>{board === "elo" ? "ELO" : "hours"}</span>
-          <span>matches</span>
+          <span>matches played</span>
         </div>
         {rows.map((row, index) => (
           <div className="leader-row" key={row.id}>
@@ -2966,20 +3209,13 @@ function Voting({
         ← back to base
       </button>
       <div className="vote-heading">
+        <h1>{match ? "Which site fits the theme best?" : "No matches in voting queue"}</h1>
         <span className="eyebrow">
-          community vote{match ? ` · theme: ${match.theme}` : ""}
+          {match ? ` · theme: ${match.theme}` : ""}
           {voteGate && voteGate.required > 0
             ? ` · ${Math.min(voteGate.cast, voteGate.required)}/${voteGate.required} voted`
             : ""}
         </span>
-        <h1>{match ? "Which build hits harder?" : "You’re caught up."}</h1>
-        <p>
-          {match
-            ? "Judge the finished site, not the player. Open both, explore, then cast one vote."
-            : stillOwed
-              ? "No more finished matchups need your vote right now — you're clear to keep playing."
-              : "There are no eligible finished matches waiting for your vote right now."}
-        </p>
       </div>
       {match && (
         <>
@@ -3431,7 +3667,7 @@ export default function RankedApp() {
 
   return (
     <div className={`app-shell screen-${screen}`}>
-      {screen !== "match" && (
+      {screen !== "match" && !(screen === "lobby" && auth.user) && (
         <SiteHeader
           screen={screen}
           navigate={navigate}

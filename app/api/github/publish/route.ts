@@ -1,15 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
-import { publishWebsite, updateDirectoryIndex, type DirectoryBuild } from "@/app/lib/github";
+import { publishWebsite, updateDirectoryIndex, PUBLISHABLE_FILE_NAME, type DirectoryBuild } from "@/app/lib/github";
 import { decryptSession, SESSION_COOKIE } from "@/app/lib/session";
 import { getSql } from "@/db";
+
+function validFileMap(value: unknown, maxEntries: number, maxLength: number) {
+  if (!value || typeof value !== "object") return false;
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (entries.length === 0 || entries.length > maxEntries) return false;
+  return entries.every(
+    ([fileName, content]) => PUBLISHABLE_FILE_NAME.test(fileName) && typeof content === "string" && content.length <= maxLength,
+  );
+}
 
 export async function POST(request: NextRequest) {
   const session = await decryptSession(request.cookies.get(SESSION_COOKIE)?.value);
   if (!session?.user) return NextResponse.json({ error: "Sign in with Hack Club first." }, { status: 401 });
   if (!session.github) return NextResponse.json({ error: "Connect GitHub first." }, { status: 401 });
   try {
-    const { matchId, name, html, files } = await request.json() as { matchId?: string; name?: string; html?: string; files?: Record<string, string> };
-    if (!html || html.length > 1_000_000) return NextResponse.json({ error: "A valid website is required." }, { status: 400 });
+    const { matchId, name, pages, files } = await request.json() as { matchId?: string; name?: string; pages?: Record<string, string>; files?: Record<string, string> };
+    if (!validFileMap(pages, 50, 1_000_000) || !pages!["index.html"]) return NextResponse.json({ error: "A valid website is required." }, { status: 400 });
     if (!matchId) return NextResponse.json({ error: "A match is required." }, { status: 400 });
     if (!name || !/^[A-Za-z0-9._-]{1,100}$/.test(name) || name === "." || name === "..") return NextResponse.json({ error: "Choose a valid build name." }, { status: 400 });
     const players = await getSql()`SELECT mp.team,m.theme,m.ends_at AS "endsAt" FROM match_players mp JOIN matches m ON m.id=mp.match_id
@@ -20,8 +29,8 @@ export async function POST(request: NextRequest) {
     const prior = await getSql()`SELECT repository_url AS "repositoryUrl",pages_url AS "pagesUrl" FROM publications
       WHERE match_id=${matchId} AND published_by=${session.user.id}`;
     if (prior[0]) return NextResponse.json(prior[0]);
-    if (files && Object.values(files).some(value => typeof value !== "string" || value.length > 500_000)) return NextResponse.json({ error: "Invalid source files." }, { status: 400 });
-    const result = await publishWebsite(session.github.accessToken, session.github.login, name, html, files);
+    if (files !== undefined && !validFileMap(files, 50, 500_000)) return NextResponse.json({ error: "Invalid source files." }, { status: 400 });
+    const result = await publishWebsite(session.github.accessToken, session.github.login, name, pages!, files);
     await getSql()`INSERT INTO publications (id,match_id,team,repository_url,pages_url,github_repo,published_by)
       VALUES (${crypto.randomUUID()},${matchId},${player.team}::match_team,${result.repositoryUrl},${result.pagesUrl},${result.folderName},${session.user.id})
       ON CONFLICT (match_id,published_by) DO NOTHING`;
