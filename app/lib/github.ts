@@ -5,7 +5,11 @@ const githubHeaders = (token: string) => ({
   "Content-Type": "application/json",
 });
 
-export function githubAuthorizationUrl(state: string, challenge: string, redirectUri: string) {
+export function githubAuthorizationUrl(
+  state: string,
+  challenge: string,
+  redirectUri: string,
+) {
   const clientId = process.env.GITHUB_CLIENT_ID;
   if (!clientId) throw new Error("GITHUB_CLIENT_ID is required.");
   const params = new URLSearchParams({
@@ -19,36 +23,74 @@ export function githubAuthorizationUrl(state: string, challenge: string, redirec
   return `https://github.com/login/oauth/authorize?${params}`;
 }
 
-export async function exchangeGitHubCode(code: string, verifier: string, redirectUri: string) {
+export async function exchangeGitHubCode(
+  code: string,
+  verifier: string,
+  redirectUri: string,
+) {
   const clientId = process.env.GITHUB_CLIENT_ID;
   const clientSecret = process.env.GITHUB_CLIENT_SECRET;
-  if (!clientId || !clientSecret) throw new Error("GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET are required.");
+  if (!clientId || !clientSecret)
+    throw new Error("GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET are required.");
   const response = await fetch("https://github.com/login/oauth/access_token", {
     method: "POST",
     headers: { Accept: "application/json", "Content-Type": "application/json" },
-    body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, code, code_verifier: verifier, redirect_uri: process.env.GITHUB_REDIRECT_URI ?? redirectUri }),
+    body: JSON.stringify({
+      client_id: clientId,
+      client_secret: clientSecret,
+      code,
+      code_verifier: verifier,
+      redirect_uri: process.env.GITHUB_REDIRECT_URI ?? redirectUri,
+    }),
   });
-  const token = await response.json() as { access_token?: string; error_description?: string };
-  if (!response.ok || !token.access_token) throw new Error(token.error_description ?? "GitHub token exchange failed.");
-  const userResponse = await fetch("https://api.github.com/user", { headers: githubHeaders(token.access_token) });
-  if (!userResponse.ok) throw new Error(`GitHub profile request failed (${userResponse.status}).`);
-  const user = await userResponse.json() as { login: string; avatar_url?: string };
-  return { accessToken: token.access_token, login: user.login, avatarUrl: user.avatar_url ?? null };
+  const token = (await response.json()) as {
+    access_token?: string;
+    error_description?: string;
+  };
+  if (!response.ok || !token.access_token)
+    throw new Error(token.error_description ?? "GitHub token exchange failed.");
+  const userResponse = await fetch("https://api.github.com/user", {
+    headers: githubHeaders(token.access_token),
+  });
+  if (!userResponse.ok)
+    throw new Error(`GitHub profile request failed (${userResponse.status}).`);
+  const user = (await userResponse.json()) as {
+    login: string;
+    avatar_url?: string;
+  };
+  return {
+    accessToken: token.access_token,
+    login: user.login,
+    avatarUrl: user.avatar_url ?? null,
+  };
 }
 
-async function githubRequest<T>(token: string, url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, { ...init, headers: { ...githubHeaders(token), ...(init?.headers ?? {}) } });
+async function githubRequest<T>(
+  token: string,
+  url: string,
+  init?: RequestInit,
+): Promise<T> {
+  const response = await fetch(url, {
+    ...init,
+    headers: { ...githubHeaders(token), ...(init?.headers ?? {}) },
+  });
   if (!response.ok) {
     const detail = await response.text();
-    if (response.status === 422 && url.endsWith("/user/repos")) throw new Error("That repository name is already in use on your GitHub account. Choose another name.");
-    throw new Error(`GitHub request failed (${response.status}): ${detail.slice(0, 280)}`);
+    if (response.status === 422 && url.endsWith("/user/repos"))
+      throw new Error(
+        "That repository name is already in use on your GitHub account. Choose another name.",
+      );
+    throw new Error(
+      `GitHub request failed (${response.status}): ${detail.slice(0, 280)}`,
+    );
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }
 
 const RANKED_REPO = "hackclubranked";
-const isNotFound = (error: unknown) => error instanceof Error && error.message.includes("(404)");
+const isNotFound = (error: unknown) =>
+  error instanceof Error && error.message.includes("(404)");
 
 function repoContentsPath(login: string, path = "") {
   return `https://api.github.com/repos/${login}/${RANKED_REPO}/contents/${path}`;
@@ -68,44 +110,73 @@ async function pathExists(token: string, login: string, path: string) {
 // instead of a fresh repo per match cluttering their GitHub account.
 async function ensureRankedRepo(token: string, login: string) {
   try {
-    return await githubRequest<{ html_url: string }>(token, `https://api.github.com/repos/${login}/${RANKED_REPO}`);
+    return await githubRequest<{ html_url: string }>(
+      token,
+      `https://api.github.com/repos/${login}/${RANKED_REPO}`,
+    );
   } catch (error) {
     if (!isNotFound(error)) throw error;
   }
 
-  const repository = await githubRequest<{ html_url: string }>(token, "https://api.github.com/user/repos", {
-    method: "POST",
-    body: JSON.stringify({
-      name: RANKED_REPO,
-      description: "Live-coded Ranked builds — one folder per match.",
-      homepage: `https://${login}.github.io/${RANKED_REPO}/`,
-      private: false,
-      has_issues: true,
-      auto_init: true,
-    }),
-  });
+  const repository = await githubRequest<{ html_url: string }>(
+    token,
+    "https://api.github.com/user/repos",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        name: RANKED_REPO,
+        description: "Hack Club Ranked is a program run by [Hack Club](https://hackclub.com) where teenagers compete and collaborate to speedrun making websites according to a theme. Whoever has the best site at the end wins, and the more matches you win the higher your Ranking. The more matches you play and more hours you code, you can buy cool prizes in the shop like drawing tablets, iPads, hoodies, headphones, and more!",
+        homepage: `https://${login}.github.io/${RANKED_REPO}/`,
+        private: false,
+        has_issues: true,
+        auto_init: true,
+      }),
+    },
+  );
   await githubRequest(token, repoContentsPath(login, ".nojekyll"), {
     method: "PUT",
-    body: JSON.stringify({ message: "Configure GitHub Pages", content: "", branch: "main" }),
+    body: JSON.stringify({
+      message: "Configure GitHub Pages",
+      content: "",
+      branch: "main",
+    }),
   });
   try {
-    await githubRequest(token, `https://api.github.com/repos/${login}/${RANKED_REPO}/pages`, {
-      method: "POST",
-      body: JSON.stringify({ source: { branch: "main", path: "/" } }),
-    });
+    await githubRequest(
+      token,
+      `https://api.github.com/repos/${login}/${RANKED_REPO}/pages`,
+      {
+        method: "POST",
+        body: JSON.stringify({ source: { branch: "main", path: "/" } }),
+      },
+    );
   } catch (error) {
-    if (!(error instanceof Error) || !error.message.includes("409")) throw error;
+    if (!(error instanceof Error) || !error.message.includes("409"))
+      throw error;
   }
   return repository;
 }
 
 const RESERVED_FOLDER_NAMES = ["index.html", "readme.md", ".nojekyll"];
-export const PUBLISHABLE_FILE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*\.(html|css|js)$/;
+export const PUBLISHABLE_FILE_NAME =
+  /^[A-Za-z0-9][A-Za-z0-9._-]*\.(html|css|js)$/;
 
-export async function publishWebsite(token: string, login: string, requestedName: string, pages: Record<string, string>, sourceFiles?: Record<string, string>) {
+export async function publishWebsite(
+  token: string,
+  login: string,
+  requestedName: string,
+  pages: Record<string, string>,
+  sourceFiles?: Record<string, string>,
+) {
   const folderName = requestedName.trim();
-  if (!/^[A-Za-z0-9._-]{1,100}$/.test(folderName) || folderName === "." || folderName === "..") {
-    throw new Error("Build names may only use letters, numbers, periods, underscores, and hyphens.");
+  if (
+    !/^[A-Za-z0-9._-]{1,100}$/.test(folderName) ||
+    folderName === "." ||
+    folderName === ".."
+  ) {
+    throw new Error(
+      "Build names may only use letters, numbers, periods, underscores, and hyphens.",
+    );
   }
   if (RESERVED_FOLDER_NAMES.includes(folderName.toLowerCase())) {
     throw new Error(`"${folderName}" is reserved. Choose another build name.`);
@@ -115,22 +186,41 @@ export async function publishWebsite(token: string, login: string, requestedName
   }
   const repository = await ensureRankedRepo(token, login);
   if (await pathExists(token, login, folderName)) {
-    throw new Error(`"${folderName}" is already used in your ${RANKED_REPO} repo. Choose another name.`);
+    throw new Error(
+      `"${folderName}" is already used in your ${RANKED_REPO} repo. Choose another name.`,
+    );
   }
 
-  const putFile = (path: string, content: string, message: string) => githubRequest(token, repoContentsPath(login, path), {
-    method: "PUT",
-    body: JSON.stringify({ message, content: Buffer.from(content, "utf8").toString("base64"), branch: "main" }),
-  });
+  const putFile = (path: string, content: string, message: string) =>
+    githubRequest(token, repoContentsPath(login, path), {
+      method: "PUT",
+      body: JSON.stringify({
+        message,
+        content: Buffer.from(content, "utf8").toString("base64"),
+        branch: "main",
+      }),
+    });
 
   for (const [name, content] of Object.entries(pages)) {
     if (!PUBLISHABLE_FILE_NAME.test(name) || !name.endsWith(".html")) continue;
-    await putFile(`${folderName}/${name}`, content, `Publish ${folderName} ${name}`);
+    await putFile(
+      `${folderName}/${name}`,
+      content,
+      `Publish ${folderName} ${name}`,
+    );
   }
-  await putFile(`${folderName}/README.md`, `# ${folderName}\n\nBuilt live on Ranked and published open source.\n`, `Add README for ${folderName}`);
+  await putFile(
+    `${folderName}/README.md`,
+    `# ${folderName}\n\nBuilt live on Ranked and published open source.\n`,
+    `Add README for ${folderName}`,
+  );
   for (const [name, content] of Object.entries(sourceFiles ?? {})) {
     if (!PUBLISHABLE_FILE_NAME.test(name)) continue;
-    await putFile(`${folderName}/source/${name}`, content, `Publish ${folderName} ${name} source`);
+    await putFile(
+      `${folderName}/source/${name}`,
+      content,
+      `Publish ${folderName} ${name} source`,
+    );
   }
 
   return {
@@ -142,16 +232,30 @@ export async function publishWebsite(token: string, login: string, requestedName
 }
 
 const escapeHtml = (value: string) =>
-  value.replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
+  value.replace(
+    /[&<>"']/g,
+    (char) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
+        char
+      ]!,
+  );
 
-export type DirectoryBuild = { folderName: string; theme: string; publishedAt: string };
+export type DirectoryBuild = {
+  folderName: string;
+  theme: string;
+  publishedAt: string;
+};
 
 function renderDirectoryIndex(login: string, builds: DirectoryBuild[]) {
-  const items = builds.map(build => `
+  const items = builds
+    .map(
+      (build) => `
       <li>
         <a href="./${encodeURIComponent(build.folderName)}/">${escapeHtml(build.folderName)}</a>
         <span>${escapeHtml(build.theme)} · ${escapeHtml(new Date(build.publishedAt).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" }))}</span>
-      </li>`).join("");
+      </li>`,
+    )
+    .join("");
 
   return `<!doctype html>
 <html lang="en">
@@ -192,10 +296,17 @@ function renderDirectoryIndex(login: string, builds: DirectoryBuild[]) {
 `;
 }
 
-export async function updateDirectoryIndex(token: string, login: string, builds: DirectoryBuild[]) {
+export async function updateDirectoryIndex(
+  token: string,
+  login: string,
+  builds: DirectoryBuild[],
+) {
   let sha: string | undefined;
   try {
-    const existing = await githubRequest<{ sha: string }>(token, repoContentsPath(login, "index.html"));
+    const existing = await githubRequest<{ sha: string }>(
+      token,
+      repoContentsPath(login, "index.html"),
+    );
     sha = existing.sha;
   } catch (error) {
     if (!isNotFound(error)) throw error;

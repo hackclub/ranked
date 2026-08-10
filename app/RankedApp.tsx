@@ -214,18 +214,61 @@ h1 { font-size: 36px; transform: rotate(-4deg); }`,
 });`,
 };
 
+// GitHub Pages usually finishes its first build well within this window; it's
+// just the countdown estimate shown while we poll for the real thing.
+const PAGES_BUILD_ESTIMATE_SECONDS = 45;
+
 const FILE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*\.(html|css|js)$/;
 const FILE_TEMPLATES: Record<"html" | "css" | "js", string> = {
   html: `<!doctype html>
 <html>
   <head><meta charset="utf-8"><meta name="viewport" content="width=device-width"></head>
   <body>
-
+    <!-- to travel to another page use a link: <a href="index.html">home</a>
+         or a button: <button onclick="goTo('index.html')">home</button> -->
   </body>
 </html>`,
   css: `/* styles */\n`,
   js: `// script\n`,
 };
+
+// window.goTo(page) is the one navigation call that behaves the same in the
+// live preview and on the deployed GitHub Pages site: in preview there is no
+// real "about.html" to navigate to (srcDoc iframe, no server), so it asks the
+// parent to swap the previewed page instead of letting a real (failing)
+// navigation happen; once published there's no Ranked parent listening, so it
+// falls back to a normal location.href assignment. Plain <a href="page.html">
+// links are also intercepted in preview (via the click listener below) so
+// players don't have to know about goTo just to link between their own pages.
+function buildNavShim(fileOrder: string[], preview: boolean) {
+  const htmlPages = fileOrder.filter((name) => name.endsWith(".html"));
+  const normalize = `
+function __rankedNormalizePage(page) {
+  return String(page).split("#")[0].split("?")[0].replace(/^\\.\\//, "").replace(/^\\/+/, "");
+}`;
+  const clickShim = preview
+    ? `
+document.addEventListener("click", function (e) {
+  var a = e.target && e.target.closest ? e.target.closest("a") : null;
+  if (!a) return;
+  var href = a.getAttribute("href");
+  if (!href || /^([a-z][a-z0-9+.-]*:)?\\/\\//i.test(href) || href[0] === "#") return;
+  var page = __rankedNormalizePage(href);
+  if (${JSON.stringify(htmlPages)}.indexOf(page) === -1) return;
+  e.preventDefault();
+  window.parent.postMessage({ source: "ranked-preview", type: "navigate", page: page }, "*");
+});`
+    : "";
+  return `
+window.__RANKED_PREVIEW__ = ${preview};${normalize}
+window.goTo = function goTo(page) {
+  if (window.__RANKED_PREVIEW__) {
+    window.parent.postMessage({ source: "ranked-preview", type: "navigate", page: __rankedNormalizePage(page) }, "*");
+  } else {
+    window.location.href = page;
+  }
+};${clickShim}`;
+}
 
 // Assembles one HTML page for preview/publish by inlining every CSS file (as
 // <style>) and every JS file (as <script>) alongside the requested page's markup,
@@ -236,6 +279,7 @@ function buildPage(
   files: Record<string, string>,
   fileOrder: string[],
   htmlName: string,
+  opts: { preview?: boolean } = {},
 ) {
   const base = files[htmlName] ?? "";
   const styles = fileOrder
@@ -246,12 +290,59 @@ function buildPage(
     .filter((name) => name.endsWith(".js"))
     .map((name) => files[name] ?? "")
     .join("\n");
+  const navShim = buildNavShim(fileOrder, Boolean(opts.preview));
   const withStyles = base.includes("</head>")
     ? base.replace("</head>", `<style>${styles}</style></head>`)
     : `<style>${styles}</style>${base}`;
   return withStyles.includes("</body>")
-    ? withStyles.replace("</body>", `<script>${scripts}<\/script></body>`)
-    : `${withStyles}<script>${scripts}<\/script>`;
+    ? withStyles.replace(
+        "</body>",
+        `<script>${navShim}<\/script><script>${scripts}<\/script></body>`,
+      )
+    : `${withStyles}<script>${navShim}<\/script><script>${scripts}<\/script>`;
+}
+
+// GitHub Pages takes ~30-90s to build after the first push, so a pagesUrl
+// fresh out of the publish API 404s for a bit — poll the real URL server-side
+// until it resolves, with a friendly countdown so the wait doesn't read as broken.
+function usePagesReady(url: string | undefined) {
+  const [ready, setReady] = useState(false);
+  const [secondsLeft, setSecondsLeft] = useState(PAGES_BUILD_ESTIMATE_SECONDS);
+  const [trackedUrl, setTrackedUrl] = useState(url);
+  if (url !== trackedUrl) {
+    setTrackedUrl(url);
+    setReady(false);
+    setSecondsLeft(PAGES_BUILD_ESTIMATE_SECONDS);
+  }
+  useEffect(() => {
+    if (!url) return;
+    let cancelled = false;
+    const countdownTimer = setInterval(() => {
+      setSecondsLeft((seconds) => Math.max(0, seconds - 1));
+    }, 1000);
+    (async () => {
+      while (!cancelled) {
+        try {
+          const response = await fetch(
+            `/api/github/pages-status?url=${encodeURIComponent(url)}`,
+          );
+          const result = (await response.json()) as { ready?: boolean };
+          if (result.ready) {
+            if (!cancelled) setReady(true);
+            return;
+          }
+        } catch {
+          // transient network hiccup — keep polling, don't stall the countdown
+        }
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+      }
+    })();
+    return () => {
+      cancelled = true;
+      clearInterval(countdownTimer);
+    };
+  }, [url]);
+  return { ready, secondsLeft };
 }
 
 function highlightMatch(text: string, query: string) {
@@ -1966,7 +2057,9 @@ function Match({
   });
   const [mic, setMic] = useState(media.mic);
   const [video, setVideo] = useState(media.video);
-  const [scope, setScope] = useState<"team" | "everyone">("team");
+  const [scope, setScope] = useState<"team" | "everyone">(
+    match.mode === "duo" ? "team" : "everyone",
+  );
   const [previewOpen, setPreviewOpen] = useState(false);
   const [syncIn, setSyncIn] = useState(18);
   const [opponentSnapshot, setOpponentSnapshot] = useState<string | null>(null);
@@ -1988,6 +2081,9 @@ function Match({
     repositoryUrl?: string;
     pagesUrl?: string;
   }>({ loading: false });
+  const { ready: pagesReady, secondsLeft: pagesCountdown } = usePagesReady(
+    publishState.pagesUrl,
+  );
   const team = match.team;
   const { status, localStream, remotePeers } = useRealtimeRoom(
     `ranked:call:${match.id}`,
@@ -2158,15 +2254,46 @@ function Match({
   }, []);
 
   const time = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+  const [previewPage, setPreviewPage] = useState<string | null>(null);
+  const [tabForPreviewReset, setTabForPreviewReset] = useState(tab);
+  if (tab !== tabForPreviewReset) {
+    setTabForPreviewReset(tab);
+    setPreviewPage(null);
+  }
   const previewDoc = useMemo(() => {
     const activeHtmlFile =
-      tab.endsWith(".html") && files[tab] !== undefined ? tab : "index.html";
-    return buildPage(files, fileOrder, activeHtmlFile);
-  }, [files, fileOrder, tab]);
+      previewPage && files[previewPage] !== undefined
+        ? previewPage
+        : tab.endsWith(".html") && files[tab] !== undefined
+          ? tab
+          : "index.html";
+    return buildPage(files, fileOrder, activeHtmlFile, { preview: true });
+  }, [files, fileOrder, tab, previewPage]);
   const previewDocRef = useRef(previewDoc);
   useEffect(() => {
     previewDocRef.current = previewDoc;
   }, [previewDoc]);
+  const ownPreviewFrames = useRef<Set<Window>>(new Set());
+  const registerOwnPreviewFrame = useCallback((el: HTMLIFrameElement | null) => {
+    if (el?.contentWindow) ownPreviewFrames.current.add(el.contentWindow);
+  }, []);
+  useEffect(() => {
+    function handleNavigateMessage(event: MessageEvent) {
+      if (
+        event.data?.source !== "ranked-preview" ||
+        event.data?.type !== "navigate" ||
+        !ownPreviewFrames.current.has(event.source as Window)
+      ) {
+        return;
+      }
+      const page = event.data.page;
+      if (typeof page === "string" && files[page] !== undefined) {
+        setPreviewPage(page);
+      }
+    }
+    window.addEventListener("message", handleNavigateMessage);
+    return () => window.removeEventListener("message", handleNavigateMessage);
+  }, [files]);
   const searchResults = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     if (query.length < 2) return [];
@@ -2945,6 +3072,7 @@ function Match({
             </button>
           </div>
           <iframe
+            ref={registerOwnPreviewFrame}
             title="Your website live preview"
             srcDoc={previewDoc}
             sandbox="allow-scripts"
@@ -2999,20 +3127,22 @@ function Match({
             <Icon name={video ? "camera" : "camera-off"} size={16} />
             <span>camera</span>
           </button>
-          <div className="scope-toggle">
-            <button
-              className={scope === "team" ? "active" : ""}
-              onClick={() => setScope("team")}
-            >
-              duo only
-            </button>
-            <button
-              className={scope === "everyone" ? "active" : ""}
-              onClick={() => setScope("everyone")}
-            >
-              everyone
-            </button>
-          </div>
+          {match.mode === "duo" && (
+            <div className="scope-toggle">
+              <button
+                className={scope === "team" ? "active" : ""}
+                onClick={() => setScope("team")}
+              >
+                duo only
+              </button>
+              <button
+                className={scope === "everyone" ? "active" : ""}
+                onClick={() => setScope("everyone")}
+              >
+                everyone
+              </button>
+            </div>
+          )}
         </div>
       </section>
       {previewOpen && (
@@ -3026,6 +3156,7 @@ function Match({
           >
             <button onClick={() => setPreviewOpen(false)}>×</button>
             <iframe
+              ref={registerOwnPreviewFrame}
               title="Expanded live preview"
               srcDoc={previewDoc}
               sandbox="allow-scripts"
@@ -3049,6 +3180,7 @@ function Match({
               <article>
                 <div className="vote-site">
                   <iframe
+                    ref={registerOwnPreviewFrame}
                     title="Your build"
                     srcDoc={previewDoc}
                     sandbox="allow-scripts"
@@ -3122,13 +3254,21 @@ function Match({
                   >
                     view source <Icon name="external" size={11} />
                   </a>
-                  <a
-                    href={publishState.pagesUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    open live website <Icon name="external" size={11} />
-                  </a>
+                  {pagesReady ? (
+                    <a
+                      href={publishState.pagesUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      open live website <Icon name="external" size={11} />
+                    </a>
+                  ) : (
+                    <span className="pending" aria-live="polite">
+                      <i />
+                      deploying
+                      {pagesCountdown > 0 ? ` · ~${pagesCountdown}s` : "…"}
+                    </span>
+                  )}
                 </div>
                 <button
                   className="primary-button"
@@ -3527,6 +3667,8 @@ function Voting({
   useEffect(() => {
     void loadNext();
   }, [loadNext]);
+  const bluePages = usePagesReady(match?.sites.blue.pagesUrl);
+  const redPages = usePagesReady(match?.sites.red.pagesUrl);
 
   const remaining = voteGate
     ? Math.max(0, voteGate.required - voteGate.cast)
@@ -3594,12 +3736,22 @@ function Voting({
           <section className="vote-grid">
             <article className={voted === "blue" ? "chosen" : ""}>
               <div className="vote-site">
-                <iframe
-                  title="Build A"
-                  src={match.sites.blue.pagesUrl}
-                  sandbox="allow-scripts allow-same-origin"
-                  referrerPolicy="no-referrer"
-                />
+                {bluePages.ready ? (
+                  <iframe
+                    title="Build A"
+                    src={match.sites.blue.pagesUrl}
+                    sandbox="allow-scripts allow-same-origin"
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <div className="vote-site-pending" aria-live="polite">
+                    <i />
+                    deploying
+                    {bluePages.secondsLeft > 0
+                      ? ` · ~${bluePages.secondsLeft}s`
+                      : "…"}
+                  </div>
+                )}
               </div>
               <footer>
                 <div>
@@ -3629,12 +3781,22 @@ function Voting({
             <div className="versus">VS</div>
             <article className={voted === "red" ? "chosen" : ""}>
               <div className="vote-site">
-                <iframe
-                  title="Build B"
-                  src={match.sites.red.pagesUrl}
-                  sandbox="allow-scripts allow-same-origin"
-                  referrerPolicy="no-referrer"
-                />
+                {redPages.ready ? (
+                  <iframe
+                    title="Build B"
+                    src={match.sites.red.pagesUrl}
+                    sandbox="allow-scripts allow-same-origin"
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <div className="vote-site-pending" aria-live="polite">
+                    <i />
+                    deploying
+                    {redPages.secondsLeft > 0
+                      ? ` · ~${redPages.secondsLeft}s`
+                      : "…"}
+                  </div>
+                )}
               </div>
               <footer>
                 <div>
