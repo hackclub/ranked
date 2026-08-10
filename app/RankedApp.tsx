@@ -250,6 +250,18 @@ function buildPage(files: Record<string, string>, fileOrder: string[], htmlName:
     : `${withStyles}<script>${scripts}<\/script>`;
 }
 
+function highlightMatch(text: string, query: string) {
+  const at = text.toLowerCase().indexOf(query.toLowerCase());
+  if (at === -1) return text;
+  return (
+    <>
+      {text.slice(0, at)}
+      <mark>{text.slice(at, at + query.length)}</mark>
+      {text.slice(at + query.length)}
+    </>
+  );
+}
+
 type IconName =
   | "external"
   | "link"
@@ -1931,6 +1943,20 @@ function Match({
   const [tab, setTab] = useState("index.html");
   const [addingFile, setAddingFile] = useState(false);
   const [newFileName, setNewFileName] = useState("");
+  const [sidebarPanel, setSidebarPanel] = useState<
+    "files" | "search" | "changes" | "settings" | null
+  >("files");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [revealRequest, setRevealRequest] = useState<{
+    file: string;
+    line: number;
+  } | null>(null);
+  const [editorPrefs, setEditorPrefs] = useState({
+    wordWrap: true,
+    minimap: false,
+    fontSize: 14,
+    tabSize: 2,
+  });
   const [mic, setMic] = useState(media.mic);
   const [video, setVideo] = useState(media.video);
   const [scope, setScope] = useState<"team" | "everyone">("team");
@@ -2087,6 +2113,30 @@ function Match({
   useEffect(() => {
     previewDocRef.current = previewDoc;
   }, [previewDoc]);
+  const searchResults = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (query.length < 2) return [];
+    return fileOrder
+      .map((file) => ({
+        file,
+        matches: (files[file] ?? "")
+          .split("\n")
+          .map((text, index) => ({ line: index + 1, text: text.trim() }))
+          .filter(({ text }) => text.toLowerCase().includes(query))
+          .slice(0, 30),
+      }))
+      .filter((group) => group.matches.length > 0);
+  }, [files, fileOrder, searchQuery]);
+  const changedFiles = useMemo(
+    () =>
+      fileOrder.filter((file) => {
+        const original =
+          starterFiles[file] ??
+          FILE_TEMPLATES[(file.split(".").pop() as "html" | "css" | "js") ?? "html"];
+        return files[file] !== original;
+      }),
+    [files, fileOrder],
+  );
   const updateCurrentFile = useCallback(
     (value: string) => {
       setFiles((current) => ({ ...current, [tab]: value }));
@@ -2530,22 +2580,241 @@ function Match({
               <b>{status === "connected" ? "synced" : status}</b>
             </div>
           </div>
-          <div className="editor-area">
+          <div className={`editor-area ${sidebarPanel ? "panel-open" : ""}`}>
             <aside className="file-rail">
-              <button className="active" aria-label="Files">
+              <button
+                className={sidebarPanel === "files" ? "active" : ""}
+                aria-label="Explorer"
+                aria-pressed={sidebarPanel === "files"}
+                onClick={() =>
+                  setSidebarPanel((current) => (current === "files" ? null : "files"))
+                }
+              >
                 <Icon name="files" size={17} />
               </button>
-              <button aria-label="Search">
+              <button
+                className={sidebarPanel === "search" ? "active" : ""}
+                aria-label="Search"
+                aria-pressed={sidebarPanel === "search"}
+                onClick={() =>
+                  setSidebarPanel((current) => (current === "search" ? null : "search"))
+                }
+              >
                 <Icon name="search" size={17} />
               </button>
-              <button aria-label="Source control">
+              <button
+                className={sidebarPanel === "changes" ? "active" : ""}
+                aria-label="Source control"
+                aria-pressed={sidebarPanel === "changes"}
+                onClick={() =>
+                  setSidebarPanel((current) => (current === "changes" ? null : "changes"))
+                }
+              >
                 <Icon name="branch" size={17} />
+                {changedFiles.length > 0 && (
+                  <i className="rail-badge">{changedFiles.length}</i>
+                )}
               </button>
               <span />
-              <button aria-label="Settings">
+              <button
+                className={sidebarPanel === "settings" ? "active" : ""}
+                aria-label="Editor settings"
+                aria-pressed={sidebarPanel === "settings"}
+                onClick={() =>
+                  setSidebarPanel((current) => (current === "settings" ? null : "settings"))
+                }
+              >
                 <Icon name="settings" size={17} />
               </button>
             </aside>
+            {sidebarPanel === "files" && (
+              <aside className="side-panel">
+                <div className="side-panel-head">Explorer</div>
+                <div className="side-panel-body explorer-list">
+                  {fileOrder.map((file) => (
+                    <button
+                      key={file}
+                      className={`explorer-row ${tab === file ? "active" : ""}`}
+                      onClick={() => setTab(file)}
+                    >
+                      <i className={`file-dot ${file.split(".").pop()}`} />
+                      <span className="explorer-name">{file}</span>
+                      {file !== "index.html" && (
+                        <span
+                          className="delete-file"
+                          role="button"
+                          aria-label={`Delete ${file}`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            removeFile(file);
+                          }}
+                        >
+                          ×
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                  <button className="explorer-add" onClick={() => setAddingFile(true)}>
+                    <Icon name="plus" size={12} /> new file
+                  </button>
+                </div>
+              </aside>
+            )}
+            {sidebarPanel === "search" && (
+              <aside className="side-panel">
+                <div className="side-panel-head">Search</div>
+                <div className="side-panel-body search-panel">
+                  <input
+                    className="search-input"
+                    placeholder="Search across files"
+                    value={searchQuery}
+                    onChange={(event) => setSearchQuery(event.target.value)}
+                    aria-label="Search across files"
+                  />
+                  {searchQuery.trim().length < 2 ? (
+                    <p className="side-panel-empty">
+                      Type at least 2 characters to search {fileOrder.join(", ")}.
+                    </p>
+                  ) : searchResults.length === 0 ? (
+                    <p className="side-panel-empty">No results found.</p>
+                  ) : (
+                    <div className="search-results">
+                      {searchResults.map((group) => (
+                        <div key={group.file} className="search-file-group">
+                          <div className="search-file-head">
+                            <i className={`file-dot ${group.file.split(".").pop()}`} />
+                            {group.file}
+                            <span>{group.matches.length}</span>
+                          </div>
+                          {group.matches.map((match) => (
+                            <button
+                              key={match.line}
+                              className="search-match"
+                              onClick={() => {
+                                setTab(group.file);
+                                setRevealRequest({ file: group.file, line: match.line });
+                              }}
+                            >
+                              <span className="search-line-no">{match.line}</span>
+                              {highlightMatch(match.text, searchQuery.trim())}
+                            </button>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </aside>
+            )}
+            {sidebarPanel === "changes" && (
+              <aside className="side-panel">
+                <div className="side-panel-head">Source Control</div>
+                <div className="side-panel-body changes-panel">
+                  <p className="changes-branch">
+                    <Icon name="branch" size={11} /> main*
+                  </p>
+                  {changedFiles.length ? (
+                    <ul className="changes-list">
+                      {changedFiles.map((file) => (
+                        <li key={file}>
+                          <button onClick={() => setTab(file)}>
+                            <i className={`file-dot ${file.split(".").pop()}`} />
+                            {file}
+                          </button>
+                          <span className="change-badge">M</span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="side-panel-empty">
+                      No changes yet — start editing to see files here.
+                    </p>
+                  )}
+                  <p className="changes-note">
+                    Changes publish to your GitHub Pages repo when the match ends.
+                  </p>
+                </div>
+              </aside>
+            )}
+            {sidebarPanel === "settings" && (
+              <aside className="side-panel">
+                <div className="side-panel-head">Editor</div>
+                <div className="side-panel-body settings-panel">
+                  <label className="settings-row">
+                    <span>Word wrap</span>
+                    <button
+                      className={`toggle-switch ${editorPrefs.wordWrap ? "on" : ""}`}
+                      role="switch"
+                      aria-checked={editorPrefs.wordWrap}
+                      aria-label="Word wrap"
+                      onClick={() =>
+                        setEditorPrefs((prefs) => ({ ...prefs, wordWrap: !prefs.wordWrap }))
+                      }
+                    >
+                      <i />
+                    </button>
+                  </label>
+                  <label className="settings-row">
+                    <span>Minimap</span>
+                    <button
+                      className={`toggle-switch ${editorPrefs.minimap ? "on" : ""}`}
+                      role="switch"
+                      aria-checked={editorPrefs.minimap}
+                      aria-label="Minimap"
+                      onClick={() =>
+                        setEditorPrefs((prefs) => ({ ...prefs, minimap: !prefs.minimap }))
+                      }
+                    >
+                      <i />
+                    </button>
+                  </label>
+                  <div className="settings-row">
+                    <span>Font size</span>
+                    <div className="settings-stepper">
+                      <button
+                        aria-label="Decrease font size"
+                        onClick={() =>
+                          setEditorPrefs((prefs) => ({
+                            ...prefs,
+                            fontSize: Math.max(11, prefs.fontSize - 1),
+                          }))
+                        }
+                      >
+                        −
+                      </button>
+                      <b>{editorPrefs.fontSize}</b>
+                      <button
+                        aria-label="Increase font size"
+                        onClick={() =>
+                          setEditorPrefs((prefs) => ({
+                            ...prefs,
+                            fontSize: Math.min(22, prefs.fontSize + 1),
+                          }))
+                        }
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+                  <div className="settings-row">
+                    <span>Tab size</span>
+                    <div className="settings-segmented">
+                      {[2, 4].map((size) => (
+                        <button
+                          key={size}
+                          className={editorPrefs.tabSize === size ? "active" : ""}
+                          onClick={() =>
+                            setEditorPrefs((prefs) => ({ ...prefs, tabSize: size }))
+                          }
+                        >
+                          {size}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </aside>
+            )}
             <CollaborativeEditor
               room={room}
               file={tab}
@@ -2555,6 +2824,11 @@ function Match({
               }
               onChange={updateCurrentFile}
               onLocalEdit={(activity) => void reportHackatimeActivity(activity)}
+              wordWrap={editorPrefs.wordWrap}
+              minimapEnabled={editorPrefs.minimap}
+              fontSize={editorPrefs.fontSize}
+              tabSize={editorPrefs.tabSize}
+              revealRequest={revealRequest}
             />
           </div>
           <footer className="editor-status">
