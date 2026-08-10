@@ -232,7 +232,11 @@ const FILE_TEMPLATES: Record<"html" | "css" | "js", string> = {
 // so multiple stylesheets/scripts can be split into separate files while still
 // producing a single runnable document (there's no real server to resolve
 // <link>/<script src> references against inside a sandboxed srcDoc iframe).
-function buildPage(files: Record<string, string>, fileOrder: string[], htmlName: string) {
+function buildPage(
+  files: Record<string, string>,
+  fileOrder: string[],
+  htmlName: string,
+) {
   const base = files[htmlName] ?? "";
   const styles = fileOrder
     .filter((name) => name.endsWith(".css"))
@@ -844,16 +848,16 @@ function Home({
             className="hero-avatar-button"
             onClick={customizeAvatar}
             aria-label={
-              auth.user
-                ? "Customize your Goofy Guy"
-                : "Create your Goofy Guy"
+              auth.user ? "Customize your Goofy Guy" : "Create your Goofy Guy"
             }
           >
             <ScribbleAvatar
               avatar={auth.user?.avatar}
               label="Your scribble avatar"
             />
-            <span>{auth.user ? "customize" : "make yours"} <i>↗</i></span>
+            <span>
+              {auth.user ? "customize" : "make yours"} <i>↗</i>
+            </span>
           </button>
           <div className="hero-copy">
             <button
@@ -863,7 +867,8 @@ function Home({
                 const fresh = await fetch("/api/dashboard")
                   .then((r) => (r.ok ? r.json() : null))
                   .catch(() => null);
-                if (!fresh) return toast("Could not reach the server, try again.");
+                if (!fresh)
+                  return toast("Could not reach the server, try again.");
                 setDashboard(fresh);
                 if (fresh.voteGate.due) return setVoteGateOpen(true);
                 navigate("lobby");
@@ -1100,10 +1105,7 @@ function OnboardingModal({
               This is you on the ladder, in calls, and on the leaderboard. Make
               it weird—you can remix it later from your profile.
             </p>
-            <AvatarCustomizer
-              value={avatar}
-              onChange={setAvatar}
-            />
+            <AvatarCustomizer value={avatar} onChange={setAvatar} />
             <button
               className="primary-button continue-button"
               onClick={onAvatarContinue}
@@ -1125,7 +1127,11 @@ function OnboardingModal({
               password to lose.
             </p>
             <div className="avatar-preview-note">
-              <ScribbleAvatar size="sm" avatar={avatar} label="Your chosen avatar" />
+              <ScribbleAvatar
+                size="sm"
+                avatar={avatar}
+                label="Your chosen avatar"
+              />
               <span>this scribble is coming with you</span>
             </div>
             <button className="primary-button" onClick={onConnectHackClub}>
@@ -1144,8 +1150,8 @@ function OnboardingModal({
             </div>
             <h2 id="onboarding-title">Connect GitHub</h2>
             <p>
-              Every finished match gets published as a folder inside{" "} one monorepo on your account
-              and deployed with GitHub Pages.
+              Every finished match gets published as a folder inside one
+              monorepo on your account and deployed with GitHub Pages.
             </p>
             <a className="primary-button" href="/api/auth/github/start">
               <Icon name="github" size={16} /> connect GitHub
@@ -1523,10 +1529,7 @@ function Lobby({
               <ul className="invite-list">
                 {duoState.incoming.map((invite) => (
                   <li className="invite-row" key={invite.id}>
-                    <ScribbleAvatar
-                      size="sm"
-                      avatar={invite.partnerAvatar}
-                    />
+                    <ScribbleAvatar size="sm" avatar={invite.partnerAvatar} />
                     <div>
                       <strong>{invite.partnerName}</strong>
                       <span>wants to duo with you</span>
@@ -1927,7 +1930,9 @@ function Match({
       : match.durationMinutes * 60;
   });
   const [files, setFiles] = useState(starterFiles);
-  const [fileOrder, setFileOrder] = useState<string[]>(Object.keys(starterFiles));
+  const [fileOrder, setFileOrder] = useState<string[]>(
+    Object.keys(starterFiles),
+  );
   const [tab, setTab] = useState("index.html");
   const [addingFile, setAddingFile] = useState(false);
   const [newFileName, setNewFileName] = useState("");
@@ -1974,13 +1979,18 @@ function Match({
     });
     const doc = provider.getYDoc();
     const fileList = doc.getArray<string>("file-list");
-    const tracked = new Map<string, { text: ReturnType<typeof doc.getText>; sync: () => void }>();
+    const tracked = new Map<
+      string,
+      { text: ReturnType<typeof doc.getText>; sync: () => void }
+    >();
 
     const trackFile = (name: string) => {
       if (tracked.has(name)) return;
       const text = doc.getText(`file:${name}`);
       const sync = () =>
-        setFiles((current) => (text.length ? { ...current, [name]: text.toString() } : current));
+        setFiles((current) =>
+          text.length ? { ...current, [name]: text.toString() } : current,
+        );
       text.observe(sync);
       tracked.set(name, { text, sync });
       if (text.length) sync();
@@ -2003,7 +2013,8 @@ function Match({
       doc.transact(() => {
         for (const name of fileList.toArray()) {
           const text = tracked.get(name)?.text ?? doc.getText(`file:${name}`);
-          if (!text.length && starterFiles[name]) text.insert(0, starterFiles[name]);
+          if (!text.length && starterFiles[name])
+            text.insert(0, starterFiles[name]);
         }
       });
       for (const { sync } of tracked.values()) sync();
@@ -2032,7 +2043,9 @@ function Match({
         return;
       }
       if (!room) return;
-      const provider = getYjsProviderForRoom(room, { offlineSupport_experimental: true });
+      const provider = getYjsProviderForRoom(room, {
+        offlineSupport_experimental: true,
+      });
       const doc = provider.getYDoc();
       const fileList = doc.getArray<string>("file-list");
       if (fileList.toArray().includes(name)) return;
@@ -2052,7 +2065,9 @@ function Match({
   const removeFile = useCallback(
     (name: string) => {
       if (name === "index.html" || !room) return;
-      const provider = getYjsProviderForRoom(room, { offlineSupport_experimental: true });
+      const provider = getYjsProviderForRoom(room, {
+        offlineSupport_experimental: true,
+      });
       const doc = provider.getYDoc();
       const fileList = doc.getArray<string>("file-list");
       const index = fileList.toArray().indexOf(name);
@@ -2080,7 +2095,8 @@ function Match({
 
   const time = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
   const previewDoc = useMemo(() => {
-    const activeHtmlFile = tab.endsWith(".html") && files[tab] !== undefined ? tab : "index.html";
+    const activeHtmlFile =
+      tab.endsWith(".html") && files[tab] !== undefined ? tab : "index.html";
     return buildPage(files, fileOrder, activeHtmlFile);
   }, [files, fileOrder, tab]);
   const previewDocRef = useRef(previewDoc);
@@ -2281,10 +2297,13 @@ function Match({
         error?: string;
         match?: MatchOutcome | null;
       };
-      if (!response.ok) throw new Error(result.error ?? "Could not end the timer.");
+      if (!response.ok)
+        throw new Error(result.error ?? "Could not end the timer.");
       applyLifecycle(result);
     } catch (error) {
-      toast(error instanceof Error ? error.message : "Could not end the timer.");
+      toast(
+        error instanceof Error ? error.message : "Could not end the timer.",
+      );
     }
   }, [applyLifecycle, match.id, toast]);
 
@@ -2551,7 +2570,9 @@ function Match({
               file={tab}
               initialValue={
                 starterFiles[tab] ??
-                FILE_TEMPLATES[(tab.split(".").pop() as "html" | "css" | "js") ?? "html"]
+                FILE_TEMPLATES[
+                  (tab.split(".").pop() as "html" | "css" | "js") ?? "html"
+                ]
               }
               onChange={updateCurrentFile}
               onLocalEdit={(activity) => void reportHackatimeActivity(activity)}
@@ -2562,7 +2583,10 @@ function Match({
             <span>spaces: 2</span>
             <span>utf-8</span>
             <strong className={`hackatime-recording ${hackatimeRecording}`}>
-              <i /> Hackatime · {hackatimeRecording === "recorded" ? "recording" : hackatimeRecording}
+              <i /> Hackatime ·{" "}
+              {hackatimeRecording === "recorded"
+                ? "recording"
+                : hackatimeRecording}
             </strong>
             <b>Liveblocks · {status}</b>
           </footer>
@@ -2680,7 +2704,9 @@ function Match({
           aria-labelledby="results-title"
         >
           <section className="modal results-modal">
-            <span className="eyebrow">match complete · theme: {match.theme}</span>
+            <span className="eyebrow">
+              match complete · theme: {match.theme}
+            </span>
             <div className="vote-grid results-grid">
               <article>
                 <div className="vote-site">
@@ -3164,7 +3190,9 @@ function Voting({
     void loadNext();
   }, [loadNext]);
 
-  const remaining = voteGate ? Math.max(0, voteGate.required - voteGate.cast) : 0;
+  const remaining = voteGate
+    ? Math.max(0, voteGate.required - voteGate.cast)
+    : 0;
   const stillOwed = Boolean(voteGate && voteGate.required > 0 && remaining > 0);
 
   useEffect(() => {
@@ -3187,7 +3215,9 @@ function Voting({
       .then((r) => r.json())
       .catch(() => null);
     setPendingNext(
-      next ? { match: next.match ?? null, voteGate: next.voteGate ?? null } : null,
+      next
+        ? { match: next.match ?? null, voteGate: next.voteGate ?? null }
+        : null,
     );
   };
   const continueVoting = () => {
@@ -3209,7 +3239,11 @@ function Voting({
         ← back to base
       </button>
       <div className="vote-heading">
-        <h1>{match ? "Which site fits the theme best?" : "No matches in voting queue"}</h1>
+        <h1>
+          {match
+            ? "Which site fits the theme best?"
+            : "No matches in voting queue"}
+        </h1>
         <span className="eyebrow">
           {match ? ` · theme: ${match.theme}` : ""}
           {voteGate && voteGate.required > 0
@@ -3376,7 +3410,9 @@ function ProfileModal({
       aria-modal="true"
       aria-labelledby="profile-title"
     >
-      <section className={`modal profile-modal${editingAvatar ? " editing-avatar" : ""}`}>
+      <section
+        className={`modal profile-modal${editingAvatar ? " editing-avatar" : ""}`}
+      >
         <button className="close-button" onClick={close}>
           ×
         </button>
@@ -3480,11 +3516,7 @@ function ProfileModal({
             </small>
             {auth.user && (
               <div className="logout-form">
-                <button
-                  type="button"
-                  onClick={logout}
-                  disabled={logoutLoading}
-                >
+                <button type="button" onClick={logout} disabled={logoutLoading}>
                   {logoutLoading
                     ? "clearing site data…"
                     : "log out & clear site data"}
@@ -3560,7 +3592,7 @@ export default function RankedApp() {
         setOnboardingOpen(
           Boolean(
             next.user &&
-              (!next.github || !next.hackatime || !next.user.experience),
+            (!next.github || !next.hackatime || !next.user.experience),
           ),
         );
         if (next.user) {
@@ -3573,9 +3605,7 @@ export default function RankedApp() {
           }
         }
       })
-      .catch(() =>
-        setAuth({ user: null, github: null, hackatime: null }),
-      );
+      .catch(() => setAuth({ user: null, github: null, hackatime: null }));
     const params = new URLSearchParams(window.location.search);
     if (params.get("auth") === "connected")
       window.setTimeout(() => toast("Hack Club account connected"), 0);
@@ -3585,10 +3615,16 @@ export default function RankedApp() {
         0,
       );
     if (params.get("hackatime") === "connected")
-      window.setTimeout(() => toast("Hackatime connected — matchmaking unlocked"), 0);
+      window.setTimeout(
+        () => toast("Hackatime connected — matchmaking unlocked"),
+        0,
+      );
     if (params.get("hackatime") === "identity_mismatch")
       window.setTimeout(
-        () => toast("That Hackatime account does not match your Hack Club identity"),
+        () =>
+          toast(
+            "That Hackatime account does not match your Hack Club identity",
+          ),
         0,
       );
     if (
