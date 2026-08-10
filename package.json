@@ -26,10 +26,10 @@
     "dotenv": "^17.4.2",
     "drizzle-orm": "0.45.2",
     "monaco-editor": "^0.56.0",
-    "next": "16.2.6",
+    "next": "16.2.11",
     "nitro": "^3.0.260610-beta",
-    "react": "19.2.6",
-    "react-dom": "19.2.6",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
     "y-monaco": "^0.1.6",
     "y-protocols": "^1.0.7",
     "yjs": "^13.6.31"
@@ -46,11 +46,20 @@
     "eslint": "9.39.4",
     "eslint-config-next": "16.2.6",
     "pg": "^8.22.0",
-    "react-server-dom-webpack": "19.2.6",
+    "react-server-dom-webpack": "19.2.8",
     "tailwindcss": "4.2.1",
     "typescript": "5.9.3",
     "vinext": "0.0.50",
-    "vite": "8.0.13"
+    "vite": "8.0.16"
   },
-  "type": "module"
+  "type": "module",
+  "pnpm": {
+    "overrides": {
+      "dompurify": "3.4.13",
+      "esbuild": "0.25.9",
+      "image-size": "2.0.3",
+      "postcss": "8.5.23",
+      "sharp": "0.35.0"
+    }
+  }
 }
