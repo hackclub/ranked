@@ -1979,10 +1979,10 @@ select:focus-visible {
   margin-left: 10px;
   color: var(--muted);
 }
-.file-tabs button span.delete-file {
+.file-tabs button span.close-tab {
   cursor: pointer;
 }
-.file-tabs button span.delete-file:hover {
+.file-tabs button span.close-tab:hover {
   color: var(--ink);
 }
 .file-tabs button.add-file-button {
@@ -2983,6 +2983,9 @@ select:focus-visible {
 .vote-gate-modal {
   text-align: center;
   max-width: 480px;
+}
+.file-delete-modal {
+  max-width: 420px;
 }
 .vote-gate-modal h2 {
   margin: 9px 0 14px;

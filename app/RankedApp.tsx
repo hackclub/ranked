@@ -1945,9 +1945,11 @@ function Match({
   const [fileOrder, setFileOrder] = useState<string[]>(
     Object.keys(starterFiles),
   );
+  const [openTabs, setOpenTabs] = useState<string[]>(Object.keys(starterFiles));
   const [tab, setTab] = useState("index.html");
   const [addingFile, setAddingFile] = useState(false);
   const [newFileName, setNewFileName] = useState("");
+  const [fileToDelete, setFileToDelete] = useState<string | null>(null);
   const [sidebarPanel, setSidebarPanel] = useState<
     "files" | "search" | "changes" | "settings" | null
   >("files");
@@ -2009,6 +2011,7 @@ function Match({
       string,
       { text: ReturnType<typeof doc.getText>; sync: () => void }
     >();
+    let tabsSeeded = false;
 
     const trackFile = (name: string) => {
       if (tracked.has(name)) return;
@@ -2024,7 +2027,11 @@ function Match({
 
     const syncFileOrder = () => {
       const names = fileList.toArray();
-      setFileOrder(names.length ? names : Object.keys(starterFiles));
+      const resolved = names.length ? names : Object.keys(starterFiles);
+      setFileOrder(resolved);
+      setOpenTabs((current) =>
+        tabsSeeded ? current.filter((name) => resolved.includes(name)) : resolved,
+      );
       for (const name of names) trackFile(name);
     };
 
@@ -2036,6 +2043,7 @@ function Match({
         });
       }
       syncFileOrder();
+      tabsSeeded = true;
       doc.transact(() => {
         for (const name of fileList.toArray()) {
           const text = tracked.get(name)?.text ?? doc.getText(`file:${name}`);
@@ -2081,11 +2089,29 @@ function Match({
         const text = doc.getText(`file:${name}`);
         if (text.length === 0) text.insert(0, FILE_TEMPLATES[ext]);
       });
+      setOpenTabs((current) => (current.includes(name) ? current : [...current, name]));
       setTab(name);
       setAddingFile(false);
       setNewFileName("");
     },
     [fileOrder, room, toast],
+  );
+
+  const openFile = useCallback((name: string) => {
+    setOpenTabs((current) => (current.includes(name) ? current : [...current, name]));
+    setTab(name);
+  }, []);
+
+  const closeTab = useCallback(
+    (name: string) => {
+      if (openTabs.length <= 1) return;
+      const index = openTabs.indexOf(name);
+      if (index === -1) return;
+      const next = openTabs.filter((f) => f !== name);
+      setOpenTabs(next);
+      if (tab === name) setTab(next[index - 1] ?? next[0]);
+    },
+    [openTabs, tab],
   );
 
   const removeFile = useCallback(
@@ -2098,10 +2124,22 @@ function Match({
       const fileList = doc.getArray<string>("file-list");
       const index = fileList.toArray().indexOf(name);
       if (index !== -1) fileList.delete(index, 1);
-      setTab((current) => (current === name ? "index.html" : current));
+      const wasActive = tab === name;
+      setOpenTabs((current) => {
+        const next = current.filter((f) => f !== name);
+        return wasActive && !next.includes("index.html")
+          ? [...next, "index.html"]
+          : next;
+      });
+      if (wasActive) setTab("index.html");
     },
-    [room],
+    [room, tab],
   );
+
+  const confirmDeleteFile = () => {
+    if (fileToDelete) removeFile(fileToDelete);
+    setFileToDelete(null);
+  };
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -2471,6 +2509,30 @@ function Match({
           </section>
         </div>
       )}
+      {fileToDelete && (
+        <div
+          className="modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-file-title"
+          onClick={() => setFileToDelete(null)}
+        >
+          <section
+            className="modal publish-modal file-delete-modal"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <span className="eyebrow">delete file</span>
+            <h2 id="delete-file-title">Delete {fileToDelete}?</h2>
+            <p>This removes it for the whole team and can't be undone.</p>
+            <div className="forfeit-actions">
+              <button onClick={() => setFileToDelete(null)}>cancel</button>
+              <button className="danger-button" onClick={confirmDeleteFile}>
+                delete file
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
       {disconnect && !outcome && (
         <div
           className={`disconnect-banner ${disconnect.team === team ? "danger" : ""}`}
@@ -2536,7 +2598,7 @@ function Match({
         <div className="editor-shell">
           <div className="editor-toolbar">
             <div className="file-tabs">
-              {fileOrder.map((file) => (
+              {openTabs.map((file) => (
                 <button
                   key={file}
                   onClick={() => setTab(file)}
@@ -2544,14 +2606,15 @@ function Match({
                 >
                   <i className={`file-dot ${file.split(".").pop()}`} />
                   {file}
-                  {file !== "index.html" && (
+                  {openTabs.length > 1 && (
                     <span
-                      className="delete-file"
+                      className="close-tab"
                       role="button"
-                      aria-label={`Delete ${file}`}
+                      aria-label={`Close ${file}`}
+                      title="Close (doesn't delete the file)"
                       onClick={(event) => {
                         event.stopPropagation();
-                        removeFile(file);
+                        closeTab(file);
                       }}
                     >
                       ×
@@ -2654,7 +2717,7 @@ function Match({
                     <button
                       key={file}
                       className={`explorer-row ${tab === file ? "active" : ""}`}
-                      onClick={() => setTab(file)}
+                      onClick={() => openFile(file)}
                     >
                       <i className={`file-dot ${file.split(".").pop()}`} />
                       <span className="explorer-name">{file}</span>
@@ -2663,9 +2726,10 @@ function Match({
                           className="delete-file"
                           role="button"
                           aria-label={`Delete ${file}`}
+                          title="Delete file"
                           onClick={(event) => {
                             event.stopPropagation();
-                            removeFile(file);
+                            setFileToDelete(file);
                           }}
                         >
                           ×
@@ -2710,7 +2774,7 @@ function Match({
                               key={match.line}
                               className="search-match"
                               onClick={() => {
-                                setTab(group.file);
+                                openFile(group.file);
                                 setRevealRequest({ file: group.file, line: match.line });
                               }}
                             >
@@ -2736,7 +2800,7 @@ function Match({
                     <ul className="changes-list">
                       {changedFiles.map((file) => (
                         <li key={file}>
-                          <button onClick={() => setTab(file)}>
+                          <button onClick={() => openFile(file)}>
                             <i className={`file-dot ${file.split(".").pop()}`} />
                             {file}
                           </button>
