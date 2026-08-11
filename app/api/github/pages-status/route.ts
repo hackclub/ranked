@@ -14,9 +14,19 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Invalid pages URL." }, { status: 400 });
   }
   try {
-    const response = await fetch(url, { method: "GET", redirect: "follow", cache: "no-store" });
+    const response = await fetch(url, {
+      method: "GET",
+      redirect: "follow",
+      cache: "no-store",
+      // Ask the runtime to close the socket instead of pooling it — GitHub's
+      // Fastly edge resetting an idle keep-alive connection is what shows up
+      // client-side as an indefinitely stuck "deploying" (see ECONNRESET).
+      headers: { Connection: "close" },
+      signal: AbortSignal.timeout(8000),
+    });
     return NextResponse.json({ ready: response.ok });
-  } catch {
+  } catch (error) {
+    console.error("pages-status check failed for", url, error);
     return NextResponse.json({ ready: false });
   }
 }

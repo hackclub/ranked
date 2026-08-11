@@ -201,6 +201,9 @@ const starterFiles: Record<string, string> = {
 <html>
   <head><meta charset="utf-8"><meta name="viewport" content="width=device-width"></head>
   <body>
+    <!-- to add another page, use a link: <a href="about.html">about</a>
+         or a button: <button onclick="goTo('about.html')">about</button> -->
+    <!-- Tailwind utility classes work out of the box, e.g. class="flex items-center gap-4" -->
     <main><div class="planet"><h1>hello, orbit!</h1></div></main>
   </body>
 </html>`,
@@ -226,6 +229,7 @@ const FILE_TEMPLATES: Record<"html" | "css" | "js", string> = {
   <body>
     <!-- to travel to another page use a link: <a href="index.html">home</a>
          or a button: <button onclick="goTo('index.html')">home</button> -->
+    <!-- Tailwind utility classes work out of the box, e.g. class="flex items-center gap-4" -->
   </body>
 </html>`,
   css: `/* styles */\n`,
@@ -291,9 +295,17 @@ function buildPage(
     .map((name) => files[name] ?? "")
     .join("\n");
   const navShim = buildNavShim(fileOrder, Boolean(opts.preview));
+  // Tailwind's Play CDN build needs no bundler, so it's the only way to give
+  // players utility classes on a raw html/css/js page with no build step —
+  // it injects its own <style> at load, ahead of styles.css in source order
+  // so a player's own CSS still wins on conflicting rules. It's a no-op (a
+  // few KB fetched, nothing generated) for anyone who never types a
+  // Tailwind class, and this same output is what gets committed on publish,
+  // so the deployed GitHub Pages site renders identically to the preview.
+  const tailwindScript = `<script src="https://cdn.tailwindcss.com"><\/script>`;
   const withStyles = base.includes("</head>")
-    ? base.replace("</head>", `<style>${styles}</style></head>`)
-    : `<style>${styles}</style>${base}`;
+    ? base.replace("</head>", `${tailwindScript}<style>${styles}</style></head>`)
+    : `${tailwindScript}<style>${styles}</style>${base}`;
   return withStyles.includes("</body>")
     ? withStyles.replace(
         "</body>",
@@ -305,20 +317,31 @@ function buildPage(
 // GitHub Pages takes ~30-90s to build after the first push, so a pagesUrl
 // fresh out of the publish API 404s for a bit — poll the real URL server-side
 // until it resolves, with a friendly countdown so the wait doesn't read as broken.
+// If the build's still not up after ~4x the usual wait, the check itself is
+// probably wedged (e.g. GitHub's edge resetting our polling connection) rather
+// than the build genuinely still running — surface an escape hatch instead of
+// polling in silence forever.
+const PAGES_STALLED_AFTER_SECONDS = PAGES_BUILD_ESTIMATE_SECONDS * 4;
+
 function usePagesReady(url: string | undefined) {
   const [ready, setReady] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(PAGES_BUILD_ESTIMATE_SECONDS);
+  const [stalled, setStalled] = useState(false);
   const [trackedUrl, setTrackedUrl] = useState(url);
   if (url !== trackedUrl) {
     setTrackedUrl(url);
     setReady(false);
+    setStalled(false);
     setSecondsLeft(PAGES_BUILD_ESTIMATE_SECONDS);
   }
   useEffect(() => {
     if (!url) return;
     let cancelled = false;
+    let elapsedSeconds = 0;
     const countdownTimer = setInterval(() => {
+      elapsedSeconds += 1;
       setSecondsLeft((seconds) => Math.max(0, seconds - 1));
+      if (elapsedSeconds >= PAGES_STALLED_AFTER_SECONDS) setStalled(true);
     }, 1000);
     (async () => {
       while (!cancelled) {
@@ -342,7 +365,7 @@ function usePagesReady(url: string | undefined) {
       clearInterval(countdownTimer);
     };
   }, [url]);
-  return { ready, secondsLeft };
+  return { ready, secondsLeft, stalled };
 }
 
 function highlightMatch(text: string, query: string) {
@@ -602,18 +625,17 @@ function ProgressBar({ elo = 1500 }: { elo?: number }) {
   return (
     <div className="rank-wrap" aria-label={`Elo rating ${elo}`}>
       <div className="rank-labels">
-        <span>1500</span>
-        <strong>{elo} ELO</strong>
-        <span>celestial at 3000</span>
+        <span className="rank-tier current">meteor</span>
+        <strong>
+          {elo} <small>elo</small>
+        </strong>
+        <span className="rank-tier target">celestial</span>
       </div>
       <div className="rank-track">
         <div className="rank-fill" style={{ width: `${progress}%` }} />
         <i className="rank-dot" style={{ left: `${progress}%` }} />
       </div>
-      <div className="rank-meta">
-        <span>meteor</span>
-        <span>{Math.max(0, 3000 - elo)} to celestial</span>
-      </div>
+      <div className="rank-meta">{Math.max(0, 3000 - elo)} to celestial</div>
     </div>
   );
 }
@@ -977,7 +999,7 @@ function Home({
                 navigate("lobby");
               }}
             >
-              {auth.user ? "find a match" : "sign in to play"}{" "}
+              {auth.user ? "start match" : "sign in to play"}{" "}
               <Icon name="external" size={18} />
             </button>
             <div className="queue-note">
@@ -1852,7 +1874,7 @@ function Lobby({
           </div>
           <div className="hud-block hud-block-tight">
             <span className="hud-label">camera & microphone</span>
-            <div className="camera-preview">
+            <div className="camera-preview h-[20vh]">
               {video && previewStream && !previewError ? (
                 <video
                   ref={previewVideoRef}
@@ -1862,7 +1884,7 @@ function Lobby({
                   className="camera-preview-video"
                 />
               ) : (
-                <div className="camera-preview-placeholder">
+                <div className="camera-preview-placeholder h-[20vh]">
                   <small>
                     {previewError
                       ? "Camera or mic blocked, check browser permissions"
@@ -1940,9 +1962,9 @@ function Lobby({
       </section>
 
       <div className="lobby-footer">
-        <small className="lobby-fineprint">
+        <small className="lobby-fineprint text-[10px] mb-2">
           By joining, you agree to abide by the{" "}
-          <a href="https://hackclub.com/conduct" className="black bold">
+          <a href="https://hackclub.com/conduct" className="black bold underline">
             Hack Club Code of Conduct
           </a>{" "}
           and be cool
@@ -1973,6 +1995,7 @@ function VideoTile({
   stream,
   local = false,
   audioMuted = false,
+  compact = false,
 }: {
   name: string;
   team: string;
@@ -1982,11 +2005,13 @@ function VideoTile({
   stream?: MediaStream | null;
   local?: boolean;
   audioMuted?: boolean;
+  compact?: boolean;
 }) {
   return (
     <div
-      className="video-tile"
+      className={`video-tile${compact ? " compact" : ""}`}
       style={{ "--tile": color ?? avatarAccent(avatar) } as React.CSSProperties}
+      title={`${name} · ${team}`}
     >
       {stream ? (
         <StreamVideo
@@ -1997,7 +2022,7 @@ function VideoTile({
       ) : (
         <ScribbleAvatar
           avatar={avatar}
-          size="md"
+          size={compact ? "sm" : "md"}
           label={`${name}'s camera placeholder`}
         />
       )}
@@ -2006,7 +2031,7 @@ function VideoTile({
           <i />
           {name}
         </span>
-        <small>{team}</small>
+        {!compact && <small>{team}</small>}
       </div>
       {muted && <span className="muted-badge">mic off</span>}
     </div>
@@ -2081,9 +2106,11 @@ function Match({
     repositoryUrl?: string;
     pagesUrl?: string;
   }>({ loading: false });
-  const { ready: pagesReady, secondsLeft: pagesCountdown } = usePagesReady(
-    publishState.pagesUrl,
-  );
+  const {
+    ready: pagesReady,
+    secondsLeft: pagesCountdown,
+    stalled: pagesStalled,
+  } = usePagesReady(publishState.pagesUrl);
   const team = match.team;
   const { status, localStream, remotePeers } = useRealtimeRoom(
     `ranked:call:${match.id}`,
@@ -2572,9 +2599,6 @@ function Match({
   return (
     <main className="match-screen">
       <header className="match-header">
-        <button className="match-logo" onClick={() => navigate("home")}>
-          R/
-        </button>
         <div className="match-timer-cluster">
           <div className="theme-tag">
             <span>theme</span>
@@ -2583,6 +2607,58 @@ function Match({
           <div className="timer" aria-label={`${time} remaining`}>
             <span>{time}</span>
             <small>remaining</small>
+          </div>
+        </div>
+        <div className="match-call-row">
+          <div className="call-team">
+            <span className="call-label">
+              {match.mode === "duo" ? "duo" : "you"}
+            </span>
+            <div className="call-tiles">
+              <VideoTile
+                compact
+                name={auth.user?.name ?? "you"}
+                team={`${team} · you`}
+                avatar={auth.user?.avatar}
+                stream={video ? localStream : null}
+                local
+                muted={!mic}
+              />
+              {match.mode === "duo" && (
+                <VideoTile
+                  compact
+                  name={teammate?.name ?? "waiting…"}
+                  team={teammate ? "teammate · live" : "waiting for teammate"}
+                  color={teammate?.color ?? COLORS[2]}
+                  avatar={teammate?.avatar}
+                  stream={teammate?.video ? teammate.stream : null}
+                  muted={teammate ? !teammate.mic : false}
+                />
+              )}
+            </div>
+          </div>
+          <div className="call-team">
+            <span className="call-label">
+              {match.mode === "duo" ? "opp" : "opponent"}
+            </span>
+            <div className="call-tiles">
+              {(match.mode === "duo" ? [0, 1] : [0]).map((index) => {
+                const peer = opponents[index];
+                return (
+                  <VideoTile
+                    compact
+                    key={peer?.connectionId ?? index}
+                    name={peer?.name ?? "open slot"}
+                    team={peer ? `${peer.team} team` : "waiting for builder"}
+                    color={peer?.color ?? COLORS[index + 3]}
+                    avatar={peer?.avatar}
+                    stream={peer?.video ? peer.stream : null}
+                    muted={peer ? !peer.mic : false}
+                    audioMuted={scope === "team" && peer?.team !== team}
+                  />
+                );
+              })}
+            </div>
           </div>
         </div>
         <div className="match-actions">
@@ -2672,55 +2748,6 @@ function Match({
           </span>
         </div>
       )}
-      <section className="call-strip">
-        <div className="call-team">
-          <span className="call-label">
-            {match.mode === "duo" ? "your duo" : "you"}
-          </span>
-          <div className="call-tiles">
-            <VideoTile
-              name={auth.user?.name ?? "you"}
-              team={`${team} · you`}
-              avatar={auth.user?.avatar}
-              stream={video ? localStream : null}
-              local
-              muted={!mic}
-            />
-            {match.mode === "duo" && (
-              <VideoTile
-                name={teammate?.name ?? "waiting…"}
-                team={teammate ? "teammate · live" : "waiting for teammate"}
-                color={teammate?.color ?? COLORS[2]}
-                avatar={teammate?.avatar}
-                stream={teammate?.video ? teammate.stream : null}
-                muted={teammate ? !teammate.mic : false}
-              />
-            )}
-          </div>
-        </div>
-        <div className="call-team">
-          <span className="call-label">
-            {match.mode === "duo" ? "opponents" : "opponent"}
-          </span>
-          <div className="call-tiles">
-            {(match.mode === "duo" ? [0, 1] : [0]).map((index) => {
-              const peer = opponents[index];
-              return (
-                <VideoTile
-                  key={peer?.connectionId ?? index}
-                  name={peer?.name ?? "open slot"}
-                  team={peer ? `${peer.team} team` : "waiting for builder"}
-                  color={peer?.color ?? COLORS[index + 3]}
-                  avatar={peer?.avatar}
-                  stream={peer?.video ? peer.stream : null}
-                  muted={peer ? !peer.mic : false}
-                  audioMuted={scope === "team" && peer?.team !== team}
-                />
-              );
-            })}
-          </div>
-        </div>
-      </section>
       <section className="workspace">
         <div className="editor-shell">
           <div className="editor-toolbar">
@@ -3057,20 +3084,6 @@ function Match({
           </footer>
         </div>
         <aside className="preview-panel">
-          <div className="preview-head">
-            <div>
-              <strong>your website</strong>
-            </div>
-            <div className="browser-dots">
-              <i />
-              <i />
-              <i />
-            </div>
-            <button onClick={() => setPreviewOpen(!previewOpen)}>
-              {previewOpen ? "hide" : "expand"}{" "}
-              <Icon name="external" size={11} />
-            </button>
-          </div>
           <iframe
             ref={registerOwnPreviewFrame}
             title="Your website live preview"
@@ -3078,38 +3091,45 @@ function Match({
             sandbox="allow-scripts"
             referrerPolicy="no-referrer"
           />
-          <div className="opponent-snapshot">
-            <div>
-              <span className="eyebrow">OPPONENT SNAPSHOT</span>
-              <strong>update in {syncIn}s</strong>
-            </div>
-            {opponentSnapshot ? (
-              <iframe
-                title="Opponent website snapshot"
-                srcDoc={opponentSnapshot}
-                sandbox="allow-scripts"
-                referrerPolicy="no-referrer"
-              />
-            ) : (
-              <div className="snapshot-art">
-                <span className="planet-one" />
-                <span className="planet-two" />
-                <b>
-                  waiting for
-                  <br />
-                  their first sync
-                </b>
-              </div>
-            )}
-            <button
-              onClick={() =>
-                toast("Snapshots sync automatically every 30 seconds")
-              }
-            >
-              live sync <small>server verified</small>
-            </button>
-          </div>
+          <button
+            className="preview-expand-button"
+            onClick={() => setPreviewOpen(!previewOpen)}
+            aria-label={previewOpen ? "Hide expanded preview" : "Expand preview"}
+          >
+            <Icon name="external" size={13} />
+          </button>
         </aside>
+        <div className="opponent-panel">
+          <div>
+            <span className="eyebrow">opponent snapshot</span>
+            <strong>update in {syncIn}s</strong>
+          </div>
+          {opponentSnapshot ? (
+            <iframe
+              title="Opponent website snapshot"
+              srcDoc={opponentSnapshot}
+              sandbox="allow-scripts"
+              referrerPolicy="no-referrer"
+            />
+          ) : (
+            <div className="snapshot-art">
+              <span className="planet-one" />
+              <span className="planet-two" />
+              <b>
+                waiting for
+                <br />
+                their first sync
+              </b>
+            </div>
+          )}
+          <button
+            onClick={() =>
+              toast("Snapshots sync automatically every 30 seconds")
+            }
+          >
+            live sync <small>server verified</small>
+          </button>
+        </div>
         <div className="call-controls">
           <button
             className={mic ? "active" : ""}
@@ -3254,7 +3274,7 @@ function Match({
                   >
                     view source <Icon name="external" size={11} />
                   </a>
-                  {pagesReady ? (
+                  {pagesReady || pagesStalled ? (
                     <a
                       href={publishState.pagesUrl}
                       target="_blank"
@@ -3443,8 +3463,9 @@ function Leaderboard({ navigate }: { navigate: (s: Screen) => void }) {
   }, [board]);
   return (
     <main className="subpage screen-pad">
-      <button className="back-button" onClick={() => navigate("home")}>
-        ← back to base
+      <button className="lobby-exit-button" onClick={() => navigate("home")}>
+        <Icon name="arrow-left" size={14} />
+        back to dash
       </button>
       <div className="subpage-head">
         <h1>Leaderboard</h1>
@@ -3554,8 +3575,9 @@ function Shop({
   };
   return (
     <main className="subpage shop-page screen-pad">
-      <button className="back-button" onClick={() => navigate("home")}>
-        ← back to base
+      <button className="lobby-exit-button" onClick={() => navigate("home")}>
+        <Icon name="arrow-left" size={14} />
+        back to dash
       </button>
       <div className="subpage-head">
         <h1>Store</h1>
@@ -3667,8 +3689,6 @@ function Voting({
   useEffect(() => {
     void loadNext();
   }, [loadNext]);
-  const bluePages = usePagesReady(match?.sites.blue.pagesUrl);
-  const redPages = usePagesReady(match?.sites.red.pagesUrl);
 
   const remaining = voteGate
     ? Math.max(0, voteGate.required - voteGate.cast)
@@ -3715,8 +3735,9 @@ function Voting({
   };
   return (
     <main className="vote-page screen-pad">
-      <button className="back-button" onClick={() => navigate("home")}>
-        ← back to base
+      <button className="lobby-exit-button" onClick={() => navigate("home")}>
+        <Icon name="arrow-left" size={14} />
+        back to dash
       </button>
       <div className="vote-heading">
         <h1>
@@ -3736,22 +3757,12 @@ function Voting({
           <section className="vote-grid">
             <article className={voted === "blue" ? "chosen" : ""}>
               <div className="vote-site">
-                {bluePages.ready ? (
-                  <iframe
-                    title="Build A"
-                    src={match.sites.blue.pagesUrl}
-                    sandbox="allow-scripts allow-same-origin"
-                    referrerPolicy="no-referrer"
-                  />
-                ) : (
-                  <div className="vote-site-pending" aria-live="polite">
-                    <i />
-                    deploying
-                    {bluePages.secondsLeft > 0
-                      ? ` · ~${bluePages.secondsLeft}s`
-                      : "…"}
-                  </div>
-                )}
+                <iframe
+                  title="Build A"
+                  src={match.sites.blue.pagesUrl}
+                  sandbox="allow-scripts allow-same-origin"
+                  referrerPolicy="no-referrer"
+                />
               </div>
               <footer>
                 <div>
@@ -3781,22 +3792,12 @@ function Voting({
             <div className="versus">VS</div>
             <article className={voted === "red" ? "chosen" : ""}>
               <div className="vote-site">
-                {redPages.ready ? (
-                  <iframe
-                    title="Build B"
-                    src={match.sites.red.pagesUrl}
-                    sandbox="allow-scripts allow-same-origin"
-                    referrerPolicy="no-referrer"
-                  />
-                ) : (
-                  <div className="vote-site-pending" aria-live="polite">
-                    <i />
-                    deploying
-                    {redPages.secondsLeft > 0
-                      ? ` · ~${redPages.secondsLeft}s`
-                      : "…"}
-                  </div>
-                )}
+                <iframe
+                  title="Build B"
+                  src={match.sites.red.pagesUrl}
+                  sandbox="allow-scripts allow-same-origin"
+                  referrerPolicy="no-referrer"
+                />
               </div>
               <footer>
                 <div>

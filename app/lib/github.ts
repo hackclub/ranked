@@ -211,13 +211,18 @@ export async function publishWebsite(
   }
   await putFile(
     `${folderName}/README.md`,
-    `# ${folderName}\n\nBuilt live on Ranked and published open source.\n`,
+    `# ${folderName}\n\nThis website was built live on [Hack Club Ranked](https://ranked.hackclub.com).\n`,
     `Add README for ${folderName}`,
   );
+  // .html source is skipped here — the bundled version above already covers
+  // it, so keeping the raw copy too would just duplicate every page. .css/.js
+  // still need their unbundled originals (the pages above only carry them
+  // inlined), sorted into styles/ and scripts/ instead of one flat "source".
   for (const [name, content] of Object.entries(sourceFiles ?? {})) {
-    if (!PUBLISHABLE_FILE_NAME.test(name)) continue;
+    if (!PUBLISHABLE_FILE_NAME.test(name) || name.endsWith(".html")) continue;
+    const subfolder = name.endsWith(".css") ? "styles" : "scripts";
     await putFile(
-      `${folderName}/source/${name}`,
+      `${folderName}/${subfolder}/${name}`,
       content,
       `Publish ${folderName} ${name} source`,
     );
