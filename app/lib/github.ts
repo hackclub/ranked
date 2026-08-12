@@ -125,7 +125,8 @@ async function ensureRankedRepo(token: string, login: string) {
       method: "POST",
       body: JSON.stringify({
         name: RANKED_REPO,
-        description: "Hack Club Ranked is a program run by [Hack Club](https://hackclub.com) where teenagers compete and collaborate to speedrun making websites according to a theme. Whoever has the best site at the end wins, and the more matches you win the higher your Ranking. The more matches you play and more hours you code, you can buy cool prizes in the shop like drawing tablets, iPads, hoodies, headphones, and more!",
+        description:
+          "Hack Club Ranked is a program run by [Hack Club](https://hackclub.com) where teenagers compete and collaborate to speedrun making websites according to a theme. Whoever has the best site at the end wins, and the more matches you win the higher your Ranking. The more matches you play and more hours you code, you can buy cool prizes in the shop like drawing tablets, iPads, hoodies, headphones, and more!",
         homepage: `https://${login}.github.io/${RANKED_REPO}/`,
         private: false,
         has_issues: true,
@@ -167,6 +168,7 @@ export async function publishWebsite(
   requestedName: string,
   pages: Record<string, string>,
   sourceFiles?: Record<string, string>,
+  description?: string,
 ) {
   const folderName = requestedName.trim();
   if (
@@ -209,9 +211,10 @@ export async function publishWebsite(
       `Publish ${folderName} ${name}`,
     );
   }
+  const trimmedDescription = description?.trim();
   await putFile(
     `${folderName}/README.md`,
-    `# ${folderName}\n\nThis website was built live on [Hack Club Ranked](https://ranked.hackclub.com).\n`,
+    `# ${folderName}\n\n${trimmedDescription ? `${trimmedDescription}\n\n` : ""}This website was built live on [Hack Club Ranked](https://ranked.hackclub.com).\n`,
     `Add README for ${folderName}`,
   );
   // .html source is skipped here — the bundled version above already covers

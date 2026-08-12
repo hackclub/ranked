@@ -1642,12 +1642,36 @@ select:focus-visible {
   overflow: hidden;
 }
 .match-header {
-  display: grid;
-  grid-template-columns: 62px auto 1fr auto;
-  grid-template-areas: "logo timer call actions";
+  display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 18px;
+  gap: 12px;
   padding: clamp(10px, 2vh, 18px) 32px 0;
+}
+.match-header-brand {
+  display: flex;
+  justify-content: center;
+}
+.match-hud {
+  /* Single source of truth for "timer + gap + theme" so the video tiles can
+     match it exactly instead of guessing at a fixed height. */
+  --hud-cluster-height: calc(
+    clamp(40px, 6.5vh, 56px) + 8px + clamp(40px, 6.5vh, 54px)
+  );
+  /* 4 columns, not 2 zones: own-tiles / actions / timer / opp-tiles. The two
+     outer columns share the leftover space equally (1fr each), so the
+     actions+timer block in between them sits at the true center of the row
+     no matter how many tiles either side renders — centering the whole flex
+     row as one group can't do that once the two sides differ in width. */
+  display: grid;
+  grid-template-columns: 1fr auto auto 1fr;
+  align-items: center;
+  gap: clamp(14px, 2.4vw, 26px);
+  width: 100%;
+}
+.match-hud > .call-team {
+  justify-self: center;
+  min-width: 0;
 }
 .match-logo {
   grid-area: logo;
@@ -1661,22 +1685,15 @@ select:focus-visible {
   border-radius: var(--blob);
 }
 .match-timer-cluster {
-  grid-area: timer;
-  justify-self: start;
   display: flex;
-  align-items: center;
-  gap: 14px;
+  flex-direction: column;
+  gap: 8px;
 }
-.match-call-row {
-  grid-area: call;
-  justify-self: end;
-  display: flex;
-  align-items: center;
-  gap: 20px;
-  min-width: 0;
+.match-timer-cluster > * {
+  min-width: 150px;
 }
 .theme-tag {
-  height: clamp(46px, 7.5vh, 64px);
+  height: clamp(40px, 6.5vh, 54px);
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -1699,7 +1716,7 @@ select:focus-visible {
 }
 .timer {
   min-width: 140px;
-  height: clamp(46px, 7.5vh, 64px);
+  height: clamp(40px, 6.5vh, 56px);
   border: 2px solid var(--red);
   display: flex;
   flex-direction: column;
@@ -1710,7 +1727,7 @@ select:focus-visible {
   border-radius: var(--blob);
 }
 .timer span {
-  font: 650 clamp(18px, 3vh, 28px) var(--font-geist-mono);
+  font: 650 clamp(16px, 2.6vh, 24px) var(--font-geist-mono);
 }
 .timer small {
   font: 600 8px var(--font-geist-mono);
@@ -1748,10 +1765,10 @@ select:focus-visible {
   background: var(--red);
 }
 .match-actions {
-  grid-area: actions;
   display: flex;
-  justify-content: flex-end;
-  gap: 9px;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
 }
 .exit-match,
 .forfeit-match {
@@ -1787,6 +1804,83 @@ select:focus-visible {
 .settings-gear:hover {
   background: var(--green);
   transform: rotate(25deg);
+}
+.report-menu-anchor {
+  position: relative;
+}
+.report-menu-button {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border: 2px solid var(--ink);
+  color: var(--ink);
+  background: var(--paper);
+  border-radius: var(--blob);
+  transition: transform 0.15s, background 0.15s;
+}
+.report-menu-button:hover {
+  background: var(--pink);
+  transform: translate(1px, 1px);
+}
+.report-menu {
+  position: absolute;
+  z-index: 31;
+  top: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 210px;
+  display: flex;
+  flex-direction: column;
+  background: var(--paper);
+  border: 2px solid var(--ink);
+  box-shadow: 5px 5px 0 var(--ink);
+  padding: 8px;
+  gap: 4px;
+  border-radius: var(--blob);
+}
+.report-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  padding: 9px 8px;
+  font: 600 10px var(--font-geist-mono);
+  border-radius: 8px;
+}
+.report-menu button:hover {
+  background: var(--red-strong);
+  color: white;
+}
+.report-roster {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 14px 0;
+}
+.report-roster button {
+  border: 2px solid var(--ink);
+  background: var(--paper);
+  color: var(--ink);
+  padding: 9px 14px;
+  font: 600 10px var(--font-geist-mono);
+  border-radius: var(--blob);
+}
+.report-roster button.active {
+  background: var(--red-strong);
+  color: white;
+}
+.report-modal {
+  text-align: center;
+  max-width: 520px;
+}
+.report-modal h2 {
+  margin: 9px 0;
+  font-size: 22px;
+  letter-spacing: -0.03em;
 }
 .settings-modal h2 {
   margin: 8px 0 20px;
@@ -1848,12 +1942,15 @@ select:focus-visible {
 }
 .call-tiles {
   display: flex;
+  justify-content: center;
   gap: 7px;
+  /* Solo mode renders one tile per side — center it in the same footprint
+     duo's two tiles occupy, instead of it sitting flush against the label. */
 }
 .video-tile {
   --tile: var(--blue);
-  width: clamp(120px, 15vw, 185px);
-  height: clamp(72px, 12vh, 132px);
+  width: 100%;
+  height: 100%;
   border: 2px solid var(--tile);
   position: relative;
   overflow: hidden;
@@ -1866,28 +1963,28 @@ select:focus-visible {
   transform: scale(0.8);
 }
 .video-tile.compact {
-  width: clamp(48px, 5.5vw, 66px);
-  height: clamp(40px, 6.5vh, 54px);
+  width: clamp(140px, 15vw, 200px);
+  height: var(--hud-cluster-height);
 }
 .video-tile.compact .scribble-avatar {
-  transform: scale(0.42);
+  transform: scale(0.62);
 }
 .video-tile.compact .video-label {
-  bottom: 3px;
-  left: 4px;
-  right: 4px;
-  font-size: 7px;
+  bottom: 5px;
+  left: 6px;
+  right: 6px;
+  font-size: 9px;
 }
 .video-tile.compact .video-label span i {
-  width: 4px;
-  height: 4px;
+  width: 5px;
+  height: 5px;
   margin-right: 3px;
 }
 .video-tile.compact .muted-badge {
-  top: 2px;
-  right: 2px;
-  padding: 2px 4px;
-  font-size: 6px;
+  top: 4px;
+  right: 4px;
+  padding: 3px 5px;
+  font-size: 7px;
 }
 .video-label {
   position: absolute;
@@ -1921,11 +2018,9 @@ select:focus-visible {
   font: 600 7px var(--font-geist-mono);
 }
 .call-controls {
-  grid-area: controls;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: flex-end;
   gap: 9px;
 }
 .call-controls > button {
@@ -1967,19 +2062,24 @@ select:focus-visible {
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(480px, 1fr) minmax(400px, 44vw);
-  grid-template-rows: 1fr 150px auto;
+  grid-template-rows: 1fr auto;
   grid-template-areas:
     "editor preview"
-    "editor opp"
-    "editor controls";
+    "editor bottom";
   gap: 14px 20px;
   padding: 20px 32px;
   background: var(--cream);
 }
+.match-bottom-row {
+  grid-area: bottom;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
 .editor-shell {
   grid-area: editor;
-  min-width: 0;
-  min-height: 0;
+  height:70vh;
   display: grid;
   grid-template-rows: 46px 1fr 26px;
   border: 2px solid var(--ink);
@@ -2464,6 +2564,7 @@ select:focus-visible {
   margin-left: 0;
 }
 .preview-panel {
+  height: 45vh;
   grid-area: preview;
   min-width: 0;
   min-height: 0;
@@ -2494,7 +2595,9 @@ select:focus-visible {
   color: var(--ink);
   border-radius: var(--blob);
   box-shadow: 2px 3px 0 var(--ink);
-  transition: transform 0.15s, box-shadow 0.15s;
+  transition:
+    transform 0.15s,
+    box-shadow 0.15s;
 }
 .preview-expand-button:hover {
   background: var(--green);
@@ -2502,38 +2605,14 @@ select:focus-visible {
   box-shadow: 3px 4px 0 var(--ink);
 }
 .opponent-panel {
-  grid-area: opp;
-  display: grid;
-  grid-template-columns: 1fr 1.2fr;
-  grid-template-rows: auto 1fr;
-  border: 2px solid var(--red);
-  background: var(--paper);
-  box-shadow: 5px 5px 0 var(--ink);
-  padding: 14px 16px;
-  gap: 10px;
+  flex: 0 1 320px;
+  height: clamp(84px, 20vh, 300px);
   min-height: 0;
   position: relative;
-  z-index: 1;
-  transform-origin: bottom right;
-  transition: transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.25s;
-  cursor: zoom-in;
-}
-.opponent-panel:hover {
-  transform: scale(1.5);
-  z-index: 20;
-  box-shadow: 10px 10px 0 var(--ink);
-}
-.opponent-panel .eyebrow {
-  color: var(--red-strong);
-  font-size: 7px;
-}
-.opponent-panel strong {
-  font: 650 10px var(--font-geist-mono);
-  color: var(--ink);
 }
 .snapshot-art {
-  grid-row: 1 / 3;
-  grid-column: 2;
+  width: 100%;
+  height: 100%;
   position: relative;
   background: #090d16;
   border: 2px solid var(--ink);
@@ -2568,20 +2647,6 @@ select:focus-visible {
   top: 12px;
   background: var(--green);
 }
-.opponent-panel > button {
-  align-self: end;
-  border: 2px solid var(--ink);
-  color: var(--muted);
-  background: var(--paper);
-  padding: 9px;
-  font: 600 8px var(--font-geist-mono);
-  border-radius: var(--blob);
-}
-.opponent-panel > button small {
-  display: block;
-  color: var(--muted);
-  margin-top: 3px;
-}
 .expanded-preview {
   width: min(1100px, 95vw);
   height: 85vh;
@@ -2590,10 +2655,12 @@ select:focus-visible {
   border: 3px solid var(--ink);
   border-radius: var(--blob);
 }
-.expanded-preview iframe {
+.expanded-preview iframe,
+.expanded-preview .snapshot-art {
   width: 100%;
   height: 100%;
   border: 0;
+  border-radius: 0;
 }
 .expanded-preview > button {
   position: absolute;
@@ -2784,6 +2851,19 @@ select:focus-visible {
   align-items: center;
   justify-content: center;
   border-radius: var(--blob);
+}
+.build-description {
+  margin: 10px 2px 0;
+  padding: 10px 12px;
+  background: #fffdf1;
+  border: 2px solid var(--ink);
+  border-radius: var(--blob);
+  font: 500 11px/1.5 var(--font-geist-mono);
+  color: var(--ink);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 .vote-grid article footer {
   display: flex;
@@ -3098,6 +3178,34 @@ select:focus-visible {
   color: var(--red-strong);
   font-weight: 700;
 }
+.description-field {
+  display: block;
+  position: relative;
+  border: 2px solid var(--ink);
+  background: #fffdf1;
+  margin: 20px 0 8px;
+  text-align: left;
+  border-radius: var(--blob);
+}
+.description-field textarea {
+  display: block;
+  width: 100%;
+  min-height: 110px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  resize: vertical;
+  padding: 14px 14px 24px;
+  font: 500 13px/1.5 var(--font-geist-mono);
+  color: var(--ink);
+}
+.description-count {
+  position: absolute;
+  right: 14px;
+  bottom: 10px;
+  color: var(--muted);
+  font: 550 9px var(--font-geist-mono);
+}
 .skip-publish-button {
   display: block;
   width: 100%;
@@ -3176,11 +3284,9 @@ select:focus-visible {
   grid-column: 1 / -1;
 }
 .opponent-panel > iframe {
-  grid-row: 1 / 3;
-  grid-column: 2;
   width: 100%;
   height: 100%;
-  border: 0;
+  border: 2px solid var(--ink);
   background: white;
   border-radius: var(--blob);
   overflow: hidden;
@@ -3384,12 +3490,11 @@ select:focus-visible {
     grid-template-columns: 1fr;
   }
   .match-header {
-    grid-template-columns: 46px 1fr auto;
-    grid-template-areas:
-      "logo timer actions"
-      "call call call";
-    row-gap: 10px;
+    gap: 10px;
     padding: clamp(8px, 1.6vh, 14px) 16px 10px;
+  }
+  .match-hud {
+    row-gap: 12px;
   }
   .theme-tag {
     display: none;
@@ -3397,15 +3502,12 @@ select:focus-visible {
   .exit-match {
     display: none;
   }
-  .match-call-row {
-    justify-self: stretch;
-    justify-content: center;
-    flex-wrap: wrap;
-    gap: 14px;
-  }
   .video-tile.compact {
     width: clamp(56px, 16vw, 84px);
     height: clamp(44px, 8vh, 60px);
+  }
+  .call-tiles {
+    height: 100%;
   }
   .workspace {
     display: flex;
@@ -3418,12 +3520,13 @@ select:focus-visible {
     flex: 1;
     min-height: 0;
   }
+  .match-bottom-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
   .opponent-panel {
     flex: 0 0 130px;
     min-height: 0;
-  }
-  .opponent-panel:hover {
-    transform: none;
   }
   .file-tabs button {
     min-width: 105px;

@@ -217,6 +217,12 @@ h1 { font-size: 36px; transform: rotate(-4deg); }`,
 });`,
 };
 
+// Written before either player can see the opponent's build, so it isn't
+// colored by a side-by-side comparison — this is also what lands in the
+// published README and what a random one of the two teammates' copies shows
+// on the voting page.
+const DESCRIPTION_MAX_LENGTH = 500;
+
 // GitHub Pages usually finishes its first build well within this window; it's
 // just the countdown estimate shown while we poll for the real thing.
 const PAGES_BUILD_ESTIMATE_SECONDS = 45;
@@ -407,7 +413,8 @@ type IconName =
   | "github"
   | "clock"
   | "star"
-  | "arrow-left";
+  | "arrow-left"
+  | "more";
 
 const FILLED_ICONS = new Set<IconName>(["github", "star"]);
 
@@ -577,6 +584,13 @@ const ICON_PATHS: Record<IconName, React.ReactNode> = {
       <path d="M11 6 5 12l6 6" />
     </>
   ),
+  more: (
+    <>
+      <circle cx="12" cy="5" r="1.7" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="12" r="1.7" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="19" r="1.7" fill="currentColor" stroke="none" />
+    </>
+  ),
 };
 
 function Icon({
@@ -716,6 +730,7 @@ function Home({
   const [slackSuggestionsOpen, setSlackSuggestionsOpen] = useState(false);
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [voteGateOpen, setVoteGateOpen] = useState(false);
+  const [starting, setStarting] = useState(false);
   const slackMatches = useMemo(() => {
     const q = slackQuery.replace(/^@/, "").trim().toLowerCase();
     if (!q || selectedFriend) return [];
@@ -987,20 +1002,34 @@ function Home({
           <div className="hero-copy">
             <button
               className="primary-button start-button"
+              disabled={starting}
               onClick={async () => {
                 if (!auth.user) return startOnboarding();
-                const fresh = await fetch("/api/dashboard")
-                  .then((r) => (r.ok ? r.json() : null))
-                  .catch(() => null);
-                if (!fresh)
-                  return toast("Could not reach the server, try again.");
-                setDashboard(fresh);
-                if (fresh.voteGate.due) return setVoteGateOpen(true);
-                navigate("lobby");
+                setStarting(true);
+                try {
+                  const fresh = await fetch("/api/dashboard")
+                    .then((r) => (r.ok ? r.json() : null))
+                    .catch(() => null);
+                  if (!fresh)
+                    return toast("Could not reach the server, try again.");
+                  setDashboard(fresh);
+                  if (fresh.voteGate.due) return setVoteGateOpen(true);
+                  navigate("lobby");
+                } finally {
+                  setStarting(false);
+                }
               }}
             >
-              {auth.user ? "start match" : "sign in to play"}{" "}
-              <Icon name="external" size={18} />
+              {starting ? (
+                <>
+                  <i className="spinner" /> starting…
+                </>
+              ) : (
+                <>
+                  {auth.user ? "start match" : "sign in to play"}{" "}
+                  <Icon name="external" size={18} />
+                </>
+              )}
             </button>
             <div className="queue-note">
               <i />{" "}
@@ -2086,13 +2115,30 @@ function Match({
     match.mode === "duo" ? "team" : "everyone",
   );
   const [previewOpen, setPreviewOpen] = useState(false);
-  const [syncIn, setSyncIn] = useState(18);
+  const [opponentPreviewOpen, setOpponentPreviewOpen] = useState(false);
   const [opponentSnapshot, setOpponentSnapshot] = useState<string | null>(null);
   const [publishOpen, setPublishOpen] = useState(false);
   const [resultsOpen, setResultsOpen] = useState(false);
+  const [descriptionOpen, setDescriptionOpen] = useState(false);
+  const [description, setDescription] = useState("");
+  const [descriptionError, setDescriptionError] = useState<string | null>(
+    null,
+  );
   const [forfeitOpen, setForfeitOpen] = useState(false);
   const [forfeitLoading, setForfeitLoading] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [reportMenuOpen, setReportMenuOpen] = useState(false);
+  const [reportType, setReportType] = useState<"misconduct" | "ai" | null>(
+    null,
+  );
+  const [reportRoster, setReportRoster] = useState<
+    Array<{ id: string; name: string }>
+  >([]);
+  const [reportRosterLoading, setReportRosterLoading] = useState(false);
+  const [reportTargetId, setReportTargetId] = useState("");
+  const [reportDetails, setReportDetails] = useState("");
+  const [reportSubmitting, setReportSubmitting] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
   const [hackatimeRecording, setHackatimeRecording] = useState<
     "ready" | "sending" | "recorded" | "error"
   >("ready");
@@ -2267,7 +2313,6 @@ function Match({
   useEffect(() => {
     const timer = setInterval(() => {
       setSeconds((s) => Math.max(0, s - 1));
-      setSyncIn((s) => (s <= 1 ? 30 : s - 1));
       setDisconnect((current) =>
         current
           ? {
@@ -2422,6 +2467,7 @@ function Match({
           name: buildName,
           pages,
           files,
+          description,
         }),
       });
       const result = (await response.json()) as {
@@ -2451,6 +2497,7 @@ function Match({
     publishState.loading,
     publishState.repositoryUrl,
     buildName,
+    description,
     toast,
   ]);
 
@@ -2549,6 +2596,69 @@ function Match({
     }
   }, [applyLifecycle, match.id, toast]);
 
+  const openReport = useCallback(
+    async (type: "misconduct" | "ai") => {
+      setReportMenuOpen(false);
+      setReportType(type);
+      setReportTargetId("");
+      setReportDetails("");
+      setReportError(null);
+      setReportRoster([]);
+      setReportRosterLoading(true);
+      const roster = await fetch(`/api/matches/${match.id}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null);
+      const players = (roster?.players ?? []) as Array<{
+        id: string;
+        name: string;
+      }>;
+      setReportRoster(players.filter((player) => player.id !== auth.user?.id));
+      setReportRosterLoading(false);
+    },
+    [auth.user?.id, match.id],
+  );
+
+  const submitReport = useCallback(async () => {
+    if (!reportType || reportSubmitting) return;
+    if (!reportTargetId) {
+      setReportError("Choose who you're reporting.");
+      return;
+    }
+    setReportSubmitting(true);
+    try {
+      const response = await fetch(`/api/matches/${match.id}/report`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: reportType,
+          targetId: reportTargetId,
+          details: reportDetails,
+        }),
+      });
+      const result = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(result.error ?? "Could not submit the report.");
+      setReportType(null);
+      toast("Report submitted — our team will review it.");
+    } catch (error) {
+      setReportError(
+        error instanceof Error ? error.message : "Could not submit the report.",
+      );
+    } finally {
+      setReportSubmitting(false);
+    }
+  }, [match.id, reportDetails, reportSubmitting, reportTargetId, reportType, toast]);
+
+  useEffect(() => {
+    if (!previewOpen && !opponentPreviewOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setPreviewOpen(false);
+      setOpponentPreviewOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [previewOpen, opponentPreviewOpen]);
+
   useEffect(() => {
     const sync = async () => {
       await fetch(`/api/matches/${match.id}/snapshot`, {
@@ -2563,7 +2673,6 @@ function Match({
         };
         if (result.snapshot?.html) setOpponentSnapshot(result.snapshot.html);
       }
-      setSyncIn(30);
     };
     const initial = window.setTimeout(() => void sync(), 1000);
     const interval = window.setInterval(() => void sync(), 30_000);
@@ -2575,8 +2684,22 @@ function Match({
 
   useEffect(() => {
     if (seconds === 0 && !outcome)
-      window.setTimeout(() => setResultsOpen(true), 0);
+      window.setTimeout(() => setDescriptionOpen(true), 0);
   }, [outcome, seconds]);
+
+  const submitDescription = () => {
+    const trimmed = description.trim();
+    if (trimmed.length < 10) {
+      setDescriptionError(
+        "must be at least 1 sentence!",
+      );
+      return;
+    }
+    setDescription(trimmed);
+    setDescriptionError(null);
+    setDescriptionOpen(false);
+    setResultsOpen(true);
+  };
 
   const isTestMatch = match.mode === "admin";
   const canSkipPublish = isTestMatch && canUseTestLobby(auth.user?.email ?? "");
@@ -2599,21 +2722,11 @@ function Match({
   return (
     <main className="match-screen">
       <header className="match-header">
-        <div className="match-timer-cluster">
-          <div className="theme-tag">
-            <span>theme</span>
-            <strong>{match.theme}</strong>
-          </div>
-          <div className="timer" aria-label={`${time} remaining`}>
-            <span>{time}</span>
-            <small>remaining</small>
-          </div>
+        <div className="match-header-brand">
+          <Logo compact />
         </div>
-        <div className="match-call-row">
+        <div className="match-hud">
           <div className="call-team">
-            <span className="call-label">
-              {match.mode === "duo" ? "duo" : "you"}
-            </span>
             <div className="call-tiles">
               <VideoTile
                 compact
@@ -2637,10 +2750,55 @@ function Match({
               )}
             </div>
           </div>
+          <div className="match-actions">
+            <button
+              className="settings-gear"
+              onClick={() => setSettingsOpen(true)}
+              aria-label="Match settings"
+            >
+              <Icon name="settings" size={17} />
+            </button>
+            <div className="report-menu-anchor">
+              <button
+                className="report-menu-button"
+                onClick={() => setReportMenuOpen((open) => !open)}
+                aria-label="Report options"
+                aria-expanded={reportMenuOpen}
+              >
+                <Icon name="more" size={17} />
+              </button>
+              {reportMenuOpen && (
+                <>
+                  <div
+                    className="popover-backdrop"
+                    onClick={() => setReportMenuOpen(false)}
+                  />
+                  <div className="report-menu" role="menu">
+                    <button
+                      role="menuitem"
+                      onClick={() => void openReport("misconduct")}
+                    >
+                      <Icon name="flag" size={13} /> report misconduct
+                    </button>
+                    <button role="menuitem" onClick={() => void openReport("ai")}>
+                      <Icon name="flag" size={13} /> report AI-generated code
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+          <div className="match-timer-cluster">
+            <div className="timer" aria-label={`${time} remaining`}>
+              <span>{time}</span>
+              <small>remaining</small>
+            </div>
+            <div className="theme-tag">
+              <span>theme</span>
+              <strong>{match.theme}</strong>
+            </div>
+          </div>
           <div className="call-team">
-            <span className="call-label">
-              {match.mode === "duo" ? "opp" : "opponent"}
-            </span>
             <div className="call-tiles">
               {(match.mode === "duo" ? [0, 1] : [0]).map((index) => {
                 const peer = opponents[index];
@@ -2660,15 +2818,6 @@ function Match({
               })}
             </div>
           </div>
-        </div>
-        <div className="match-actions">
-          <button
-            className="settings-gear"
-            onClick={() => setSettingsOpen(true)}
-            aria-label="Match settings"
-          >
-            <Icon name="settings" size={17} />
-          </button>
         </div>
       </header>
       {settingsOpen && (
@@ -2709,6 +2858,76 @@ function Match({
                 force timer to end
               </button>
             )}
+          </section>
+        </div>
+      )}
+      {reportType && (
+        <div className="modal-backdrop" onClick={() => setReportType(null)}>
+          <section
+            className="modal report-modal"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="close-button"
+              onClick={() => setReportType(null)}
+              aria-label="Close report"
+            >
+              ×
+            </button>
+            <span className="eyebrow">
+              {reportType === "misconduct"
+                ? "report misconduct"
+                : "report AI-generated code"}
+            </span>
+            <h2>Who are you reporting?</h2>
+            {reportRosterLoading ? (
+              <p>Loading match roster…</p>
+            ) : reportRoster.length ? (
+              <div className="report-roster">
+                {reportRoster.map((player) => (
+                  <button
+                    key={player.id}
+                    type="button"
+                    className={reportTargetId === player.id ? "active" : ""}
+                    onClick={() => {
+                      setReportTargetId(player.id);
+                      if (reportError) setReportError(null);
+                    }}
+                  >
+                    {player.name}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p>There&apos;s no one else in this match to report.</p>
+            )}
+            <label className="description-field">
+              <textarea
+                value={reportDetails}
+                onChange={(event) =>
+                  setReportDetails(event.target.value.slice(0, 1000))
+                }
+                placeholder={
+                  reportType === "misconduct"
+                    ? "What happened?"
+                    : "What made you suspect AI-generated code?"
+                }
+                rows={4}
+                maxLength={1000}
+              />
+              <span className="description-count">
+                {reportDetails.length}/1000
+              </span>
+            </label>
+            {reportError && <p className="publish-error">{reportError}</p>}
+            <button
+              className="danger-button"
+              onClick={() => void submitReport()}
+              disabled={reportSubmitting || !reportTargetId}
+            >
+              {reportSubmitting ? "submitting…" : "submit report"}
+            </button>
           </section>
         </div>
       )}
@@ -3099,70 +3318,72 @@ function Match({
             <Icon name="external" size={13} />
           </button>
         </aside>
-        <div className="opponent-panel">
-          <div>
-            <span className="eyebrow">opponent snapshot</span>
-            <strong>update in {syncIn}s</strong>
+        <div className="match-bottom-row">
+          <div className="call-controls">
+            <button
+              className={mic ? "active" : ""}
+              onClick={() => setMic(!mic)}
+              aria-label="Toggle microphone"
+            >
+              <Icon name={mic ? "mic" : "mic-off"} size={16} />
+              <span>mic</span>
+            </button>
+            <button
+              className={video ? "active" : ""}
+              onClick={() => setVideo(!video)}
+              aria-label="Toggle camera"
+            >
+              <Icon name={video ? "camera" : "camera-off"} size={16} />
+              <span>camera</span>
+            </button>
+            {match.mode === "duo" && (
+              <div className="scope-toggle">
+                <button
+                  className={scope === "team" ? "active" : ""}
+                  onClick={() => setScope("team")}
+                >
+                  duo only
+                </button>
+                <button
+                  className={scope === "everyone" ? "active" : ""}
+                  onClick={() => setScope("everyone")}
+                >
+                  everyone
+                </button>
+              </div>
+            )}
           </div>
-          {opponentSnapshot ? (
-            <iframe
-              title="Opponent website snapshot"
-              srcDoc={opponentSnapshot}
-              sandbox="allow-scripts"
-              referrerPolicy="no-referrer"
-            />
-          ) : (
-            <div className="snapshot-art">
-              <span className="planet-one" />
-              <span className="planet-two" />
-              <b>
-                waiting for
-                <br />
-                their first sync
-              </b>
-            </div>
-          )}
-          <button
-            onClick={() =>
-              toast("Snapshots sync automatically every 30 seconds")
-            }
-          >
-            live sync <small>server verified</small>
-          </button>
-        </div>
-        <div className="call-controls">
-          <button
-            className={mic ? "active" : ""}
-            onClick={() => setMic(!mic)}
-            aria-label="Toggle microphone"
-          >
-            <Icon name={mic ? "mic" : "mic-off"} size={16} />
-            <span>mic</span>
-          </button>
-          <button
-            className={video ? "active" : ""}
-            onClick={() => setVideo(!video)}
-            aria-label="Toggle camera"
-          >
-            <Icon name={video ? "camera" : "camera-off"} size={16} />
-            <span>camera</span>
-          </button>
-          {match.mode === "duo" && (
-            <div className="scope-toggle">
-              <button
-                className={scope === "team" ? "active" : ""}
-                onClick={() => setScope("team")}
-              >
-                duo only
-              </button>
-              <button
-                className={scope === "everyone" ? "active" : ""}
-                onClick={() => setScope("everyone")}
-              >
-                everyone
-              </button>
-            </div>
-          )}
+          <div className="opponent-panel">
+            {opponentSnapshot ? (
+              <iframe
+                title="Opponent website preview"
+                srcDoc={opponentSnapshot}
+                sandbox="allow-scripts"
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <div className="snapshot-art">
+                <span className="planet-one" />
+                <span className="planet-two" />
+                <b>
+                  waiting for
+                  <br />
+                  their first sync
+                </b>
+              </div>
+            )}
+            <button
+              className="preview-expand-button"
+              onClick={() => setOpponentPreviewOpen(!opponentPreviewOpen)}
+              aria-label={
+                opponentPreviewOpen
+                  ? "Hide expanded opponent preview"
+                  : "Expand opponent preview"
+              }
+            >
+              <Icon name="external" size={13} />
+            </button>
+          </div>
         </div>
       </section>
       {previewOpen && (
@@ -3183,6 +3404,78 @@ function Match({
               referrerPolicy="no-referrer"
             />
           </div>
+        </div>
+      )}
+      {opponentPreviewOpen && (
+        <div
+          className="preview-modal modal-backdrop"
+          onClick={() => setOpponentPreviewOpen(false)}
+        >
+          <div
+            className="expanded-preview"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button onClick={() => setOpponentPreviewOpen(false)}>×</button>
+            {opponentSnapshot ? (
+              <iframe
+                title="Expanded opponent preview"
+                srcDoc={opponentSnapshot}
+                sandbox="allow-scripts"
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <div className="snapshot-art">
+                <span className="planet-one" />
+                <span className="planet-two" />
+                <b>
+                  waiting for
+                  <br />
+                  their first sync
+                </b>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+      {descriptionOpen && !outcome && (
+        <div
+          className="modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="description-title"
+        >
+          <section className="modal publish-modal">
+            <span className="eyebrow">
+              match complete · theme: {match.theme}
+            </span>
+            <h2 id="description-title">describe your site!</h2>
+            <p>
+              a sentence or two on what you made.
+              voters see this next to your site!
+            </p>
+            <label className="description-field">
+              <textarea
+                value={description}
+                onChange={(event) => {
+                  setDescription(event.target.value.slice(0, DESCRIPTION_MAX_LENGTH));
+                  if (descriptionError) setDescriptionError(null);
+                }}
+                placeholder="a website where you click through the different options to get through the maze and escape the monster, but if you don't answer the questions fast enough you get eaten."
+                maxLength={DESCRIPTION_MAX_LENGTH}
+                autoFocus
+                rows={4}
+              />
+              <span className="description-count">
+                {description.length}/{DESCRIPTION_MAX_LENGTH}
+              </span>
+            </label>
+            {descriptionError && (
+              <p className="publish-error">{descriptionError}</p>
+            )}
+            <button className="primary-button" onClick={submitDescription}>
+              continue
+            </button>
+          </section>
         </div>
       )}
       {resultsOpen && !outcome && (
@@ -3662,7 +3955,10 @@ function Voting({
     id: string;
     theme: string;
     durationMinutes: number;
-    sites: Record<"blue" | "red", { pagesUrl: string; repositoryUrl: string }>;
+    sites: Record<
+      "blue" | "red",
+      { pagesUrl: string; repositoryUrl: string; description: string | null }
+    >;
   } | null>(null);
   const [voteGate, setVoteGate] = useState<{
     required: number;
@@ -3764,6 +4060,11 @@ function Voting({
                   referrerPolicy="no-referrer"
                 />
               </div>
+              {match.sites.blue.description && (
+                <p className="build-description">
+                  {match.sites.blue.description}
+                </p>
+              )}
               <footer>
                 <div>
                   <span>BUILD A</span>
@@ -3799,6 +4100,11 @@ function Voting({
                   referrerPolicy="no-referrer"
                 />
               </div>
+              {match.sites.red.description && (
+                <p className="build-description">
+                  {match.sites.red.description}
+                </p>
+              )}
               <footer>
                 <div>
                   <span>BUILD B</span>

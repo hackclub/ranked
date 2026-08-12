@@ -20,6 +20,7 @@ export const friendshipStatusEnum = pgEnum("friendship_status", ["pending", "acc
 export const duoInviteStatusEnum = pgEnum("duo_invite_status", ["pending", "accepted", "declined"]);
 export const orderStatusEnum = pgEnum("order_status", ["pending", "approved", "shipped", "cancelled"]);
 export const challengeTypeEnum = pgEnum("challenge_type", ["play_matches", "code_seconds", "add_friends"]);
+export const reportTypeEnum = pgEnum("report_type", ["misconduct", "ai"]);
 
 export const users = pgTable("users", {
   id: text("id").primaryKey(),
@@ -153,9 +154,20 @@ export const publications = pgTable("publications", {
   repositoryUrl: text("repository_url").notNull(),
   pagesUrl: text("pages_url").notNull(),
   githubRepo: text("github_repo").notNull(),
+  description: text("description"),
   publishedBy: text("published_by").notNull().references(() => users.id),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, table => [uniqueIndex("publication_match_user_unique").on(table.matchId, table.publishedBy), index("publication_match_team_idx").on(table.matchId, table.team)]);
+
+export const reports = pgTable("reports", {
+  id: text("id").primaryKey(),
+  matchId: text("match_id").notNull().references(() => matches.id, { onDelete: "cascade" }),
+  reporterId: text("reporter_id").notNull().references(() => users.id),
+  targetId: text("target_id").notNull().references(() => users.id),
+  type: reportTypeEnum("type").notNull(),
+  details: text("details"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, table => [index("reports_match_idx").on(table.matchId)]);
 
 export const matchSnapshots = pgTable("match_snapshots", {
   matchId: text("match_id").notNull().references(() => matches.id, { onDelete: "cascade" }),

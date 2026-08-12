@@ -9,9 +9,9 @@ export async function GET(request: NextRequest) {
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const [rows, voteGate] = await Promise.all([
     getSql()`WITH canonical AS (
-        SELECT DISTINCT ON (match_id,team) match_id,team,pages_url,repository_url FROM publications ORDER BY match_id,team,created_at
+        SELECT DISTINCT ON (match_id,team) match_id,team,pages_url,repository_url,description FROM publications ORDER BY match_id,team,random()
       ) SELECT m.id, m.theme, m.mode, m.duration_minutes AS "durationMinutes",
-        json_object_agg(p.team, json_build_object('pagesUrl',p.pages_url,'repositoryUrl',p.repository_url)) AS sites
+        json_object_agg(p.team, json_build_object('pagesUrl',p.pages_url,'repositoryUrl',p.repository_url,'description',p.description)) AS sites
       FROM matches m JOIN canonical p ON p.match_id=m.id
       WHERE m.status='voting' AND NOT EXISTS (SELECT 1 FROM match_players mp WHERE mp.match_id=m.id AND mp.user_id=${user.id})
         AND NOT EXISTS (SELECT 1 FROM votes v WHERE v.match_id=m.id AND v.voter_id=${user.id})
