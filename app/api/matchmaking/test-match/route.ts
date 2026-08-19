@@ -19,11 +19,12 @@ export async function POST(request: NextRequest) {
 
   const body = await request.json().catch(() => ({}));
   const duration = [10, 30, 60].includes(Number(body.durationMinutes)) ? Number(body.durationMinutes) : 10;
+  const mode = body.mode === "duo" ? "duo" : "solo";
   const matchId = crypto.randomUUID();
   const theme = generateMatchTheme();
   await getSql()`DELETE FROM matchmaking_queue WHERE user_id = ${user.id}`;
-  await getSql()`INSERT INTO matches (id, mode, duration_minutes, theme, ends_at)
-    VALUES (${matchId}, 'admin'::match_mode, ${duration}, ${theme}, NOW() + (${duration} || ' minutes')::interval)`;
+  await getSql()`INSERT INTO matches (id, mode, is_test, duration_minutes, theme, ends_at)
+    VALUES (${matchId}, ${mode}::match_mode, TRUE, ${duration}, ${theme}, NOW() + (${duration} || ' minutes')::interval)`;
   await getSql()`INSERT INTO match_players (match_id, user_id, team, slot, pre_elo, last_heartbeat_at)
     VALUES (${matchId}, ${user.id}, 'blue'::match_team, 0, ${user.elo}, NOW())`;
 

@@ -70,6 +70,7 @@ export const matches = pgTable("matches", {
   forfeitedBy: text("forfeited_by"),
   forfeitingTeam: teamEnum("forfeiting_team"),
   playersCounted: boolean("players_counted").notNull().default(false),
+  isTest: boolean("is_test").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, table => [index("matches_status_idx").on(table.status), index("matches_ends_idx").on(table.endsAt)]);
 

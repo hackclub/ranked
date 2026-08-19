@@ -64,6 +64,13 @@
       "when": 1787160717781,
       "tag": "0008_parched_living_tribunal",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1787176178661,
+      "tag": "0009_nervous_thunderbolts",
+      "breakpoints": true
     }
   ]
 }

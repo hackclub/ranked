@@ -76,7 +76,7 @@ const THEME_NOUNS = [
   "glow-in-the-dark gravel",
   "malicious rubber ducks",
   "artisanal air",
-  "backwards music",
+  "electronic dance music",
   "poor ghosts",
   "invisible paint",
   "expired coupons",
@@ -102,7 +102,7 @@ export function generateMatchTheme(): string {
 }
 
 export async function activeMatch(userId: string) {
-  const rows = await getSql()`SELECT m.id, m.mode, m.duration_minutes AS "durationMinutes", m.theme, m.status,
+  const rows = await getSql()`SELECT m.id, m.mode, m.is_test AS "isTest", m.duration_minutes AS "durationMinutes", m.theme, m.status,
       m.started_at AS "startedAt", m.ends_at AS "endsAt",
       GREATEST(0,CEIL(EXTRACT(EPOCH FROM (m.ends_at-NOW()))))::int AS "remainingSeconds",mp.team,
       (SELECT COUNT(*)::int FROM match_players WHERE match_id=m.id) AS "playerCount"
@@ -170,10 +170,10 @@ export async function finalizeForfeit(
           AND COALESCE(stale.disconnect_started_at,stale.last_heartbeat_at)+INTERVAL '10 seconds'<=NOW()
       )
     )
-    RETURNING id,mode`;
+    RETURNING id,is_test AS "isTest"`;
   if (!claimed.length) return null;
 
-  if (claimed[0].mode !== "admin") {
+  if (!claimed[0].isTest) {
     await getSql().transaction([
       getSql()`WITH team_averages AS (
           SELECT mp.team,AVG(u.elo)::numeric AS average_elo

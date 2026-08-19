@@ -38,6 +38,7 @@ type AuthState = {
 type ActiveMatch = {
   id: string;
   mode: Mode | "admin";
+  isTest?: boolean;
   durationMinutes: number;
   theme: string;
   status: string;
@@ -370,7 +371,10 @@ function buildPage(
   // so the deployed GitHub Pages site renders identically to the preview.
   const tailwindScript = `<script src="https://cdn.tailwindcss.com"><\/script>`;
   const withStyles = base.includes("</head>")
-    ? base.replace("</head>", `${tailwindScript}<style>${styles}</style></head>`)
+    ? base.replace(
+        "</head>",
+        `${tailwindScript}<style>${styles}</style></head>`,
+      )
     : `${tailwindScript}<style>${styles}</style>${base}`;
   return withStyles.includes("</body>")
     ? withStyles.replace(
@@ -940,7 +944,11 @@ function Home({
     setFriendMenuConfirm(null);
   };
   const friendMenuAnchorRef = useRef<HTMLDivElement>(null);
-  useOutsideDismiss(Boolean(friendMenuOpen), friendMenuAnchorRef, closeFriendMenu);
+  useOutsideDismiss(
+    Boolean(friendMenuOpen),
+    friendMenuAnchorRef,
+    closeFriendMenu,
+  );
   useEscapeKey(Boolean(friendMenuOpen), closeFriendMenu);
   useEscapeKey(voteGateOpen, () => setVoteGateOpen(false));
   useEscapeKey(slackSuggestionsOpen, () => setSlackSuggestionsOpen(false));
@@ -991,14 +999,19 @@ function Home({
                   const menuOpen = friendMenuOpen === friend.friendshipId;
                   return (
                     <li key={friend.id}>
-                      <PersonFace name={friend.name} avatarUrl={friend.avatarUrl} />
+                      <PersonFace
+                        name={friend.name}
+                        avatarUrl={friend.avatarUrl}
+                      />
                       <div>
                         <strong>{friend.name}</strong>
                         <small className="last-seen">
                           {friend.status === "accepted" ? (
                             <>
                               {formatLastSeen(friend.lastSeenAt)}
-                              <i className={`status${online ? "" : " offline"}`} />
+                              <i
+                                className={`status${online ? "" : " offline"}`}
+                              />
                             </>
                           ) : friend.incoming ? (
                             "request received"
@@ -1684,7 +1697,7 @@ function Lobby({
     const response = await fetch("/api/matchmaking/test-match", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ durationMinutes: length }),
+      body: JSON.stringify({ durationMinutes: length, mode }),
     });
     const result = await response.json();
     if (result.code === "hackatime_required") {
@@ -2020,7 +2033,7 @@ function Lobby({
                     >
                       <Icon name="plus" size={22} />
                     </button>
-                    <strong>open slot</strong>
+                    <strong>no player yet</strong>
                     {addOpen && (
                       <>
                         <div
@@ -2202,7 +2215,10 @@ function Lobby({
       <div className="lobby-footer">
         <small className="lobby-fineprint text-[10px] mb-2">
           By joining, you agree to abide by the{" "}
-          <a href="https://hackclub.com/conduct" className="black bold underline">
+          <a
+            href="https://hackclub.com/conduct"
+            className="black bold underline"
+          >
             Hack Club Code of Conduct
           </a>{" "}
           and be cool
@@ -2224,6 +2240,65 @@ function Lobby({
   );
 }
 
+// RMS-level detection, same shape as the lobby's mic-test meter (see the
+// useEffect tied to previewStream/meterFillRef) — but compared against an
+// adaptive noise floor instead of one fixed number. getUserMedia's default
+// autoGainControl actively boosts quiet room noise, so a fixed threshold
+// alone lights up on ambient hum, not just real speech; tracking how loud
+// "quiet" currently is (and requiring a real jump above it) keeps this tied
+// to audio the mic is actually picking up a voice on.
+const SPEAKING_MIN_LEVEL = 0.02;
+const SPEAKING_FLOOR_MULTIPLIER = 2.5;
+const SPEAKING_HOLD_MS = 350;
+
+function useIsSpeaking(stream: MediaStream | null | undefined, enabled: boolean) {
+  const [speaking, setSpeaking] = useState(false);
+  useEffect(() => {
+    if (!enabled || !stream || !stream.getAudioTracks().length) return;
+    const audioContext = new AudioContext();
+    const source = audioContext.createMediaStreamSource(stream);
+    const analyser = audioContext.createAnalyser();
+    analyser.fftSize = 512;
+    source.connect(analyser);
+    const data = new Uint8Array(analyser.frequencyBinCount);
+    let frame = 0;
+    let noiseFloor = SPEAKING_MIN_LEVEL;
+    let lastAboveThreshold = 0;
+    const tick = () => {
+      analyser.getByteTimeDomainData(data);
+      let sumSquares = 0;
+      for (let i = 0; i < data.length; i++) {
+        const centered = (data[i] - 128) / 128;
+        sumSquares += centered * centered;
+      }
+      const level = Math.sqrt(sumSquares / data.length);
+      const now = performance.now();
+      const threshold = Math.max(
+        SPEAKING_MIN_LEVEL,
+        noiseFloor * SPEAKING_FLOOR_MULTIPLIER,
+      );
+      if (level > threshold) {
+        lastAboveThreshold = now;
+        setSpeaking(true);
+      } else {
+        // Only drift the floor up while quiet, so it tracks room/AGC noise
+        // without ever adapting to someone's own voice as "the new normal".
+        noiseFloor = noiseFloor * 0.98 + level * 0.02;
+        if (now - lastAboveThreshold > SPEAKING_HOLD_MS) setSpeaking(false);
+      }
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(frame);
+      source.disconnect();
+      void audioContext.close();
+      setSpeaking(false);
+    };
+  }, [stream, enabled]);
+  return speaking;
+}
+
 function VideoTile({
   name,
   team,
@@ -2231,6 +2306,7 @@ function VideoTile({
   color,
   muted = false,
   stream,
+  audioSource,
   local = false,
   audioMuted = false,
   compact = false,
@@ -2241,13 +2317,15 @@ function VideoTile({
   color?: string;
   muted?: boolean;
   stream?: MediaStream | null;
+  audioSource?: MediaStream | null;
   local?: boolean;
   audioMuted?: boolean;
   compact?: boolean;
 }) {
+  const speaking = useIsSpeaking(audioSource ?? stream, !muted);
   return (
     <div
-      className={`video-tile${compact ? " compact" : ""}`}
+      className={`video-tile${compact ? " compact" : ""}${speaking ? " speaking" : ""}`}
       style={{ "--tile": color ?? avatarAccent(avatar) } as React.CSSProperties}
       title={`${name} · ${team}`}
     >
@@ -2271,7 +2349,7 @@ function VideoTile({
         </span>
         {!compact && <small>{team}</small>}
       </div>
-      {muted && <span className="muted-badge">mic off</span>}
+      {muted && <span className="muted-badge">muted</span>}
     </div>
   );
 }
@@ -2323,6 +2401,21 @@ function Match({
   const [scope, setScope] = useState<"team" | "everyone">(
     match.mode === "duo" ? "team" : "everyone",
   );
+  const [micDeviceId, setMicDeviceId] = useState(media.micDeviceId ?? "");
+  const [videoDeviceId, setVideoDeviceId] = useState(media.videoDeviceId ?? "");
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  const [avSettingsOpen, setAvSettingsOpen] = useState(false);
+  const avSettingsAnchorRef = useRef<HTMLDivElement>(null);
+  useOutsideDismiss(avSettingsOpen, avSettingsAnchorRef, () =>
+    setAvSettingsOpen(false),
+  );
+  useEscapeKey(avSettingsOpen, () => setAvSettingsOpen(false));
+  useEffect(() => {
+    navigator.mediaDevices
+      ?.enumerateDevices()
+      .then(setDevices)
+      .catch(() => undefined);
+  }, []);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [opponentPreviewOpen, setOpponentPreviewOpen] = useState(false);
   const [opponentSnapshot, setOpponentSnapshot] = useState<string | null>(null);
@@ -2330,9 +2423,7 @@ function Match({
   const [resultsOpen, setResultsOpen] = useState(false);
   const [descriptionOpen, setDescriptionOpen] = useState(false);
   const [description, setDescription] = useState("");
-  const [descriptionError, setDescriptionError] = useState<string | null>(
-    null,
-  );
+  const [descriptionError, setDescriptionError] = useState<string | null>(null);
   const [forfeitOpen, setForfeitOpen] = useState(false);
   const [forfeitLoading, setForfeitLoading] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -2379,8 +2470,8 @@ function Match({
     video,
     scope,
     team,
-    media.micDeviceId,
-    media.videoDeviceId,
+    micDeviceId || undefined,
+    videoDeviceId || undefined,
   );
   const room = useCodeRoom(`ranked:code:${match.id}:${team}`);
 
@@ -2414,7 +2505,9 @@ function Match({
       const resolved = names.length ? names : Object.keys(starterFiles);
       setFileOrder(resolved);
       setOpenTabs((current) =>
-        tabsSeeded ? current.filter((name) => resolved.includes(name)) : resolved,
+        tabsSeeded
+          ? current.filter((name) => resolved.includes(name))
+          : resolved,
       );
       for (const name of names) trackFile(name);
     };
@@ -2473,7 +2566,9 @@ function Match({
         const text = doc.getText(`file:${name}`);
         if (text.length === 0) text.insert(0, FILE_TEMPLATES[ext]);
       });
-      setOpenTabs((current) => (current.includes(name) ? current : [...current, name]));
+      setOpenTabs((current) =>
+        current.includes(name) ? current : [...current, name],
+      );
       setTab(name);
       setAddingFile(false);
       setNewFileName("");
@@ -2482,7 +2577,9 @@ function Match({
   );
 
   const openFile = useCallback((name: string) => {
-    setOpenTabs((current) => (current.includes(name) ? current : [...current, name]));
+    setOpenTabs((current) =>
+      current.includes(name) ? current : [...current, name],
+    );
     setTab(name);
   }, []);
 
@@ -2561,9 +2658,12 @@ function Match({
     previewDocRef.current = previewDoc;
   }, [previewDoc]);
   const ownPreviewFrames = useRef<Set<Window>>(new Set());
-  const registerOwnPreviewFrame = useCallback((el: HTMLIFrameElement | null) => {
-    if (el?.contentWindow) ownPreviewFrames.current.add(el.contentWindow);
-  }, []);
+  const registerOwnPreviewFrame = useCallback(
+    (el: HTMLIFrameElement | null) => {
+      if (el?.contentWindow) ownPreviewFrames.current.add(el.contentWindow);
+    },
+    [],
+  );
   useEffect(() => {
     function handleNavigateMessage(event: MessageEvent) {
       if (
@@ -2600,7 +2700,9 @@ function Match({
       fileOrder.filter((file) => {
         const original =
           starterFiles[file] ??
-          FILE_TEMPLATES[(file.split(".").pop() as "html" | "css" | "js") ?? "html"];
+          FILE_TEMPLATES[
+            (file.split(".").pop() as "html" | "css" | "js") ?? "html"
+          ];
         return files[file] !== original;
       }),
     [files, fileOrder],
@@ -2851,7 +2953,8 @@ function Match({
         }),
       });
       const result = (await response.json()) as { error?: string };
-      if (!response.ok) throw new Error(result.error ?? "Could not submit the report.");
+      if (!response.ok)
+        throw new Error(result.error ?? "Could not submit the report.");
       setReportType(null);
       toast("Report submitted — our team will review it.");
     } catch (error) {
@@ -2861,7 +2964,14 @@ function Match({
     } finally {
       setReportSubmitting(false);
     }
-  }, [match.id, reportDetails, reportSubmitting, reportTargetId, reportType, toast]);
+  }, [
+    match.id,
+    reportDetails,
+    reportSubmitting,
+    reportTargetId,
+    reportType,
+    toast,
+  ]);
 
   useEffect(() => {
     if (!previewOpen && !opponentPreviewOpen) return;
@@ -2904,10 +3014,8 @@ function Match({
 
   const submitDescription = () => {
     const trimmed = description.trim();
-    if (trimmed.length < 10) {
-      setDescriptionError(
-        "must be at least 1 sentence!",
-      );
+    if (trimmed.length < 30) {
+      setDescriptionError("must be at least 2 sentences!");
       return;
     }
     setDescription(trimmed);
@@ -2916,7 +3024,7 @@ function Match({
     setResultsOpen(true);
   };
 
-  const isTestMatch = match.mode === "admin";
+  const isTestMatch = Boolean(match.isTest);
   const canSkipPublish = isTestMatch && canUseTestLobby(auth.user?.email ?? "");
 
   const disconnectSeconds = disconnect
@@ -2949,6 +3057,7 @@ function Match({
                 team={`${team} · you`}
                 avatar={auth.user?.avatar}
                 stream={video ? localStream : null}
+                audioSource={localStream}
                 local
                 muted={!mic}
               />
@@ -2960,6 +3069,7 @@ function Match({
                   color={teammate?.color ?? COLORS[2]}
                   avatar={teammate?.avatar}
                   stream={teammate?.video ? teammate.stream : null}
+                  audioSource={teammate?.stream}
                   muted={teammate ? !teammate.mic : false}
                 />
               )}
@@ -2995,7 +3105,10 @@ function Match({
                     >
                       <Icon name="flag" size={13} /> report misconduct
                     </button>
-                    <button role="menuitem" onClick={() => void openReport("ai")}>
+                    <button
+                      role="menuitem"
+                      onClick={() => void openReport("ai")}
+                    >
                       <Icon name="flag" size={13} /> report AI-generated code
                     </button>
                   </div>
@@ -3004,13 +3117,13 @@ function Match({
             </div>
           </div>
           <div className="match-timer-cluster">
-            <div className="timer" aria-label={`${time} remaining`}>
-              <span>{time}</span>
-              <small>remaining</small>
-            </div>
             <div className="theme-tag">
               <span>theme</span>
               <strong title={match.theme}>{match.theme}</strong>
+            </div>
+            <div className="timer" aria-label={`${time} remaining`}>
+              <span>{time}</span>
+              <small>remaining</small>
             </div>
           </div>
           <div className="call-team">
@@ -3021,11 +3134,12 @@ function Match({
                   <VideoTile
                     compact
                     key={peer?.connectionId ?? index}
-                    name={peer?.name ?? "open slot"}
-                    team={peer ? `${peer.team} team` : "waiting for builder"}
+                    name={peer?.name ?? "no player yet"}
+                    team={peer ? `${peer.team} team` : "waiting for player"}
                     color={peer?.color ?? COLORS[index + 3]}
                     avatar={peer?.avatar}
                     stream={peer?.video ? peer.stream : null}
+                    audioSource={peer?.stream}
                     muted={peer ? !peer.mic : false}
                     audioMuted={scope === "team" && peer?.team !== team}
                   />
@@ -3250,14 +3364,18 @@ function Match({
               <b>{status === "connected" ? "synced" : status}</b>
             </div>
           </div>
-          <div className={`editor-area ${sidebarPanel ? "panel-open" : ""}`}>
+          <div
+            className={`editor-area ${sidebarPanel ? `panel-open panel-${sidebarPanel}` : ""}`}
+          >
             <aside className="file-rail">
               <button
                 className={sidebarPanel === "files" ? "active" : ""}
                 aria-label="Explorer"
                 aria-pressed={sidebarPanel === "files"}
                 onClick={() =>
-                  setSidebarPanel((current) => (current === "files" ? null : "files"))
+                  setSidebarPanel((current) =>
+                    current === "files" ? null : "files",
+                  )
                 }
               >
                 <Icon name="files" size={17} />
@@ -3267,7 +3385,9 @@ function Match({
                 aria-label="Search"
                 aria-pressed={sidebarPanel === "search"}
                 onClick={() =>
-                  setSidebarPanel((current) => (current === "search" ? null : "search"))
+                  setSidebarPanel((current) =>
+                    current === "search" ? null : "search",
+                  )
                 }
               >
                 <Icon name="search" size={17} />
@@ -3277,7 +3397,9 @@ function Match({
                 aria-label="Source control"
                 aria-pressed={sidebarPanel === "changes"}
                 onClick={() =>
-                  setSidebarPanel((current) => (current === "changes" ? null : "changes"))
+                  setSidebarPanel((current) =>
+                    current === "changes" ? null : "changes",
+                  )
                 }
               >
                 <Icon name="branch" size={17} />
@@ -3291,7 +3413,9 @@ function Match({
                 aria-label="Editor settings"
                 aria-pressed={sidebarPanel === "settings"}
                 onClick={() =>
-                  setSidebarPanel((current) => (current === "settings" ? null : "settings"))
+                  setSidebarPanel((current) =>
+                    current === "settings" ? null : "settings",
+                  )
                 }
               >
                 <Icon name="settings" size={17} />
@@ -3325,7 +3449,10 @@ function Match({
                       )}
                     </button>
                   ))}
-                  <button className="explorer-add" onClick={() => setAddingFile(true)}>
+                  <button
+                    className="explorer-add"
+                    onClick={() => setAddingFile(true)}
+                  >
                     <Icon name="plus" size={12} /> new file
                   </button>
                 </div>
@@ -3344,7 +3471,8 @@ function Match({
                   />
                   {searchQuery.trim().length < 2 ? (
                     <p className="side-panel-empty">
-                      Type at least 2 characters to search {fileOrder.join(", ")}.
+                      Type at least 2 characters to search{" "}
+                      {fileOrder.join(", ")}.
                     </p>
                   ) : searchResults.length === 0 ? (
                     <p className="side-panel-empty">No results found.</p>
@@ -3353,7 +3481,9 @@ function Match({
                       {searchResults.map((group) => (
                         <div key={group.file} className="search-file-group">
                           <div className="search-file-head">
-                            <i className={`file-dot ${group.file.split(".").pop()}`} />
+                            <i
+                              className={`file-dot ${group.file.split(".").pop()}`}
+                            />
                             {group.file}
                             <span>{group.matches.length}</span>
                           </div>
@@ -3363,10 +3493,15 @@ function Match({
                               className="search-match"
                               onClick={() => {
                                 openFile(group.file);
-                                setRevealRequest({ file: group.file, line: match.line });
+                                setRevealRequest({
+                                  file: group.file,
+                                  line: match.line,
+                                });
                               }}
                             >
-                              <span className="search-line-no">{match.line}</span>
+                              <span className="search-line-no">
+                                {match.line}
+                              </span>
                               {highlightMatch(match.text, searchQuery.trim())}
                             </button>
                           ))}
@@ -3389,7 +3524,9 @@ function Match({
                       {changedFiles.map((file) => (
                         <li key={file}>
                           <button onClick={() => openFile(file)}>
-                            <i className={`file-dot ${file.split(".").pop()}`} />
+                            <i
+                              className={`file-dot ${file.split(".").pop()}`}
+                            />
                             {file}
                           </button>
                           <span className="change-badge">M</span>
@@ -3402,7 +3539,8 @@ function Match({
                     </p>
                   )}
                   <p className="changes-note">
-                    Changes publish to your GitHub Pages repo when the match ends.
+                    Changes publish to your GitHub Pages repo when the match
+                    ends.
                   </p>
                 </div>
               </aside>
@@ -3419,7 +3557,10 @@ function Match({
                       aria-checked={editorPrefs.wordWrap}
                       aria-label="Word wrap"
                       onClick={() =>
-                        setEditorPrefs((prefs) => ({ ...prefs, wordWrap: !prefs.wordWrap }))
+                        setEditorPrefs((prefs) => ({
+                          ...prefs,
+                          wordWrap: !prefs.wordWrap,
+                        }))
                       }
                     >
                       <i />
@@ -3433,7 +3574,10 @@ function Match({
                       aria-checked={editorPrefs.minimap}
                       aria-label="Minimap"
                       onClick={() =>
-                        setEditorPrefs((prefs) => ({ ...prefs, minimap: !prefs.minimap }))
+                        setEditorPrefs((prefs) => ({
+                          ...prefs,
+                          minimap: !prefs.minimap,
+                        }))
                       }
                     >
                       <i />
@@ -3473,9 +3617,14 @@ function Match({
                       {[2, 4].map((size) => (
                         <button
                           key={size}
-                          className={editorPrefs.tabSize === size ? "active" : ""}
+                          className={
+                            editorPrefs.tabSize === size ? "active" : ""
+                          }
                           onClick={() =>
-                            setEditorPrefs((prefs) => ({ ...prefs, tabSize: size }))
+                            setEditorPrefs((prefs) => ({
+                              ...prefs,
+                              tabSize: size,
+                            }))
                           }
                         >
                           {size}
@@ -3528,46 +3677,14 @@ function Match({
           <button
             className="preview-expand-button"
             onClick={() => setPreviewOpen(!previewOpen)}
-            aria-label={previewOpen ? "Hide expanded preview" : "Expand preview"}
+            aria-label={
+              previewOpen ? "Hide expanded preview" : "Expand preview"
+            }
           >
             <Icon name="external" size={13} />
           </button>
         </aside>
         <div className="match-bottom-row">
-          <div className="call-controls">
-            <button
-              className={mic ? "active" : ""}
-              onClick={() => setMic(!mic)}
-              aria-label="Toggle microphone"
-            >
-              <Icon name={mic ? "mic" : "mic-off"} size={16} />
-              <span>mic</span>
-            </button>
-            <button
-              className={video ? "active" : ""}
-              onClick={() => setVideo(!video)}
-              aria-label="Toggle camera"
-            >
-              <Icon name={video ? "camera" : "camera-off"} size={16} />
-              <span>camera</span>
-            </button>
-            {match.mode === "duo" && (
-              <div className="scope-toggle">
-                <button
-                  className={scope === "team" ? "active" : ""}
-                  onClick={() => setScope("team")}
-                >
-                  duo only
-                </button>
-                <button
-                  className={scope === "everyone" ? "active" : ""}
-                  onClick={() => setScope("everyone")}
-                >
-                  everyone
-                </button>
-              </div>
-            )}
-          </div>
           <div className="opponent-panel">
             {opponentSnapshot ? (
               <iframe
@@ -3598,6 +3715,90 @@ function Match({
             >
               <Icon name="external" size={13} />
             </button>
+          </div>
+          <div className="call-controls">
+            <button
+              className={mic ? "active" : ""}
+              onClick={() => setMic(!mic)}
+              aria-label="Toggle microphone"
+            >
+              <Icon name={mic ? "mic" : "mic-off"} size={16} />
+              <span>mic</span>
+            </button>
+            <button
+              className={video ? "active" : ""}
+              onClick={() => setVideo(!video)}
+              aria-label="Toggle camera"
+            >
+              <Icon name={video ? "camera" : "camera-off"} size={16} />
+              <span>camera</span>
+            </button>
+            <div className="av-settings-anchor" ref={avSettingsAnchorRef}>
+              <button
+                aria-label="Audio and video settings"
+                aria-expanded={avSettingsOpen}
+                onClick={() => setAvSettingsOpen((open) => !open)}
+              >
+                <Icon name="settings" size={16} />
+                <span>a/v</span>
+              </button>
+              {avSettingsOpen && (
+                <div className="av-settings-menu" role="dialog" aria-label="Audio and video settings">
+                  <div className="device-row-group">
+                    <label className="device-row">
+                      <span>microphone input</span>
+                      <select
+                        aria-label="Microphone"
+                        value={micDeviceId}
+                        onChange={(event) => setMicDeviceId(event.target.value)}
+                      >
+                        <option value="">Default</option>
+                        {devices
+                          .filter((device) => device.kind === "audioinput")
+                          .map((device, index) => (
+                            <option key={device.deviceId} value={device.deviceId}>
+                              {device.label || `Microphone ${index + 1}`}
+                            </option>
+                          ))}
+                      </select>
+                    </label>
+                    <label className="device-row">
+                      <span>camera</span>
+                      <select
+                        aria-label="Camera"
+                        value={videoDeviceId}
+                        onChange={(event) => setVideoDeviceId(event.target.value)}
+                      >
+                        <option value="">Default</option>
+                        {devices
+                          .filter((device) => device.kind === "videoinput")
+                          .map((device, index) => (
+                            <option key={device.deviceId} value={device.deviceId}>
+                              {device.label || `Camera ${index + 1}`}
+                            </option>
+                          ))}
+                      </select>
+                    </label>
+                  </div>
+                </div>
+              )}
+            </div>
+            {match.mode === "duo" && (
+              <div className="scope-toggle">
+                <button
+                  className={scope === "team" ? "active" : ""}
+                  onClick={() => setScope("team")}
+                >
+                  duo only
+                </button>
+                <button
+                  className={scope === "everyone" ? "active" : ""}
+                  onClick={() => setScope("everyone")}
+                >
+                  everyone
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </section>
@@ -3665,14 +3866,16 @@ function Match({
             </span>
             <h2 id="description-title">describe your site!</h2>
             <p>
-              a sentence or two on what you made.
-              voters see this next to your site!
+              a sentence or two on what you made. voters see this next to your
+              site!
             </p>
             <label className="description-field">
               <textarea
                 value={description}
                 onChange={(event) => {
-                  setDescription(event.target.value.slice(0, DESCRIPTION_MAX_LENGTH));
+                  setDescription(
+                    event.target.value.slice(0, DESCRIPTION_MAX_LENGTH),
+                  );
                   if (descriptionError) setDescriptionError(null);
                 }}
                 placeholder="a website where you click through the different options to get through the maze and escape the monster, but if you don't answer the questions fast enough you get eaten."
@@ -4452,7 +4655,7 @@ function ProfileModal({
             <ScribbleAvatar avatar={auth.user?.avatar} size="md" />
             <div>
               <span className="eyebrow">your account</span>
-              <h2 id="profile-title">{auth.user?.name ?? "Guest builder"}</h2>
+              <h2 id="profile-title">{auth.user?.name ?? "Guest player"}</h2>
               <p>
                 {auth.user
                   ? `${auth.user.email} · ${auth.user.elo} ELO · ${Math.round(auth.user.codingSeconds / 360) / 10}h`

@@ -8,12 +8,12 @@ export async function POST(request: NextRequest, context: { params: Promise<{ ma
   const user = await currentUser(request);
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { matchId } = await context.params;
-  const rows = await getSql()`SELECT mp.team,m.status,m.mode,m.ends_at>NOW() AS "beforeEnd"
+  const rows = await getSql()`SELECT mp.team,m.status,m.is_test AS "isTest",m.ends_at>NOW() AS "beforeEnd"
     FROM match_players mp JOIN matches m ON m.id=mp.match_id
     WHERE mp.match_id=${matchId} AND mp.user_id=${user.id}`;
-  const player = rows[0] as { team: MatchTeam; status: string; mode: string; beforeEnd: boolean } | undefined;
+  const player = rows[0] as { team: MatchTeam; status: string; isTest: boolean; beforeEnd: boolean } | undefined;
   if (!player) return NextResponse.json({ error: "You are not in this match." }, { status: 403 });
-  const isAdminLobby = player.mode === "admin" && canUseTestLobby(user.email);
+  const isAdminLobby = player.isTest && canUseTestLobby(user.email);
   if (player.status !== "active" || (!player.beforeEnd && !isAdminLobby)) {
     return NextResponse.json({ error: "This match has already ended.", match: await matchOutcome(matchId) }, { status: 409 });
   }
