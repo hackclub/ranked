@@ -4,7 +4,102 @@ import { getSql } from "@/db";
 export type MatchTeam = "blue" | "red";
 export type MatchEndReason = "forfeit" | "disconnect";
 
-export const MATCH_THEMES = ["solar system", "tiny arcade", "midnight garden", "future transit", "friendly monsters", "music festival"];
+// Themes are generated, not picked from a fixed list — "music festival" gives
+// nobody anything to actually build. Composing "<format> for <entity>" (with
+// some entities pulling in a concrete noun) always hands players something
+// buildable: a specific product for a specific audience.
+const THEME_FORMATS = [
+  "an online shop",
+  "the personal website",
+  "the landing page",
+  "a social media site",
+  "a wikiHow guide",
+  "a recipe blog",
+  "a dating app",
+  "a weather site",
+  "a to-do list site",
+  "a support page",
+  "a forum",
+  "a marketplace",
+  "a portfolio site",
+  "a museum exhibit microsite",
+  "an obituary page",
+  "a subscription box landing page",
+  "a conspiracy theory blog",
+  "a search engine",
+  "a quiz site",
+  "a travel booking site",
+  "a fortune-telling site",
+  "a pet adoption site",
+];
+
+const THEME_ENTITIES = [
+  "horseless cowboys",
+  "raccoons",
+  "time travelers",
+  "pirates",
+  "unemployed wizards",
+  "vampires afraid of blood",
+  "ghosts stuck in a refrigerator",
+  "english teachers",
+  "retired superheroes",
+  "musician houseplants",
+  "competitive nappers",
+  "underground mole people",
+  "an alien who speaks in numbers",
+  "a dragon with an office job",
+  "a talking vending machine",
+  "a cat running for mayor",
+  "a medieval knight",
+  "a robot",
+  "an octopus who plays the drums",
+  "garden gnomes",
+  "a giant",
+  "a company advertising {noun}",
+  "a startup selling {noun}",
+  "an app that tracks {noun}",
+  "a museum dedicated to {noun}",
+  "a shop that only sells {noun}",
+  "a cult that worships {noun}",
+  "a subscription that delivers {noun}",
+  "a club for people obsessed with {noun}",
+  "a scientist studying {noun}",
+  "an influencer who only talks about {noun}",
+  "a Hack Clubber",
+  "Hack Club"
+];
+
+const THEME_NOUNS = [
+  "moon water",
+  "haunted socks",
+  "sentient soup",
+  "glow-in-the-dark gravel",
+  "malicious rubber ducks",
+  "artisanal air",
+  "backwards music",
+  "poor ghosts",
+  "invisible paint",
+  "expired coupons",
+  "made-up constellations",
+  "airport food",
+  "illegal fireworks",
+  "haunted furniture",
+  "mismatched socks",
+  "counterfeit clouds",
+  "bubblegum",
+  "recycled toothpaste",
+];
+
+function pickRandom<T>(list: readonly T[]): T {
+  return list[Math.floor(Math.random() * list.length)];
+}
+
+export function generateMatchTheme(): string {
+  const format = pickRandom(THEME_FORMATS);
+  const entity = pickRandom(THEME_ENTITIES).replace("{noun}", () => pickRandom(THEME_NOUNS));
+  const phrase = `${format} for ${entity}`;
+  return phrase.charAt(0).toUpperCase() + phrase.slice(1);
+}
 
 export async function activeMatch(userId: string) {
   const rows = await getSql()`SELECT m.id, m.mode, m.duration_minutes AS "durationMinutes", m.theme, m.status,

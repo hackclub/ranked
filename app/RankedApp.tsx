@@ -845,7 +845,7 @@ function Home({
             matchId: match.id,
           })) ?? [],
       )
-      .slice(0, 5) ?? [];
+      .slice(0, 3) ?? [];
 
   useEffect(() => {
     if (!auth.user) return;
@@ -3010,7 +3010,7 @@ function Match({
             </div>
             <div className="theme-tag">
               <span>theme</span>
-              <strong>{match.theme}</strong>
+              <strong title={match.theme}>{match.theme}</strong>
             </div>
           </div>
           <div className="call-team">

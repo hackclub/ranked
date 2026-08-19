@@ -43,14 +43,32 @@ select:focus-visible {
   outline-offset: 3px;
 }
 .app-shell {
-  min-height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
   background-color: var(--cream);
   background-image: radial-gradient(#c7b65c45 0.7px, transparent 0.7px);
   background-size: 17px 17px;
   overflow: hidden;
 }
+/* Leaderboard and shop are browse-style lists — let the whole page scroll
+   naturally instead of forcing their content into one viewport-height box. */
+.app-shell.screen-leaderboard,
+.app-shell.screen-shop {
+  height: auto;
+  min-height: 100dvh;
+  overflow: visible;
+}
 .screen-pad {
   padding: 0 42px 64px;
+}
+.home-screen {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding-bottom: clamp(5vh, 10vh, 15px);
+  display: flex;
+  flex-direction: column;
 }
 .eyebrow {
   display: block;
@@ -66,6 +84,7 @@ select:focus-visible {
 
 .site-header {
   height: 98px;
+  flex-shrink: 0;
   padding: 18px 42px 0;
   display: grid;
   grid-template-columns: 1fr auto 1fr;
@@ -170,8 +189,9 @@ select:focus-visible {
 }
 
 .rank-wrap {
-  width: min(660px, 60vw);
-  margin: 18px auto 28px;
+  width: min(415px, 32vw);
+  flex-shrink: 0;
+  margin: clamp(4px, 1vh, 18px) auto clamp(8px, 1.8vh, 28px);
 }
 .rank-labels {
   display: flex;
@@ -246,23 +266,36 @@ select:focus-visible {
 .home-grid {
   max-width: 1300px;
   margin: auto;
+  width: 100%;
   display: grid;
   grid-template-columns: 245px minmax(360px, 1fr) 300px;
-  gap: clamp(26px, 4vw, 70px);
-  align-items: center;
-  min-height: 560px;
+  gap: clamp(20px, 4vw, 70px);
+  align-items: stretch;
+  align-content: stretch;
+  flex: 1;
+  min-height: 0;
 }
 .home-left,
 .home-right {
   display: flex;
   flex-direction: column;
-  gap: 22px;
+  gap: clamp(10px, 1.4vh, min(22px, 10vh));
+}
+.home-left > .paper-card,
+.home-right > .paper-card {
+  /* Grow to soak up leftover column height, but never shrink below what the
+     card's own content needs — shrinking (the old `flex: 1` shorthand,
+     which implies flex-basis: 0% and needs min-height: 0 to work) let a
+     card get forced shorter than its title + list + form, so the content
+     spilled out past the card's border instead of the card just sizing to
+     it. */
+  flex: 1 0 auto;
 }
 .paper-card {
   border: 2px solid var(--line);
   background: var(--paper);
   box-shadow: 5px 6px 0 #24231f;
-  padding: 19px 19px 17px;
+  padding: clamp(15px, 1.3vh, 19px) 16px clamp(6px, 1.1vh, 17px);
   transform: rotate(-0.4deg);
   position: relative;
   border-radius: var(--blob);
@@ -277,14 +310,14 @@ select:focus-visible {
 .daily-card {
   background: #f3a4ed;
   transform: rotate(0.5deg);
-  padding: 19px 23px;
+  padding: clamp(12px, 2vh, 19px) 20px;
   height: min-content;
 }
 .card-title {
-  margin: 0 0 15px;
+  margin: 0 0 clamp(5px, 1vh, 15px);
   font: 500 20px var(--font-geist-mono);
   border-bottom: 2px solid var(--line);
-  padding-bottom: 9px;
+  padding-bottom: clamp(3px, 0.7vh, 9px);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -309,8 +342,9 @@ select:focus-visible {
   flex-direction: column;
   gap: 11px;
 }
-.people-list {
-  max-height: 190px;
+.people-list,
+.interaction-list {
+  max-height: clamp(70px, 13vh, 190px);
   overflow-y: auto;
   overflow-x: hidden;
   padding-right: 4px;
@@ -343,9 +377,9 @@ select:focus-visible {
 .friend-search {
   display: grid;
   grid-template-columns: 1fr auto;
-  margin-top: 14px;
+  margin-top: clamp(5px, 1vh, 14px);
   border-top: 1px solid #526e65;
-  padding-top: 11px;
+  padding-top: clamp(4px, 0.8vh, 11px);
 }
 .friend-search button {
   border: 1px solid var(--ink);
@@ -534,15 +568,18 @@ select:focus-visible {
 
 .hero-zone {
   text-align: center;
-  min-height: 485px;
+  min-height: clamp(230px, 44vh, 420px);
   position: relative;
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  justify-content: space-between;
   align-items: center;
+  padding-block: clamp(6px, 2vh, 24px);
 }
 .hero-zone .scribble-avatar {
   z-index: 2;
+  width: clamp(150px, 28vh, 220px);
+  height: clamp(156px, 29vh, 228px);
 }
 .hero-avatar-button {
   position: relative;
@@ -599,7 +636,7 @@ select:focus-visible {
 }
 .hero-copy {
   z-index: 3;
-  margin-top: 26px;
+  margin-top: clamp(8px, 2vh, 26px);
 }
 .hero-copy p {
   font: 500 12px var(--font-geist-mono);
@@ -822,7 +859,8 @@ select:focus-visible {
   grid-template-rows: auto 1fr auto;
   gap: clamp(10px, 1.6vh, 18px);
   padding: 14px clamp(16px, 3vw, 40px) clamp(10px, 1.8vh, 18px);
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
   position: relative;
   color: var(--ink);
   background-color: var(--cream);
@@ -1778,17 +1816,18 @@ select:focus-visible {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  align-items: center;
 }
 .match-timer-cluster > * {
   min-width: 150px;
 }
 .theme-tag {
-  height: clamp(40px, 6.5vh, 54px);
+  height: fit-content;
   display: flex;
   flex-direction: column;
   justify-content: center;
   gap: 2px;
-  padding: 0 16px;
+  padding: 10px;
   border: 2px solid var(--ink);
   background: var(--paper);
   border-radius: var(--blob);
@@ -1801,11 +1840,14 @@ select:focus-visible {
   letter-spacing: 0.15em;
 }
 .theme-tag strong {
+  display: block;
   color: var(--blue);
   font: 650 13px var(--font-geist-mono);
+  overflow: hidden;
 }
 .timer {
   min-width: 140px;
+  width: min-content;
   height: clamp(40px, 6.5vh, 56px);
   border: 2px solid var(--red);
   display: flex;
@@ -2907,7 +2949,9 @@ select:focus-visible {
 }
 
 .vote-page {
-  min-height: calc(100vh - 98px);
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 .vote-heading {
   text-align: center;
@@ -3440,6 +3484,13 @@ select:focus-visible {
 }
 
 @media (max-width: 1050px) {
+  /* Home's dashboard sections stack into two rows here (and three on phone
+     widths) instead of sitting side by side on desktop — no amount of
+     shrinking fits that stack in one viewport, so this is the one width
+     range where the dashboard scrolls as a whole rather than clipping. */
+  .home-screen {
+    overflow-y: auto;
+  }
   .site-header {
     padding-inline: 24px;
   }
@@ -3455,10 +3506,6 @@ select:focus-visible {
   }
   .home-right > * {
     flex: 1;
-  }
-  .lobby-screen {
-    height: auto;
-    min-height: 100dvh;
   }
   .hud-panel {
     max-height: fit-content;
@@ -3507,17 +3554,18 @@ select:focus-visible {
     padding-inline: 16px;
   }
   .rank-wrap {
-    width: 95%;
-    margin-top: 24px;
+    width: 210px;
+    max-width: 95%;
+    margin-top: clamp(4px, 3vh, 24px);
   }
   .home-grid {
     display: flex;
     flex-direction: column;
-    gap: 22px;
+    gap: clamp(8px, 2.2vh, 22px);
   }
   .hero-zone {
     order: -1;
-    min-height: 470px;
+    min-height: clamp(190px, 32vh, 380px);
     width: 100%;
   }
   .home-left,
@@ -3549,9 +3597,6 @@ select:focus-visible {
   }
   .level-grid button {
     min-height: 110px;
-  }
-  .lobby-screen {
-    min-height: 100dvh;
   }
   .lobby-hud-bar {
     grid-template-columns: 1fr;

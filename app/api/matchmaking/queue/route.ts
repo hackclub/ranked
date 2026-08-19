@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { currentUser } from "@/app/lib/current-user";
-import { activeMatch, MATCH_THEMES } from "@/app/lib/match-lifecycle";
+import { activeMatch, generateMatchTheme } from "@/app/lib/match-lifecycle";
 import { getVoteGate } from "@/app/lib/vote-gate";
 import { getSql } from "@/db";
 
@@ -88,7 +88,7 @@ export async function POST(request: NextRequest) {
 
   const matchId = crypto.randomUUID();
   const needed = mode === "duo" ? 4 : 2;
-  const theme = MATCH_THEMES[Math.floor(Math.random() * MATCH_THEMES.length)];
+  const theme = generateMatchTheme();
   await getSql()`
     WITH candidates AS (
       SELECT q.user_id, q.joined_at, COALESCE(${partyKey}::text IS NOT NULL AND q.party_key=${partyKey}, false) AS is_party

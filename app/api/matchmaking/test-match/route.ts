@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { currentUser } from "@/app/lib/current-user";
-import { activeMatch, MATCH_THEMES } from "@/app/lib/match-lifecycle";
+import { activeMatch, generateMatchTheme } from "@/app/lib/match-lifecycle";
 import { canUseTestLobby } from "@/app/lib/test-lobby";
 import { getSql } from "@/db";
 
@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => ({}));
   const duration = [10, 30, 60].includes(Number(body.durationMinutes)) ? Number(body.durationMinutes) : 10;
   const matchId = crypto.randomUUID();
-  const theme = MATCH_THEMES[Math.floor(Math.random() * MATCH_THEMES.length)];
+  const theme = generateMatchTheme();
   await getSql()`DELETE FROM matchmaking_queue WHERE user_id = ${user.id}`;
   await getSql()`INSERT INTO matches (id, mode, duration_minutes, theme, ends_at)
     VALUES (${matchId}, 'admin'::match_mode, ${duration}, ${theme}, NOW() + (${duration} || ' minutes')::interval)`;
