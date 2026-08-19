@@ -36,6 +36,21 @@ export async function PATCH(request: NextRequest) {
   const user = await currentUser(request);
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { friendshipId, action } = await request.json();
+
+  if (action === "block") {
+    const rows = await getSql()`UPDATE friendships SET status='blocked', updated_at=NOW()
+      WHERE id=${friendshipId} AND (requester_id=${user.id} OR addressee_id=${user.id}) RETURNING id`;
+    if (!rows.length) return NextResponse.json({ error: "Friend not found" }, { status: 404 });
+    return NextResponse.json({ ok: true, status: "blocked" });
+  }
+
+  if (action === "unfriend") {
+    const rows = await getSql()`DELETE FROM friendships
+      WHERE id=${friendshipId} AND (requester_id=${user.id} OR addressee_id=${user.id}) AND status='accepted' RETURNING id`;
+    if (!rows.length) return NextResponse.json({ error: "Friend not found" }, { status: 404 });
+    return NextResponse.json({ ok: true, status: "removed" });
+  }
+
   const status = action === "accept" ? "accepted" : "declined";
   const rows = await getSql()`UPDATE friendships SET status=${status}::friendship_status, updated_at=NOW()
     WHERE id=${friendshipId} AND addressee_id=${user.id} AND status='pending' RETURNING requester_id AS "requesterId"`;

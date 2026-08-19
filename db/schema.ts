@@ -34,6 +34,8 @@ export const users = pgTable("users", {
   codingSeconds: integer("coding_seconds").notNull().default(0),
   hBucks: integer("h_bucks").notNull().default(0),
   avatar: jsonb("avatar").$type<{ color: string; eyes: number; mouths: number; eyeStyle?: string; mouthStyle?: string }>().notNull().default({ color: "#497CBF", eyes: 2, mouths: 1 }),
+  avatarUrl: text("avatar_url"),
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

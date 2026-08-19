@@ -10,7 +10,8 @@ export async function GET(request: NextRequest) {
   await ensureDailyChallenges(user.id);
   const sql = getSql();
   const [friends, recent, challenges, rank] = await sql.transaction([
-    sql`SELECT u.id, u.name, u.slack_id AS "slackId", u.avatar, f.id AS "friendshipId", f.status,
+    sql`SELECT u.id, u.name, u.slack_id AS "slackId", u.avatar, u.avatar_url AS "avatarUrl",
+      u.last_seen_at AS "lastSeenAt", f.id AS "friendshipId", f.status,
       CASE WHEN f.addressee_id = ${user.id} THEN TRUE ELSE FALSE END AS "incoming"
       FROM friendships f JOIN users u ON u.id = CASE WHEN f.requester_id = ${user.id} THEN f.addressee_id ELSE f.requester_id END
       WHERE (f.requester_id = ${user.id} OR f.addressee_id = ${user.id}) AND f.status IN ('accepted','pending')

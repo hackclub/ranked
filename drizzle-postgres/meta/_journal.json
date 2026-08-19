@@ -57,6 +57,13 @@
       "when": 1786492809853,
       "tag": "0007_first_rocket_racer",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1787160717781,
+      "tag": "0008_parched_living_tribunal",
+      "breakpoints": true
     }
   ]
 }

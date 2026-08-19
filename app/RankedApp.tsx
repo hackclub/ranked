@@ -75,6 +75,8 @@ type DashboardData = {
     friendshipId: string;
     name: string;
     slackId: string | null;
+    avatarUrl: string | null;
+    lastSeenAt: string | null;
     status: string;
     incoming: boolean;
   }>;
@@ -133,6 +135,64 @@ function useCountdownToUtcMidnight() {
   );
   const seconds = String(totalSeconds % 60).padStart(2, "0");
   return `${hours}:${minutes}:${seconds}`;
+}
+
+const ONLINE_THRESHOLD_MS = 2 * 60 * 1000;
+
+function isRecentlyOnline(lastSeenAt: string | null) {
+  if (!lastSeenAt) return false;
+  return Date.now() - new Date(lastSeenAt).getTime() < ONLINE_THRESHOLD_MS;
+}
+
+function formatLastSeen(lastSeenAt: string | null) {
+  if (!lastSeenAt) return "never online";
+  const diffMs = Date.now() - new Date(lastSeenAt).getTime();
+  if (diffMs < ONLINE_THRESHOLD_MS) return "online now";
+  const minutes = Math.floor(diffMs / 60000);
+  if (minutes < 60) return `online ${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `online ${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `online ${days}d ago`;
+  const weeks = Math.floor(days / 7);
+  if (weeks < 5) return `online ${weeks}w ago`;
+  return `online ${new Date(lastSeenAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
+}
+
+// Shared dismiss behavior for modals, popovers, and inline dropdowns: Escape
+// always closes whatever's open, matching whatever affordance already exists
+// (a close button, a cancel action) rather than inventing a new one.
+function useEscapeKey(active: boolean, onEscape: () => void) {
+  useEffect(() => {
+    if (!active) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onEscape();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [active, onEscape]);
+}
+
+// Closes on any pointerdown outside `ref`. Prefer this over a full-screen
+// backdrop element for anything that can be nested inside a `transform`ed
+// ancestor (e.g. the rotated paper-card treatment) — `position: fixed`
+// backdrops get contained by that ancestor instead of the viewport, so
+// clicks outside the card silently no-op instead of closing the popover.
+function useOutsideDismiss(
+  active: boolean,
+  ref: React.RefObject<HTMLElement | null>,
+  onDismiss: () => void,
+) {
+  useEffect(() => {
+    if (!active) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (ref.current && !ref.current.contains(event.target as Node)) {
+        onDismiss();
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [active, ref, onDismiss]);
 }
 
 const COLORS = ["#D891D9", "#497CBF", "#CCD96C", "#D99F6C", "#BF5A5A"];
@@ -704,6 +764,33 @@ function CardTitle({ children }: { children: React.ReactNode }) {
   );
 }
 
+function PersonFace({
+  name,
+  avatarUrl,
+  tone = "blue",
+}: {
+  name: string;
+  avatarUrl?: string | null;
+  tone?: "blue" | "orange" | "green";
+}) {
+  if (avatarUrl) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element -- tiny 28px avatar, not worth the Image pipeline
+      <img
+        className="mini-face mini-face-photo"
+        src={avatarUrl}
+        alt=""
+        draggable={false}
+      />
+    );
+  }
+  return (
+    <span className={`mini-face ${tone}`} aria-hidden="true">
+      {name[0]?.toUpperCase()}
+    </span>
+  );
+}
+
 function Home({
   navigate,
   toast,
@@ -731,6 +818,11 @@ function Home({
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [voteGateOpen, setVoteGateOpen] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [friendMenuOpen, setFriendMenuOpen] = useState<string | null>(null);
+  const [friendMenuConfirm, setFriendMenuConfirm] = useState<
+    "block" | "unfriend" | null
+  >(null);
+  const slackQueryInputRef = useRef<HTMLInputElement>(null);
   const slackMatches = useMemo(() => {
     const q = slackQuery.replace(/^@/, "").trim().toLowerCase();
     if (!q || selectedFriend) return [];
@@ -831,6 +923,52 @@ function Home({
     toast("Friend added");
   };
 
+  const removeFriendFromDashboard = (friendshipId: string) =>
+    setDashboard((current) =>
+      current
+        ? {
+            ...current,
+            friends: current.friends.filter(
+              (friend) => friend.friendshipId !== friendshipId,
+            ),
+          }
+        : current,
+    );
+
+  const closeFriendMenu = () => {
+    setFriendMenuOpen(null);
+    setFriendMenuConfirm(null);
+  };
+  const friendMenuAnchorRef = useRef<HTMLDivElement>(null);
+  useOutsideDismiss(Boolean(friendMenuOpen), friendMenuAnchorRef, closeFriendMenu);
+  useEscapeKey(Boolean(friendMenuOpen), closeFriendMenu);
+  useEscapeKey(voteGateOpen, () => setVoteGateOpen(false));
+  useEscapeKey(slackSuggestionsOpen, () => setSlackSuggestionsOpen(false));
+
+  const blockFriend = async (friendshipId: string, name: string) => {
+    closeFriendMenu();
+    const response = await fetch("/api/friends", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ friendshipId, action: "block" }),
+    });
+    if (!response.ok) return toast("Could not block that friend");
+    removeFriendFromDashboard(friendshipId);
+    toast(`Blocked @${name}`);
+  };
+
+  const unfriendFriend = async (friendshipId: string, name: string) => {
+    closeFriendMenu();
+    const response = await fetch("/api/friends", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ friendshipId, action: "unfriend" }),
+    });
+    if (!response.ok) return toast("Could not remove that friend");
+    removeFriendFromDashboard(friendshipId);
+    toast(`Removed @${name} from friends`);
+  };
+
   return (
     <main className="home-screen screen-pad">
       <ProgressBar elo={auth.user?.elo} />
@@ -841,41 +979,110 @@ function Home({
               friends{" "}
               <button
                 aria-label="Add a friend"
-                onClick={() =>
-                  toast(
-                    "Connect Hack Club Slack in your profile to find friends",
-                  )
-                }
+                onClick={() => slackQueryInputRef.current?.focus()}
               >
                 <Icon name="plus" size={13} />
               </button>
             </CardTitle>
             <ul className="people-list">
               {dashboard?.friends.length ? (
-                dashboard.friends.map((friend) => (
-                  <li key={friend.id}>
-                    <span className="mini-face blue">{friend.name[0]}</span>
-                    <div>
-                      <strong>{friend.name}</strong>
-                      <small>
-                        {friend.status === "accepted"
-                          ? "friend"
-                          : friend.incoming
-                            ? "request received"
-                            : "request sent"}
-                      </small>
-                    </div>
-                    {friend.status === "pending" && friend.incoming ? (
-                      <button
-                        onClick={() => void acceptFriend(friend.friendshipId)}
-                      >
-                        accept
-                      </button>
-                    ) : (
-                      <i className="status" />
-                    )}
-                  </li>
-                ))
+                dashboard.friends.map((friend) => {
+                  const online = isRecentlyOnline(friend.lastSeenAt);
+                  const menuOpen = friendMenuOpen === friend.friendshipId;
+                  return (
+                    <li key={friend.id}>
+                      <PersonFace name={friend.name} avatarUrl={friend.avatarUrl} />
+                      <div>
+                        <strong>{friend.name}</strong>
+                        <small className="last-seen">
+                          {friend.status === "accepted" ? (
+                            <>
+                              {formatLastSeen(friend.lastSeenAt)}
+                              <i className={`status${online ? "" : " offline"}`} />
+                            </>
+                          ) : friend.incoming ? (
+                            "request received"
+                          ) : (
+                            "request sent"
+                          )}
+                        </small>
+                      </div>
+                      {friend.status === "pending" && friend.incoming ? (
+                        <button
+                          onClick={() => void acceptFriend(friend.friendshipId)}
+                        >
+                          accept
+                        </button>
+                      ) : friend.status === "accepted" ? (
+                        <div
+                          className="friend-menu-anchor"
+                          ref={menuOpen ? friendMenuAnchorRef : undefined}
+                        >
+                          <button
+                            className="friend-menu-button"
+                            onClick={() => {
+                              if (menuOpen) return closeFriendMenu();
+                              setFriendMenuOpen(friend.friendshipId);
+                              setFriendMenuConfirm(null);
+                            }}
+                            aria-label={`Manage ${friend.name}`}
+                            aria-expanded={menuOpen}
+                          >
+                            <Icon name="settings" size={13} />
+                          </button>
+                          {menuOpen && (
+                            <div className="friend-menu" role="menu">
+                              <button
+                                role="menuitem"
+                                className={
+                                  friendMenuConfirm === "unfriend"
+                                    ? "confirming"
+                                    : ""
+                                }
+                                onClick={() =>
+                                  friendMenuConfirm === "unfriend"
+                                    ? void unfriendFriend(
+                                        friend.friendshipId,
+                                        friend.name,
+                                      )
+                                    : setFriendMenuConfirm("unfriend")
+                                }
+                              >
+                                <Icon name="minus" size={13} />
+                                {friendMenuConfirm === "unfriend"
+                                  ? "click again to remove"
+                                  : "unfriend"}
+                              </button>
+                              <button
+                                role="menuitem"
+                                className={
+                                  friendMenuConfirm === "block"
+                                    ? "confirming"
+                                    : "danger"
+                                }
+                                onClick={() =>
+                                  friendMenuConfirm === "block"
+                                    ? void blockFriend(
+                                        friend.friendshipId,
+                                        friend.name,
+                                      )
+                                    : setFriendMenuConfirm("block")
+                                }
+                              >
+                                <Icon name="flag" size={13} />
+                                {friendMenuConfirm === "block"
+                                  ? "click again to block"
+                                  : "block"}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <i className="status offline" />
+                      )}
+                    </li>
+                  );
+                })
               ) : (
                 <li>
                   <div>
@@ -891,6 +1098,7 @@ function Home({
             >
               <div className="slack-picker">
                 <input
+                  ref={slackQueryInputRef}
                   value={slackQuery}
                   onChange={(event) => {
                     setSlackQuery(event.target.value);
@@ -1414,6 +1622,7 @@ function Lobby({
   });
   const [inviteBusy, setInviteBusy] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  useEscapeKey(addOpen, () => setAddOpen(false));
   const [challenges, setChallenges] = useState<DashboardData["challenges"]>([]);
   const resetsIn = useCountdownToUtcMidnight();
 
@@ -2139,6 +2348,12 @@ function Match({
   const [reportDetails, setReportDetails] = useState("");
   const [reportSubmitting, setReportSubmitting] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
+  useEscapeKey(addingFile, () => setAddingFile(false));
+  useEscapeKey(Boolean(fileToDelete), () => setFileToDelete(null));
+  useEscapeKey(settingsOpen, () => setSettingsOpen(false));
+  useEscapeKey(reportMenuOpen, () => setReportMenuOpen(false));
+  useEscapeKey(Boolean(reportType), () => setReportType(null));
+  useEscapeKey(forfeitOpen, () => setForfeitOpen(false));
   const [hackatimeRecording, setHackatimeRecording] = useState<
     "ready" | "sending" | "recorded" | "error"
   >("ready");
@@ -3842,6 +4057,7 @@ function Shop({
   const [selected, setSelected] = useState<(typeof products)[number] | null>(
     null,
   );
+  useEscapeKey(Boolean(selected), () => setSelected(null));
   const [balance, setBalance] = useState(auth.user?.hBucks ?? 0);
   useEffect(() => {
     if (auth.user)
@@ -4180,6 +4396,14 @@ function ProfileModal({
   startEditingAvatar?: boolean;
 }) {
   const [editingAvatar, setEditingAvatar] = useState(startEditingAvatar);
+  useEscapeKey(
+    true,
+    useCallback(() => {
+      if (!editingAvatar) return close();
+      if (startEditingAvatar) return close();
+      setEditingAvatar(false);
+    }, [close, editingAvatar, startEditingAvatar]),
+  );
   const [avatarDraft, setAvatarDraft] = useState<ResolvedAvatarConfig>(() =>
     normalizeAvatar(auth.user?.avatar),
   );

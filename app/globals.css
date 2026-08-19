@@ -287,10 +287,16 @@ select:focus-visible {
   padding-bottom: 9px;
   display: flex;
   justify-content: space-between;
+  align-items: center;
 }
 .card-title button {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
   border: 0;
   background: transparent;
+  padding: 0;
+  margin-left: 2px;
   font-weight: 900;
   line-height: 1;
 }
@@ -302,6 +308,13 @@ select:focus-visible {
   display: flex;
   flex-direction: column;
   gap: 11px;
+}
+.people-list {
+  max-height: 190px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 4px;
+  margin-right: -4px;
 }
 .people-list li,
 .interaction-list li {
@@ -398,6 +411,14 @@ select:focus-visible {
   font: 500 8px var(--font-geist-mono);
   margin-top: 2px;
 }
+.people-list small.last-seen {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.people-list small.last-seen .status {
+  flex-shrink: 0;
+}
 .mini-face,
 .interaction-avatar {
   width: 28px;
@@ -419,8 +440,8 @@ select:focus-visible {
   background: var(--green);
 }
 .status {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: #4fb16e;
   border: 1px solid var(--ink);
@@ -428,6 +449,75 @@ select:focus-visible {
 .status.playing {
   background: var(--pink);
   box-shadow: 0 0 0 3px #d891d944;
+}
+.status.offline {
+  background: #c9c2b4;
+}
+.mini-face-photo {
+  display: block;
+  object-fit: cover;
+  background: var(--paper);
+}
+.friend-menu-anchor {
+  position: relative;
+}
+.friend-menu-button {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--ink);
+  background: transparent;
+  color: var(--ink);
+  border-radius: 50%;
+  transition:
+    transform 0.15s,
+    background 0.15s;
+}
+.friend-menu-button:hover,
+.friend-menu-button[aria-expanded="true"] {
+  background: var(--green);
+  transform: rotate(25deg);
+}
+.friend-menu {
+  position: absolute;
+  z-index: 31;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 152px;
+  display: flex;
+  flex-direction: column;
+  background: var(--paper);
+  border: 2px solid var(--ink);
+  box-shadow: 4px 4px 0 var(--ink);
+  padding: 6px;
+  gap: 3px;
+  border-radius: var(--blob);
+}
+.friend-menu button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  padding: 7px 8px;
+  font: 600 9px var(--font-geist-mono);
+  border-radius: 8px;
+  white-space: nowrap;
+}
+.friend-menu button:hover {
+  background: #f4ff00;
+}
+.friend-menu button.danger:hover {
+  background: var(--red-strong);
+  color: white;
+}
+.friend-menu button.confirming,
+.friend-menu button.confirming:hover {
+  background: var(--red-strong);
+  color: white;
 }
 .interaction-list li button {
   width: 27px;

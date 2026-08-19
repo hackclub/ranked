@@ -1,4 +1,4 @@
-export const hackClubScopes = "email name verification_status slack_id";
+export const hackClubScopes = "email name profile verification_status slack_id";
 
 export type HackClubIdentity = {
   id?: string;
@@ -8,6 +8,7 @@ export type HackClubIdentity = {
   email?: string;
   slack_id?: string;
   verification_status?: string;
+  picture?: string;
 };
 
 function authBaseUrl() {

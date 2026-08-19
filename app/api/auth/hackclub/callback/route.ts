@@ -17,10 +17,11 @@ export async function GET(request: NextRequest) {
     const name = [identity.first_name, identity.last_name].filter(Boolean).join(" ") || email.split("@")[0];
     const userId = identity.id ?? email;
     await getSql()`
-      INSERT INTO users (id, email, name, slack_id, verification_status)
-      VALUES (${userId}, ${email}, ${name}, ${identity.slack_id ?? null}, ${identity.verification_status ?? null})
+      INSERT INTO users (id, email, name, slack_id, verification_status, avatar_url, last_seen_at)
+      VALUES (${userId}, ${email}, ${name}, ${identity.slack_id ?? null}, ${identity.verification_status ?? null}, ${identity.picture ?? null}, NOW())
       ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, name = EXCLUDED.name,
-        slack_id = EXCLUDED.slack_id, verification_status = EXCLUDED.verification_status, updated_at = NOW()
+        slack_id = EXCLUDED.slack_id, verification_status = EXCLUDED.verification_status,
+        avatar_url = COALESCE(EXCLUDED.avatar_url, users.avatar_url), last_seen_at = NOW(), updated_at = NOW()
     `;
     const response = NextResponse.redirect(appUrl("/?auth=connected", request));
     response.cookies.set(SESSION_COOKIE, await encryptSession({
