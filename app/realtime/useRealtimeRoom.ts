@@ -85,7 +85,7 @@ export function useRealtimeRoom(roomId: string, mic: boolean, video: boolean, sc
       const other = joinedRoom.getOthers().find(candidate => candidate.connectionId === connectionId);
       return {
         connectionId,
-        name: other?.info?.name ?? "builder",
+        name: other?.info?.name ?? "Player",
         color: other?.info?.color ?? "#D99F6C",
         avatar: other?.info?.avatarConfig,
         stream,

@@ -262,7 +262,6 @@ export function AvatarCustomizer({
 
   return (
     <div className="avatar-customizer">
-      <span className="eyebrow">your goofy guy</span>
       <div className="avatar-stage">
         <ScribbleAvatar avatar={avatar} label="Your customized Goofy Guy" />
       </div>

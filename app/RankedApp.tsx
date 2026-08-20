@@ -3163,7 +3163,6 @@ function Match({
             >
               ×
             </button>
-            <span className="eyebrow">match settings</span>
             <h2>Settings</h2>
             <button
               className="danger-button"
@@ -3204,12 +3203,10 @@ function Match({
             >
               ×
             </button>
-            <span className="eyebrow">
-              {reportType === "misconduct"
-                ? "report misconduct"
-                : "report AI-generated code"}
-            </span>
-            <h2>Who are you reporting?</h2>
+            <h2>
+              Who are you reporting for{" "}
+              {reportType === "misconduct" ? "misconduct" : "AI-generated code"}?
+            </h2>
             {reportRosterLoading ? (
               <p>Loading match roster…</p>
             ) : reportRoster.length ? (
@@ -3272,7 +3269,6 @@ function Match({
             className="modal publish-modal file-delete-modal"
             onClick={(event) => event.stopPropagation()}
           >
-            <span className="eyebrow">delete file</span>
             <h2 id="delete-file-title">Delete {fileToDelete}?</h2>
             <p>This removes it for the whole team and can't be undone.</p>
             <div className="forfeit-actions">
@@ -3861,13 +3857,10 @@ function Match({
           aria-labelledby="description-title"
         >
           <section className="modal publish-modal">
-            <span className="eyebrow">
-              match complete · theme: {match.theme}
-            </span>
             <h2 id="description-title">describe your site!</h2>
             <p>
-              a sentence or two on what you made. voters see this next to your
-              site!
+              a sentence or two on what you made for {match.theme}. voters see
+              this next to your site!
             </p>
             <label className="description-field">
               <textarea
@@ -3904,9 +3897,7 @@ function Match({
           aria-labelledby="results-title"
         >
           <section className="modal results-modal">
-            <span className="eyebrow">
-              match complete · theme: {match.theme}
-            </span>
+            <h2 id="results-title">{match.theme}</h2>
             <div className="vote-grid results-grid">
               <article>
                 <div className="vote-site">
@@ -3965,7 +3956,6 @@ function Match({
           aria-labelledby="publish-title"
         >
           <section className="modal publish-modal">
-            <span className="eyebrow">match complete · your GitHub copy</span>
             <h2 id="publish-title">
               {publishState.repositoryUrl
                 ? "Your build is open source."
@@ -4090,7 +4080,6 @@ function Match({
           aria-labelledby="forfeit-title"
         >
           <section className="modal publish-modal forfeit-modal">
-            <span className="eyebrow">leave this match</span>
             <h2 id="forfeit-title">Forfeit the match?</h2>
             <p>
               This ends the match immediately. The other team wins and ELO is
@@ -4122,11 +4111,6 @@ function Match({
           aria-labelledby="outcome-title"
         >
           <section className="modal publish-modal outcome-modal">
-            <span className="eyebrow">
-              {isTestMatch
-                ? "test match closed"
-                : `match closed · ${outcome.endReason}`}
-            </span>
             <h2 id="outcome-title">
               {isTestMatch
                 ? "Test match ended."
@@ -4309,7 +4293,6 @@ function Shop({
               <div className="product-art">
                 <Icon name={icon} size={56} />
               </div>
-              <span className="eyebrow">ships worldwide</span>
               <h2>{name}</h2>
               <p>{desc}</p>
               <div>
@@ -4343,7 +4326,6 @@ function Shop({
             >
               ×
             </button>
-            <span className="eyebrow">secure redemption</span>
             <h2>Ship your {selected[1]}</h2>
             <input name="name" placeholder="Full name" required />
             <input name="address1" placeholder="Address" required />
@@ -4460,12 +4442,15 @@ function Voting({
             ? "Which site fits the theme best?"
             : "No matches in voting queue"}
         </h1>
-        <span className="eyebrow">
-          {match ? ` · theme: ${match.theme}` : ""}
-          {voteGate && voteGate.required > 0
-            ? ` · ${Math.min(voteGate.cast, voteGate.required)}/${voteGate.required} voted`
-            : ""}
-        </span>
+        {(match || (voteGate && voteGate.required > 0)) && (
+          <p>
+            {match ? `theme: ${match.theme}` : ""}
+            {match && voteGate && voteGate.required > 0 ? " · " : ""}
+            {voteGate && voteGate.required > 0
+              ? `${Math.min(voteGate.cast, voteGate.required)}/${voteGate.required} voted`
+              : ""}
+          </p>
+        )}
       </div>
       {match && (
         <>
@@ -4654,7 +4639,6 @@ function ProfileModal({
           <>
             <ScribbleAvatar avatar={auth.user?.avatar} size="md" />
             <div>
-              <span className="eyebrow">your account</span>
               <h2 id="profile-title">{auth.user?.name ?? "Guest player"}</h2>
               <p>
                 {auth.user

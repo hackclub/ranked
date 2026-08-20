@@ -70,12 +70,6 @@ select:focus-visible {
   display: flex;
   flex-direction: column;
 }
-.eyebrow {
-  display: block;
-  font: 700 11px/1.2 var(--font-geist-mono);
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-}
 .icon {
   display: inline-block;
   flex: none;
@@ -328,10 +322,14 @@ select:focus-visible {
   vertical-align: middle;
   border: 0;
   background: transparent;
-  padding: 0;
+  padding: 2px;
   margin-left: 2px;
   font-weight: 900;
   line-height: 1;
+  border-radius: 50%;
+}
+.card-title button:hover {
+  background: var(--green);
 }
 .people-list,
 .interaction-list {
@@ -389,7 +387,7 @@ select:focus-visible {
   border-radius: var(--blob);
 }
 .friend-search button:disabled {
-  opacity: 0.5;
+  opacity: 0.6;
   cursor: not-allowed;
 }
 .slack-picker {
@@ -511,7 +509,6 @@ select:focus-visible {
 .friend-menu-button:hover,
 .friend-menu-button[aria-expanded="true"] {
   background: var(--green);
-  transform: rotate(25deg);
 }
 .friend-menu {
   position: absolute;
@@ -664,7 +661,7 @@ select:focus-visible {
 }
 .primary-button:disabled {
   cursor: wait;
-  opacity: 0.85;
+  opacity: 0.6;
 }
 .start-button {
   min-width: 265px;
@@ -849,7 +846,7 @@ select:focus-visible {
 .vote-heading p {
   margin: auto;
   max-width: 580px;
-  font: 450 13px/1.6 var(--font-geist-mono);
+  font: 450 13px/1.6 var(--font-geist-sans);
   color: var(--muted);
 }
 .lobby-screen {
@@ -1014,6 +1011,9 @@ select:focus-visible {
   gap: 9px;
   border-radius: var(--blob);
 }
+.segmented button:hover {
+  background: var(--cream);
+}
 .segmented button.active {
   background: var(--green);
   border-color: var(--ink);
@@ -1041,8 +1041,11 @@ select:focus-visible {
   background: var(--paper);
   border-radius: var(--blob);
 }
+.time-options button:hover {
+  background: var(--cream);
+}
 .time-options button.active {
-  background: var(--pink);
+  background: var(--green);
   border-color: var(--ink);
   box-shadow: 3px 3px 0 var(--ink);
 }
@@ -1613,6 +1616,9 @@ select:focus-visible {
   font-size: 21px;
   border-radius: var(--blob);
 }
+.close-button:hover {
+  background: var(--cream);
+}
 .onboarding-modal h2,
 .profile-modal h2 {
   margin: 8px 0;
@@ -1620,7 +1626,7 @@ select:focus-visible {
   letter-spacing: -0.05em;
 }
 .onboarding-modal > p {
-  font: 500 11px/1.5 var(--font-geist-mono);
+  font: 500 11px/1.5 var(--font-geist-sans);
   color: var(--muted);
 }
 .level-grid {
@@ -1727,7 +1733,7 @@ select:focus-visible {
 .connect-step > p {
   max-width: 430px;
   margin: 0 auto 22px;
-  font: 500 11px/1.65 var(--font-geist-mono);
+  font: 500 11px/1.65 var(--font-geist-sans);
   color: var(--muted);
 }
 .avatar-preview-note {
@@ -1941,7 +1947,6 @@ select:focus-visible {
 }
 .settings-gear:hover {
   background: var(--green);
-  transform: rotate(25deg);
 }
 .report-menu-anchor {
   position: relative;
@@ -1957,9 +1962,9 @@ select:focus-visible {
   border-radius: var(--blob);
   transition: transform 0.15s, background 0.15s;
 }
-.report-menu-button:hover {
-  background: var(--pink);
-  transform: translate(1px, 1px);
+.report-menu-button:hover,
+.report-menu-button[aria-expanded="true"] {
+  background: var(--green);
 }
 .report-menu {
   position: absolute;
@@ -2007,9 +2012,12 @@ select:focus-visible {
   font: 600 10px var(--font-geist-mono);
   border-radius: var(--blob);
 }
+.report-roster button:hover {
+  background: var(--cream);
+}
 .report-roster button.active {
-  background: var(--red-strong);
-  color: white;
+  background: var(--green);
+  color: var(--ink);
 }
 .report-modal {
   text-align: center;
@@ -2023,20 +2031,26 @@ select:focus-visible {
 .settings-modal h2 {
   margin: 8px 0 20px;
 }
-.settings-modal .danger-button {
-  width: 100%;
-  min-height: 48px;
+/* Base look for every destructive action in the app (forfeit, delete,
+   submit-report, etc.) — components only need to add their own layout
+   (width, min-height, grid placement) on top of this. */
+.danger-button {
   border: 2px solid var(--ink);
   background: var(--red-strong);
   color: white;
   font: 700 10px var(--font-geist-mono);
   border-radius: var(--blob);
 }
-.settings-modal .danger-button:hover:not(:disabled) {
+.danger-button:hover:not(:disabled) {
   background: var(--red);
 }
-.settings-modal .danger-button:disabled {
+.danger-button:disabled {
   opacity: 0.6;
+  cursor: wait;
+}
+.settings-modal .danger-button {
+  width: 100%;
+  min-height: 48px;
 }
 .disconnect-banner {
   position: fixed;
@@ -2179,9 +2193,10 @@ select:focus-visible {
 .call-controls > button.active {
   background: var(--green);
 }
+.call-controls > button:hover,
+.call-controls .av-settings-anchor > button:hover,
 .call-controls .av-settings-anchor > button[aria-expanded="true"] {
-  background: var(--pink);
-  transform: rotate(25deg);
+  background: var(--green);
 }
 .call-controls > button span,
 .call-controls .av-settings-anchor > button span {
@@ -2219,8 +2234,11 @@ select:focus-visible {
   padding: 0 12px;
   font: 600 8px var(--font-geist-mono);
 }
+.scope-toggle button:hover {
+  background: var(--cream);
+}
 .scope-toggle button.active {
-  background: var(--pink);
+  background: var(--green);
   color: var(--ink);
 }
 .workspace {
@@ -2277,10 +2295,13 @@ select:focus-visible {
   font: 600 10px var(--font-geist-mono);
   flex-shrink: 0;
 }
+.file-tabs button:hover {
+  background: var(--paper);
+  color: var(--ink);
+}
 .file-tabs button.active {
   color: var(--ink);
   background: var(--paper);
-  border-top: 3px solid var(--pink);
 }
 .file-tabs button span {
   margin-left: 10px;
@@ -2390,11 +2411,12 @@ select:focus-visible {
   position: relative;
 }
 .file-rail button:hover {
+  background: var(--cream);
   color: var(--ink);
 }
 .file-rail button.active {
+  background: var(--green);
   color: var(--ink);
-  border-left: 3px solid var(--pink);
 }
 .file-rail span {
   flex: 1;
@@ -2694,6 +2716,9 @@ select:focus-visible {
 .settings-segmented button:first-child {
   border-left: 0;
 }
+.settings-segmented button:hover {
+  background: var(--cream);
+}
 .settings-segmented button.active {
   background: var(--green);
   color: var(--ink);
@@ -2876,6 +2901,9 @@ select:focus-visible {
   padding: 10px 18px;
   font: 650 10px var(--font-geist-mono);
 }
+.board-toggle button:hover {
+  background: var(--cream);
+}
 .board-toggle button.active {
   background: var(--green);
 }
@@ -2975,7 +3003,7 @@ select:focus-visible {
 }
 .product-card p {
   min-height: 40px;
-  font: 500 9px/1.5 var(--font-geist-mono);
+  font: 500 9px/1.5 var(--font-geist-sans);
   color: var(--muted);
 }
 .product-card > div:last-child {
@@ -3040,7 +3068,7 @@ select:focus-visible {
   background: #fffdf1;
   border: 2px solid var(--ink);
   border-radius: var(--blob);
-  font: 500 11px/1.5 var(--font-geist-mono);
+  font: 500 11px/1.5 var(--font-geist-sans);
   color: var(--ink);
   display: -webkit-box;
   -webkit-line-clamp: 3;
@@ -3070,6 +3098,16 @@ select:focus-visible {
   padding: 10px 14px;
   font: 650 9px var(--font-geist-mono);
   border-radius: var(--blob);
+  box-shadow: 3px 4px 0 var(--ink);
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+.vote-grid footer button:hover {
+  transform: translate(1px, 2px);
+  box-shadow: 2px 2px 0 var(--ink);
+}
+.vote-grid footer button:active {
+  transform: translate(3px, 4px);
+  box-shadow: none;
 }
 .versus {
   font: 800 17px var(--font-geist-mono);
@@ -3254,6 +3292,11 @@ select:focus-visible {
   text-align: center;
   width: min(1100px, 100%);
 }
+.results-modal h2 {
+  margin: 0 0 9px;
+  font-size: 34px;
+  letter-spacing: -0.05em;
+}
 .results-modal .results-grid {
   margin: 20px auto 24px;
 }
@@ -3271,7 +3314,7 @@ select:focus-visible {
 }
 .vote-gate-modal p {
   color: var(--muted);
-  font: 500 10px/1.6 var(--font-geist-mono);
+  font: 500 10px/1.6 var(--font-geist-sans);
   margin: 0 0 20px;
 }
 .vote-gate-modal .primary-button {
@@ -3288,7 +3331,11 @@ select:focus-visible {
 }
 .publish-modal p {
   color: var(--muted);
-  font: 500 10px/1.5 var(--font-geist-mono);
+  font: 500 10px/1.5 var(--font-geist-sans);
+}
+.report-modal p {
+  color: var(--muted);
+  font: 500 10px/1.5 var(--font-geist-sans);
 }
 .publish-links {
   display: grid;
@@ -3356,7 +3403,8 @@ select:focus-visible {
   padding: 10px 12px 10px 2px;
   font: 650 11px var(--font-geist-mono);
 }
-.publish-modal .publish-error {
+.publish-modal .publish-error,
+.report-modal .publish-error {
   color: var(--red-strong);
   font-weight: 700;
 }
@@ -3435,6 +3483,13 @@ select:focus-visible {
   font: 700 10px var(--font-geist-mono);
   border-radius: var(--blob);
 }
+.forfeit-actions button:not(.danger-button):hover:not(:disabled) {
+  background: var(--cream);
+}
+.forfeit-actions button:not(.danger-button):disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
 .forfeit-actions .danger-button {
   background: var(--red-strong);
   color: white;
@@ -3449,7 +3504,6 @@ select:focus-visible {
   gap: 10px;
 }
 .shipping-modal h2,
-.shipping-modal .eyebrow,
 .shipping-modal .primary-button {
   grid-column: 1 / -1;
 }
