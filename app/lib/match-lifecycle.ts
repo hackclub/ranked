@@ -1,4 +1,5 @@
 import { addChallengeProgress } from "@/app/lib/progression";
+import { logAudit } from "@/app/lib/audit";
 import { getSql } from "@/db";
 
 export type MatchTeam = "blue" | "red";
@@ -22,7 +23,7 @@ const THEME_FORMATS = [
   "a forum",
   "a marketplace",
   "a portfolio site",
-  "a museum exhibit microsite",
+  "a museum exhibit",
   "an obituary page",
   "a subscription box landing page",
   "a conspiracy theory blog",
@@ -170,8 +171,21 @@ export async function finalizeForfeit(
           AND COALESCE(stale.disconnect_started_at,stale.last_heartbeat_at)+INTERVAL '10 seconds'<=NOW()
       )
     )
-    RETURNING id,is_test AS "isTest"`;
+    RETURNING id,is_test AS "isTest",theme,mode`;
   if (!claimed.length) return null;
+
+  const forfeiter = await getSql()`SELECT name FROM users WHERE id=${forfeitedBy}`;
+  await logAudit({
+    actor: null,
+    action: reason === "forfeit" ? "match.forfeit" : "match.disconnect",
+    summary:
+      reason === "forfeit"
+        ? `${forfeiter[0]?.name ?? "A player"} forfeited a ${claimed[0].mode} match ("${claimed[0].theme}")`
+        : `${forfeiter[0]?.name ?? "A player"} was auto-forfeited from a ${claimed[0].mode} match ("${claimed[0].theme}") after disconnecting`,
+    targetType: "match",
+    targetId: matchId,
+    metadata: { forfeitedBy, losingTeam, isTest: claimed[0].isTest },
+  });
 
   if (!claimed[0].isTest) {
     await getSql().transaction([

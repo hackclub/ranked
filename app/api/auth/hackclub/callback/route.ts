@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { exchangeHackClubCode } from "@/app/lib/hackclub";
 import { decryptSession, encryptSession, SESSION_COOKIE, sessionCookieOptions } from "@/app/lib/session";
 import { appUrl } from "@/app/lib/urls";
+import { logAudit } from "@/app/lib/audit";
 import { getSql } from "@/db";
 
 export async function GET(request: NextRequest) {
@@ -23,6 +24,14 @@ export async function GET(request: NextRequest) {
         slack_id = EXCLUDED.slack_id, verification_status = EXCLUDED.verification_status,
         avatar_url = COALESCE(EXCLUDED.avatar_url, users.avatar_url), last_seen_at = NOW(), updated_at = NOW()
     `;
+    await logAudit({
+      actor: { id: userId, name, email },
+      action: "auth.login",
+      summary: `${name} signed in via Hack Club OAuth`,
+      targetType: "user",
+      targetId: userId,
+    });
+
     const response = NextResponse.redirect(appUrl("/?auth=connected", request));
     response.cookies.set(SESSION_COOKIE, await encryptSession({
       github: current?.github,

@@ -17,7 +17,7 @@ export const matchModeEnum = pgEnum("match_mode", ["solo", "duo", "admin"]);
 export const matchStatusEnum = pgEnum("match_status", ["active", "voting", "finalizing", "completed", "cancelled"]);
 export const teamEnum = pgEnum("match_team", ["blue", "red"]);
 export const friendshipStatusEnum = pgEnum("friendship_status", ["pending", "accepted", "declined", "blocked"]);
-export const duoInviteStatusEnum = pgEnum("duo_invite_status", ["pending", "accepted", "declined"]);
+export const duoInviteStatusEnum = pgEnum("duo_invite_status", ["pending", "accepted", "declined", "missed"]);
 export const orderStatusEnum = pgEnum("order_status", ["pending", "approved", "shipped", "cancelled"]);
 export const challengeTypeEnum = pgEnum("challenge_type", ["play_matches", "code_seconds", "add_friends"]);
 export const reportTypeEnum = pgEnum("report_type", ["misconduct", "ai"]);
@@ -190,3 +190,19 @@ export const shopOrders = pgTable("shop_orders", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, table => [index("orders_user_idx").on(table.userId)]);
+
+// Deliberately has no foreign keys on the actor/target ids: an audit row must stay
+// legible even after the account it names is wiped (db:wipe-users) or deleted, so
+// the human-readable name/email are captured at write time rather than joined live.
+export const auditLog = pgTable("audit_log", {
+  id: text("id").primaryKey(),
+  actorId: text("actor_id"),
+  actorName: text("actor_name"),
+  actorEmail: text("actor_email"),
+  action: text("action").notNull(),
+  summary: text("summary").notNull(),
+  targetType: text("target_type"),
+  targetId: text("target_id"),
+  metadata: jsonb("metadata"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, table => [index("audit_log_created_idx").on(table.createdAt)]);

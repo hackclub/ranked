@@ -3,12 +3,13 @@ import { currentUser } from "@/app/lib/current-user";
 import { getSql } from "@/db";
 
 type InvitePartner = { id: string; partnerId: string; partnerName: string; partnerAvatar: { color: string; eyes: number; mouths: number }; partnerQueued?: boolean };
+type MissedInvite = { id: string; partnerName: string; partnerAvatar: { color: string; eyes: number; mouths: number } };
 
 export async function GET(request: NextRequest) {
   const user = await currentUser(request);
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const sql = getSql();
-  const [partner, outgoing, incoming] = await Promise.all([
+  const [partner, outgoing, incoming, missed] = await Promise.all([
     sql`SELECT di.id, (CASE WHEN di.from_user_id=${user.id} THEN di.to_user_id ELSE di.from_user_id END) AS "partnerId",
         u.name AS "partnerName", u.avatar AS "partnerAvatar",
         EXISTS(SELECT 1 FROM matchmaking_queue q WHERE q.user_id = (CASE WHEN di.from_user_id=${user.id} THEN di.to_user_id ELSE di.from_user_id END)) AS "partnerQueued"
@@ -21,11 +22,15 @@ export async function GET(request: NextRequest) {
     sql`SELECT di.id, di.from_user_id AS "partnerId", u.name AS "partnerName", u.avatar AS "partnerAvatar"
       FROM duo_invites di JOIN users u ON u.id=di.from_user_id
       WHERE di.to_user_id=${user.id} AND di.status='pending' ORDER BY di.created_at DESC`,
+    sql`SELECT di.id, u.name AS "partnerName", u.avatar AS "partnerAvatar"
+      FROM duo_invites di JOIN users u ON u.id=di.from_user_id
+      WHERE di.to_user_id=${user.id} AND di.status='missed' ORDER BY di.created_at DESC`,
   ]);
   return NextResponse.json({
     partner: (partner[0] as InvitePartner | undefined) ?? null,
     outgoing: (outgoing[0] as InvitePartner | undefined) ?? null,
     incoming: incoming as InvitePartner[],
+    missed: missed as MissedInvite[],
   });
 }
 
@@ -40,6 +45,17 @@ export async function POST(request: NextRequest) {
   if (!friendship.length) return NextResponse.json({ error: "You can only invite accepted friends." }, { status: 400 });
   const friend = await sql`SELECT name, avatar FROM users WHERE id=${friendId}`;
   if (!friend[0]) return NextResponse.json({ error: "That player no longer exists." }, { status: 404 });
+
+  const inMatch = await sql`SELECT 1 FROM match_players mp JOIN matches m ON m.id = mp.match_id
+    WHERE mp.user_id=${friendId} AND m.status='active' LIMIT 1`;
+  if (inMatch.length) {
+    await sql`INSERT INTO duo_invites (id, from_user_id, to_user_id, status) VALUES (${crypto.randomUUID()}, ${user.id}, ${friendId}, 'missed')`;
+    return NextResponse.json(
+      { error: `${friend[0].name} is currently playing a match — try inviting them again once they're done.` },
+      { status: 409 },
+    );
+  }
+
   await sql`DELETE FROM duo_invites WHERE status IN ('pending','accepted') AND (from_user_id=${user.id} OR to_user_id=${user.id})`;
   const inserted = await sql`INSERT INTO duo_invites (id, from_user_id, to_user_id) VALUES (${crypto.randomUUID()}, ${user.id}, ${friendId}) RETURNING id`;
   return NextResponse.json({ outgoing: { id: inserted[0].id, partnerId: friendId, partnerName: friend[0].name, partnerAvatar: friend[0].avatar } });
@@ -49,8 +65,13 @@ export async function PATCH(request: NextRequest) {
   const user = await currentUser(request);
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { inviteId, action } = await request.json() as { inviteId?: string; action?: string };
-  if (!inviteId || (action !== "accept" && action !== "decline")) return NextResponse.json({ error: "Invalid request." }, { status: 400 });
+  if (!inviteId || (action !== "accept" && action !== "decline" && action !== "acknowledge"))
+    return NextResponse.json({ error: "Invalid request." }, { status: 400 });
   const sql = getSql();
+  if (action === "acknowledge") {
+    await sql`UPDATE duo_invites SET status='declined', updated_at=NOW() WHERE id=${inviteId} AND to_user_id=${user.id} AND status='missed'`;
+    return NextResponse.json({ ok: true });
+  }
   if (action === "decline") {
     await sql`UPDATE duo_invites SET status='declined', updated_at=NOW() WHERE id=${inviteId} AND to_user_id=${user.id} AND status='pending'`;
     return NextResponse.json({ ok: true });

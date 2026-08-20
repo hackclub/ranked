@@ -5,7 +5,7 @@ import { CollaborativeEditor } from "./realtime/CollaborativeEditor";
 import { StreamVideo } from "./realtime/StreamVideo";
 import { useCodeRoom, useRealtimeRoom } from "./realtime/useRealtimeRoom";
 import { getYjsProviderForRoom } from "@liveblocks/yjs";
-import { canUseTestLobby } from "./lib/test-lobby";
+import { isAdmin } from "./lib/admin";
 import { AvatarCustomizer, ScribbleAvatar } from "./components/GoofyGuyAvatar";
 import {
   DEFAULT_AVATAR,
@@ -15,7 +15,7 @@ import {
   type ResolvedAvatarConfig,
 } from "./lib/avatar";
 
-type Screen = "home" | "lobby" | "match" | "vote" | "leaderboard" | "shop";
+type Screen = "home" | "lobby" | "match" | "vote" | "leaderboard" | "shop" | "admin";
 type Mode = "solo" | "duo";
 type Experience = "beginner" | "intermediate" | "expert";
 type AuthState = {
@@ -286,7 +286,7 @@ const DESCRIPTION_MAX_LENGTH = 500;
 
 // GitHub Pages usually finishes its first build well within this window; it's
 // just the countdown estimate shown while we poll for the real thing.
-const PAGES_BUILD_ESTIMATE_SECONDS = 45;
+const PAGES_BUILD_ESTIMATE_SECONDS = 30;
 
 const FILE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*\.(html|css|js)$/;
 const FILE_TEMPLATES: Record<"html" | "css" | "js", string> = {
@@ -724,12 +724,14 @@ function SiteHeader({
   onProfile,
   balance,
   avatar,
+  showAdmin = false,
 }: {
   screen: Screen;
   navigate: (s: Screen) => void;
   onProfile: () => void;
   balance: number;
   avatar?: AvatarConfig;
+  showAdmin?: boolean;
 }) {
   return (
     <header className="site-header">
@@ -746,6 +748,14 @@ function SiteHeader({
         >
           leaderboard
         </button>
+        {showAdmin && (
+          <button
+            className={screen === "admin" ? "active" : ""}
+            onClick={() => navigate("admin")}
+          >
+            admin
+          </button>
+        )}
       </nav>
       <Logo />
       <button
@@ -1635,7 +1645,15 @@ function Lobby({
   });
   const [inviteBusy, setInviteBusy] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
-  useEscapeKey(addOpen, () => setAddOpen(false));
+  const [inviteSearch, setInviteSearch] = useState("");
+  const closeInvitePopover = useCallback(() => {
+    setAddOpen(false);
+    setInviteSearch("");
+  }, []);
+  useEscapeKey(addOpen, closeInvitePopover);
+  const filteredFriends = friends.filter((friend) =>
+    friend.name.toLowerCase().includes(inviteSearch.trim().toLowerCase()),
+  );
   const [challenges, setChallenges] = useState<DashboardData["challenges"]>([]);
   const resetsIn = useCountdownToUtcMidnight();
 
@@ -1853,20 +1871,6 @@ function Lobby({
     toast(`Invite sent to ${result.outgoing.partnerName}`);
   };
 
-  const respondInvite = async (
-    inviteId: string,
-    action: "accept" | "decline",
-  ) => {
-    const response = await fetch("/api/duo-invites", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ inviteId, action }),
-    });
-    if (!response.ok) return toast("Could not respond to that invite");
-    fetchDuoState();
-    if (action === "accept") toast("You're teamed up!");
-  };
-
   const cancelDuo = async () => {
     await fetch("/api/duo-invites", { method: "DELETE" });
     setDuoState({ partner: null, outgoing: null, incoming: [] });
@@ -1899,36 +1903,6 @@ function Lobby({
 
       <section className="lobby-stage">
         <div className="flex flex-col gap-4">
-          {mode === "duo" && duoState.incoming.length > 0 && (
-            <aside className="hud-panel">
-              <span className="hud-label">duo invite</span>
-              <ul className="invite-list">
-                {duoState.incoming.map((invite) => (
-                  <li className="invite-row" key={invite.id}>
-                    <ScribbleAvatar size="sm" avatar={invite.partnerAvatar} />
-                    <div>
-                      <strong>{invite.partnerName}</strong>
-                      <span>wants to duo with you</span>
-                    </div>
-                    <div className="invite-actions">
-                      <button
-                        aria-label={`Accept ${invite.partnerName}'s invite`}
-                        onClick={() => void respondInvite(invite.id, "accept")}
-                      >
-                        <Icon name="check" size={13} />
-                      </button>
-                      <button
-                        aria-label={`Decline ${invite.partnerName}'s invite`}
-                        onClick={() => void respondInvite(invite.id, "decline")}
-                      >
-                        ×
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </aside>
-          )}
           <DailyChallenges challenges={challenges} resetsIn={resetsIn} />
 
           <div className="match-dock">
@@ -1951,7 +1925,7 @@ function Lobby({
                 <i className="dock-dot" /> contacting matchmaking service…
               </p>
             )}
-            {canUseTestLobby(user.email) && !matching && (
+            {isAdmin(user.email) && !matching && (
               <button
                 className="test-lobby-button"
                 onClick={() => void testEmptyLobby()}
@@ -1966,6 +1940,7 @@ function Lobby({
           <div className="pedestal-row">
             <div className={`pedestal ${matching ? "ready" : ""}`}>
               <div className="pedestal-ring" />
+              <div className="pedestal-beam" />
               <div className="pedestal-avatar">
                 <ScribbleAvatar
                   avatar={user.avatar}
@@ -1986,6 +1961,7 @@ function Lobby({
                 {duoState.partner ? (
                   <>
                     <div className="pedestal-ring" />
+                    <div className="pedestal-beam" />
                     <div className="pedestal-avatar">
                       <ScribbleAvatar
                         avatar={duoState.partner.partnerAvatar}
@@ -2029,7 +2005,9 @@ function Lobby({
                       className="invite-plus"
                       aria-label="Invite a friend to duo"
                       aria-expanded={addOpen}
-                      onClick={() => setAddOpen((open) => !open)}
+                      onClick={() =>
+                        addOpen ? closeInvitePopover() : setAddOpen(true)
+                      }
                     >
                       <Icon name="plus" size={22} />
                     </button>
@@ -2038,7 +2016,7 @@ function Lobby({
                       <>
                         <div
                           className="popover-backdrop"
-                          onClick={() => setAddOpen(false)}
+                          onClick={closeInvitePopover}
                         />
                         <div
                           className="invite-popover"
@@ -2048,20 +2026,45 @@ function Lobby({
                           <span className="invite-popover-title">
                             invite a friend
                           </span>
-                          {friends.length ? (
+                          {friends.length > 0 && (
+                            <div className="invite-search">
+                              <Icon name="search" size={11} />
+                              <input
+                                type="text"
+                                value={inviteSearch}
+                                onChange={(event) =>
+                                  setInviteSearch(event.target.value)
+                                }
+                                placeholder="search friends"
+                                autoComplete="off"
+                                aria-label="Search friends"
+                              />
+                            </div>
+                          )}
+                          {friends.length === 0 ? (
+                            <p className="invite-empty">
+                              Add friends from a recent match first.
+                            </p>
+                          ) : filteredFriends.length === 0 ? (
+                            <p className="invite-empty">
+                              No friends match &ldquo;{inviteSearch}&rdquo;.
+                            </p>
+                          ) : (
                             <ul className="invite-friend-list">
-                              {friends.map((friend) => (
+                              {filteredFriends.map((friend) => (
                                 <li key={friend.userId}>
-                                  <ScribbleAvatar
-                                    size="sm"
-                                    avatar={friend.avatar}
-                                  />
+                                  <span className="invite-avatar-frame">
+                                    <ScribbleAvatar
+                                      size="sm"
+                                      avatar={friend.avatar}
+                                    />
+                                  </span>
                                   <strong>{friend.name}</strong>
                                   <button
                                     disabled={inviteBusy}
                                     onClick={() => {
                                       void sendInvite(friend.userId);
-                                      setAddOpen(false);
+                                      closeInvitePopover();
                                     }}
                                   >
                                     invite
@@ -2069,10 +2072,6 @@ function Lobby({
                                 </li>
                               ))}
                             </ul>
-                          ) : (
-                            <p className="invite-empty">
-                              Add friends from a recent match first.
-                            </p>
                           )}
                         </div>
                       </>
@@ -3025,7 +3024,7 @@ function Match({
   };
 
   const isTestMatch = Boolean(match.isTest);
-  const canSkipPublish = isTestMatch && canUseTestLobby(auth.user?.email ?? "");
+  const canSkipPublish = isTestMatch && isAdmin(auth.user?.email);
 
   const disconnectSeconds = disconnect
     ? Math.max(0, disconnect.secondsRemaining)
@@ -3736,7 +3735,7 @@ function Match({
                 onClick={() => setAvSettingsOpen((open) => !open)}
               >
                 <Icon name="settings" size={16} />
-                <span>a/v</span>
+                <span>settings</span>
               </button>
               {avSettingsOpen && (
                 <div className="av-settings-menu" role="dialog" aria-label="Audio and video settings">
@@ -4140,22 +4139,51 @@ function Match({
   );
 }
 
-function Leaderboard({ navigate }: { navigate: (s: Screen) => void }) {
+type LeaderboardPage = {
+  page: number;
+  pageSize: number;
+  totalPlayers: number;
+  totalPages: number;
+  yourRank: number | null;
+  yourPage: number | null;
+  players: Array<{
+    id: string;
+    name: string;
+    score: number | string;
+    matchesPlayed: number;
+  }>;
+};
+
+function Leaderboard({
+  navigate,
+  auth,
+}: {
+  navigate: (s: Screen) => void;
+  auth: AuthState;
+}) {
   const [board, setBoard] = useState<"elo" | "hours">("elo");
-  const [rows, setRows] = useState<
-    Array<{
-      id: string;
-      name: string;
-      score: number | string;
-      matchesPlayed: number;
-    }>
-  >([]);
+  const [requestedPage, setRequestedPage] = useState<number | null>(null);
+  const [data, setData] = useState<LeaderboardPage | null>(null);
+
+  const changeBoard = (next: "elo" | "hours") => {
+    setBoard(next);
+    setRequestedPage(null);
+    setData(null);
+  };
+
   useEffect(() => {
-    fetch(`/api/leaderboard?type=${board}`)
+    const params = new URLSearchParams({ type: board });
+    if (requestedPage) params.set("page", String(requestedPage));
+    fetch(`/api/leaderboard?${params}`)
       .then((response) => response.json())
-      .then((result) => setRows(result.players ?? []))
-      .catch(() => setRows([]));
-  }, [board]);
+      .then((result) => setData(result))
+      .catch(() => setData(null));
+  }, [board, requestedPage]);
+
+  const onYourPage = Boolean(
+    data?.yourPage && data.yourPage === data.page,
+  );
+
   return (
     <main className="subpage screen-pad">
       <button className="lobby-exit-button" onClick={() => navigate("home")}>
@@ -4168,13 +4196,13 @@ function Leaderboard({ navigate }: { navigate: (s: Screen) => void }) {
       <div className="board-toggle">
         <button
           className={board === "elo" ? "active" : ""}
-          onClick={() => setBoard("elo")}
+          onClick={() => changeBoard("elo")}
         >
           elo
         </button>
         <button
           className={board === "hours" ? "active" : ""}
-          onClick={() => setBoard("hours")}
+          onClick={() => changeBoard("hours")}
         >
           hours
         </button>
@@ -4186,20 +4214,157 @@ function Leaderboard({ navigate }: { navigate: (s: Screen) => void }) {
           <span>{board === "elo" ? "ELO" : "hours"}</span>
           <span>matches played</span>
         </div>
-        {rows.map((row, index) => (
-          <div className="leader-row" key={row.id}>
-            <strong>#{index + 1}</strong>
-            <span>
-              <i style={{ background: COLORS[index % COLORS.length] }}>
-                {row.name[0].toUpperCase()}
-              </i>
-              <b>{row.name}</b>
-            </span>
-            <strong>{row.score}</strong>
-            <span>{row.matchesPlayed}</span>
-          </div>
-        ))}
+        {data?.players.map((row, index) => {
+          const rank = (data.page - 1) * data.pageSize + index + 1;
+          const isYou = row.id === auth.user?.id;
+          return (
+            <div
+              className={isYou ? "leader-row you" : "leader-row"}
+              key={row.id}
+            >
+              <strong>#{rank}</strong>
+              <span>
+                <i style={{ background: COLORS[index % COLORS.length] }}>
+                  {row.name[0].toUpperCase()}
+                </i>
+                <b>{row.name}</b>
+                {isYou && <em className="leader-you-tag">you</em>}
+              </span>
+              <strong>{row.score}</strong>
+              <span>{row.matchesPlayed}</span>
+            </div>
+          );
+        })}
       </section>
+      {data && data.totalPages > 1 && (
+        <div className="leader-pagination">
+          <button
+            className="lobby-exit-button"
+            disabled={data.page <= 1}
+            onClick={() => setRequestedPage(data.page - 1)}
+          >
+            <Icon name="arrow-left" size={13} />
+          </button>
+          <span>
+            page {data.page} of {data.totalPages}
+          </span>
+          <button
+            className="lobby-exit-button"
+            disabled={data.page >= data.totalPages}
+            onClick={() => setRequestedPage(data.page + 1)}
+          >
+            <Icon name="arrow-left" size={13} className="icon-flip" />
+          </button>
+          {data.yourPage && !onYourPage && (
+            <button
+              className="leader-jump-button"
+              onClick={() => setRequestedPage(data.yourPage)}
+            >
+              jump to my rank (#{data.yourRank})
+            </button>
+          )}
+        </div>
+      )}
+    </main>
+  );
+}
+
+const AUDIT_CATEGORY_LABELS: Record<string, string> = {
+  auth: "login",
+  admin: "admin",
+  match: "match",
+  report: "report",
+  shop: "shop",
+};
+
+type AuditEntry = {
+  id: string;
+  createdAt: string;
+  action: string;
+  summary: string;
+  actorName: string | null;
+  actorEmail: string | null;
+};
+
+type AuditPage = {
+  page: number;
+  totalEntries: number;
+  totalPages: number;
+  entries: AuditEntry[];
+};
+
+function AdminAuditLog({ navigate }: { navigate: (s: Screen) => void }) {
+  const [requestedPage, setRequestedPage] = useState<number | null>(null);
+  const [data, setData] = useState<AuditPage | null>(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (requestedPage) params.set("page", String(requestedPage));
+    fetch(`/api/admin/audit-log?${params}`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((result) => setData(result))
+      .catch(() => setData(null));
+  }, [requestedPage]);
+
+  return (
+    <main className="subpage screen-pad">
+      <button className="lobby-exit-button" onClick={() => navigate("home")}>
+        <Icon name="arrow-left" size={14} />
+        back to dash
+      </button>
+      <div className="subpage-head">
+        <h1>Audit Log</h1>
+        <p>
+          Security and moderation events across the site — logins, matches,
+          reports, redemptions, and admin actions.
+        </p>
+      </div>
+      <section className="audit-card">
+        {data && data.entries.length === 0 && (
+          <p className="audit-empty">Nothing logged yet.</p>
+        )}
+        {data?.entries.map((entry) => {
+          const category = entry.action.split(".")[0];
+          const label = AUDIT_CATEGORY_LABELS[category] ?? category;
+          return (
+            <div className="audit-row" key={entry.id}>
+              <span
+                className={`audit-tag audit-tag-${AUDIT_CATEGORY_LABELS[category] ? category : "default"}`}
+              >
+                {label}
+              </span>
+              <div className="audit-body">
+                <p>{entry.summary}</p>
+                <span className="audit-meta">
+                  {new Date(entry.createdAt).toLocaleString()}
+                  {entry.actorName && ` · ${entry.actorName}`}
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </section>
+      {data && data.totalPages > 1 && (
+        <div className="admin-pagination">
+          <button
+            className="lobby-exit-button"
+            disabled={data.page <= 1}
+            onClick={() => setRequestedPage(data.page - 1)}
+          >
+            <Icon name="arrow-left" size={13} />
+          </button>
+          <span>
+            page {data.page} of {data.totalPages} · {data.totalEntries} events
+          </span>
+          <button
+            className="lobby-exit-button"
+            disabled={data.page >= data.totalPages}
+            onClick={() => setRequestedPage(data.page + 1)}
+          >
+            <Icon name="arrow-left" size={13} className="icon-flip" />
+          </button>
+        </div>
+      )}
     </main>
   );
 }
@@ -4919,6 +5084,70 @@ export default function RankedApp() {
     }
   }, [logoutLoading, toast]);
 
+  const [incomingInvites, setIncomingInvites] = useState<
+    Array<{ id: string; partnerName: string; partnerAvatar: AvatarConfig }>
+  >([]);
+  const acknowledgingMissed = useRef<Set<string>>(new Set());
+
+  const pollDuoInvites = useCallback(() => {
+    fetch("/api/duo-invites")
+      .then((response) => (response.ok ? response.json() : null))
+      .then(
+        (
+          data: {
+            incoming?: Array<{ id: string; partnerName: string; partnerAvatar: AvatarConfig }>;
+            missed?: Array<{ id: string; partnerName: string; partnerAvatar: AvatarConfig }>;
+          } | null,
+        ) => {
+          if (!data) return;
+          setIncomingInvites(data.incoming ?? []);
+          if (screen === "match") return;
+          for (const missedInvite of data.missed ?? []) {
+            if (acknowledgingMissed.current.has(missedInvite.id)) continue;
+            acknowledgingMissed.current.add(missedInvite.id);
+            toast(
+              `${missedInvite.partnerName} invited you to duo while you were in a match`,
+            );
+            void fetch("/api/duo-invites", {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ inviteId: missedInvite.id, action: "acknowledge" }),
+            });
+          }
+        },
+      )
+      .catch(() => undefined);
+  }, [screen, toast]);
+
+  useEffect(() => {
+    if (!auth.user) return;
+    pollDuoInvites();
+    const poll = window.setInterval(pollDuoInvites, 4000);
+    return () => window.clearInterval(poll);
+  }, [auth.user, pollDuoInvites]);
+
+  const respondToInvite = useCallback(
+    async (inviteId: string, action: "accept" | "decline") => {
+      const response = await fetch("/api/duo-invites", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ inviteId, action }),
+      });
+      if (!response.ok) {
+        toast("Could not respond to that invite");
+        return;
+      }
+      setIncomingInvites((current) =>
+        current.filter((invite) => invite.id !== inviteId),
+      );
+      if (action === "accept") {
+        toast("You're teamed up!");
+        navigate("lobby");
+      }
+    },
+    [toast],
+  );
+
   return (
     <div className={`app-shell screen-${screen}`}>
       {screen !== "match" && !(screen === "lobby" && auth.user) && (
@@ -4931,6 +5160,7 @@ export default function RankedApp() {
           }}
           balance={auth.user?.hBucks ?? 0}
           avatar={auth.user?.avatar}
+          showAdmin={isAdmin(auth.user?.email)}
         />
       )}
       {screen === "home" && (
@@ -4997,9 +5227,14 @@ export default function RankedApp() {
         />
       )}
       {screen === "vote" && <Voting navigate={navigate} toast={toast} />}
-      {screen === "leaderboard" && <Leaderboard navigate={navigate} />}
+      {screen === "leaderboard" && (
+        <Leaderboard navigate={navigate} auth={auth} />
+      )}
       {screen === "shop" && (
         <Shop navigate={navigate} toast={toast} auth={auth} />
+      )}
+      {screen === "admin" && auth.user && isAdmin(auth.user.email) && (
+        <AdminAuditLog navigate={navigate} />
       )}
       {profileOpen && (
         <ProfileModal
@@ -5043,6 +5278,33 @@ export default function RankedApp() {
           onSelectExperience={(experience) => void saveExperience(experience)}
           close={() => setOnboardingOpen(false)}
         />
+      )}
+      {screen !== "match" && auth.user && incomingInvites.length > 0 && (
+        <div className="global-invite-stack" role="alert">
+          {incomingInvites.map((invite) => (
+            <div className="global-invite-card" key={invite.id}>
+              <ScribbleAvatar size="sm" avatar={invite.partnerAvatar} />
+              <div>
+                <strong>{invite.partnerName}</strong>
+                <span>wants to duo with you</span>
+              </div>
+              <div className="invite-actions">
+                <button
+                  aria-label={`Accept ${invite.partnerName}'s invite`}
+                  onClick={() => void respondToInvite(invite.id, "accept")}
+                >
+                  <Icon name="check" size={13} />
+                </button>
+                <button
+                  aria-label={`Decline ${invite.partnerName}'s invite`}
+                  onClick={() => void respondToInvite(invite.id, "decline")}
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
       )}
       <div className={`toast ${toastMessage ? "show" : ""}`} role="status">
         {toastMessage}

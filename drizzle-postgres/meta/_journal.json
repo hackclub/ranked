@@ -71,6 +71,20 @@
       "when": 1787176178661,
       "tag": "0009_nervous_thunderbolts",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1787247128066,
+      "tag": "0010_supreme_shocker",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1787258923607,
+      "tag": "0011_closed_blade",
+      "breakpoints": true
     }
   ]
 }

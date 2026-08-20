@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { currentUser } from "@/app/lib/current-user";
 import { finalizeForfeit, matchOutcome, type MatchTeam } from "@/app/lib/match-lifecycle";
-import { canUseTestLobby } from "@/app/lib/test-lobby";
+import { isAdmin } from "@/app/lib/admin";
 import { getSql } from "@/db";
 
 export async function POST(request: NextRequest, context: { params: Promise<{ matchId: string }> }) {
@@ -13,7 +13,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ ma
     WHERE mp.match_id=${matchId} AND mp.user_id=${user.id}`;
   const player = rows[0] as { team: MatchTeam; status: string; isTest: boolean; beforeEnd: boolean } | undefined;
   if (!player) return NextResponse.json({ error: "You are not in this match." }, { status: 403 });
-  const isAdminLobby = player.isTest && canUseTestLobby(user.email);
+  const isAdminLobby = player.isTest && isAdmin(user.email);
   if (player.status !== "active" || (!player.beforeEnd && !isAdminLobby)) {
     return NextResponse.json({ error: "This match has already ended.", match: await matchOutcome(matchId) }, { status: 409 });
   }

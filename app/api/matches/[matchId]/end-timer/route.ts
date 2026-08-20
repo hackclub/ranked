@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { currentUser } from "@/app/lib/current-user";
 import { activeMatch } from "@/app/lib/match-lifecycle";
-import { canUseTestLobby } from "@/app/lib/test-lobby";
+import { isAdmin } from "@/app/lib/admin";
 import { getSql } from "@/db";
 
 export async function POST(request: NextRequest, context: { params: Promise<{ matchId: string }> }) {
@@ -13,7 +13,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ ma
     WHERE mp.match_id=${matchId} AND mp.user_id=${user.id}`;
   const player = rows[0] as { status: string; isTest: boolean } | undefined;
   if (!player) return NextResponse.json({ error: "You are not in this match." }, { status: 403 });
-  if (!player.isTest || !canUseTestLobby(user.email)) {
+  if (!player.isTest || !isAdmin(user.email)) {
     return NextResponse.json({ error: "Not available for this match." }, { status: 403 });
   }
   if (player.status !== "active") {

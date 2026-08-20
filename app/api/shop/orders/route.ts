@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { currentUser } from "@/app/lib/current-user";
+import { logAudit } from "@/app/lib/audit";
 import { getSql } from "@/db";
 
 const catalog: Record<string, { name: string; cost: number }> = {
@@ -34,5 +35,13 @@ export async function POST(request: NextRequest) {
       SELECT ${orderId},${user.id},${itemId},${item.name},${item.cost},${JSON.stringify(shipping)}::jsonb FROM debit RETURNING id,status
     ) SELECT placed.id,placed.status,debit.h_bucks AS balance FROM placed CROSS JOIN debit`;
   if (!result.length) return NextResponse.json({ error: "Not enough H-Bucks." }, { status: 400 });
+  await logAudit({
+    actor: { id: user.id, name: user.name, email: user.email },
+    action: "shop.order.created",
+    summary: `${user.name} redeemed ${item.name} for ${item.cost} Ħ — pending shipping approval`,
+    targetType: "shop_order",
+    targetId: orderId,
+    metadata: { itemId, cost: item.cost },
+  });
   return NextResponse.json({ order: result[0], balance: result[0].balance });
 }

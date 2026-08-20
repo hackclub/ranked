@@ -1,11 +1,46 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSql } from "@/db";
+import { currentUser } from "@/app/lib/current-user";
+
+const PAGE_SIZE = 10;
 
 export async function GET(request: NextRequest) {
   const type = request.nextUrl.searchParams.get("type") === "hours" ? "hours" : "elo";
-  const rows = type === "elo"
-    ? await getSql()`SELECT id, name, elo AS score, avatar, matches_played AS "matchesPlayed" FROM users ORDER BY elo DESC, matches_played DESC LIMIT 100`
-    : await getSql()`SELECT id, name, ROUND(coding_seconds/3600.0,1) AS score, avatar, matches_played AS "matchesPlayed" FROM users ORDER BY coding_seconds DESC LIMIT 100`;
-  return NextResponse.json({ type, players: rows });
-}
+  const sql = getSql();
+  const user = await currentUser(request);
 
+  const [{ count }] = await sql`SELECT COUNT(*)::int AS count FROM users`;
+  const totalPlayers = Number(count);
+  const totalPages = Math.max(1, Math.ceil(totalPlayers / PAGE_SIZE));
+
+  let yourRank: number | null = null;
+  if (user) {
+    const rankRows = type === "elo"
+      ? await sql`SELECT (COUNT(*) FILTER (WHERE elo > ${user.elo} OR (elo = ${user.elo} AND matches_played > ${user.matchesPlayed})))::int + 1 AS rank FROM users`
+      : await sql`SELECT (COUNT(*) FILTER (WHERE coding_seconds > ${user.codingSeconds}))::int + 1 AS rank FROM users`;
+    yourRank = Number((rankRows[0] as { rank: number } | undefined)?.rank) || null;
+  }
+  const yourPage = yourRank ? Math.ceil(yourRank / PAGE_SIZE) : null;
+
+  const requestedPage = Number(request.nextUrl.searchParams.get("page"));
+  const page = Math.min(
+    Math.max(1, Number.isFinite(requestedPage) && requestedPage > 0 ? requestedPage : (yourPage ?? 1)),
+    totalPages,
+  );
+  const offset = (page - 1) * PAGE_SIZE;
+
+  const rows = type === "elo"
+    ? await sql`SELECT id, name, elo AS score, avatar, matches_played AS "matchesPlayed" FROM users ORDER BY elo DESC, matches_played DESC LIMIT ${PAGE_SIZE} OFFSET ${offset}`
+    : await sql`SELECT id, name, ROUND(coding_seconds/3600.0,1) AS score, avatar, matches_played AS "matchesPlayed" FROM users ORDER BY coding_seconds DESC LIMIT ${PAGE_SIZE} OFFSET ${offset}`;
+
+  return NextResponse.json({
+    type,
+    page,
+    pageSize: PAGE_SIZE,
+    totalPlayers,
+    totalPages,
+    players: rows,
+    yourRank,
+    yourPage,
+  });
+}

@@ -1313,32 +1313,68 @@ select:focus-visible {
   white-space: nowrap;
   color: var(--ink);
 }
+.invite-search {
+  position: relative;
+  margin-bottom: 8px;
+}
+.invite-search .icon {
+  position: absolute;
+  top: 50%;
+  left: 8px;
+  transform: translateY(-50%);
+  color: var(--muted);
+  pointer-events: none;
+}
+.invite-search input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--ink);
+  background: #fff9dc;
+  padding: 6px 8px 6px 24px;
+  font: 500 9px var(--font-geist-mono);
+  border-radius: var(--blob);
+}
 .invite-friend-list {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 3px;
+  max-height: 152px;
+  overflow-y: auto;
 }
 .invite-friend-list li {
   display: grid;
-  grid-template-columns: 30px 1fr auto;
+  grid-template-columns: 22px 1fr auto;
   align-items: center;
-  gap: 9px;
+  gap: 7px;
+  padding: 3px 2px;
 }
-.invite-friend-list li .scribble-avatar {
-  transform: scale(0.52);
+.invite-avatar-frame {
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+.invite-avatar-frame .scribble-avatar {
+  transform: scale(0.38);
 }
 .invite-friend-list li strong {
-  font: 600 10px var(--font-geist-mono);
+  font: 600 9px var(--font-geist-mono);
   color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .invite-friend-list li button {
   border: 1px solid var(--ink);
   background: var(--green);
-  padding: 5px 10px;
-  font: 650 8px var(--font-geist-mono);
+  padding: 3px 8px;
+  font: 650 7px var(--font-geist-mono);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   border-radius: var(--blob);
@@ -1387,12 +1423,44 @@ select:focus-visible {
   border-radius: 50%;
   background: #d9c79a;
   border: 3px solid var(--ink);
+  box-shadow:
+    0 0 0 6px #497cbf22,
+    0 0 20px 4px #497cbf33;
   z-index: 0;
 }
 .pedestal-ring.dashed {
   background: transparent;
   border: 3px dashed var(--ink);
+  box-shadow: none;
   opacity: 0.55;
+}
+.pedestal-beam {
+  position: absolute;
+  bottom: 10%;
+  left: 50%;
+  width: 42%;
+  height: 80%;
+  transform: translateX(-50%);
+  z-index: 0;
+  pointer-events: none;
+  clip-path: polygon(38% 100%, 62% 100%, 84% 0%, 16% 0%);
+  background: linear-gradient(
+    to top,
+    #497cbf5e 0%,
+    #497cbf26 55%,
+    transparent 100%
+  );
+  filter: blur(1px);
+  animation: beam-flicker 2.8s ease-in-out infinite;
+}
+.pedestal.ready .pedestal-beam {
+  background: linear-gradient(
+    to top,
+    #ccd96cb0 0%,
+    #ccd96c40 55%,
+    transparent 100%
+  );
+  animation: beam-flicker 1s ease-in-out infinite;
 }
 .pedestal .scribble-avatar {
   position: relative;
@@ -1402,19 +1470,32 @@ select:focus-visible {
   width: clamp(135px, 33vh, 255px);
   height: clamp(140px, 34vh, 265px);
 }
-.pedestal strong {
+.pedestal > strong {
   display: block;
-  margin-top: 6px;
-  font: 700 11px var(--font-geist-mono);
+  margin-top: 10px;
+  max-width: 100%;
+  padding: 4px 12px;
+  border: 1.5px solid var(--ink);
+  border-radius: 999px;
+  background: var(--paper);
+  box-shadow: 2px 2px 0 var(--ink);
+  font: 700 10px var(--font-geist-mono);
   color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.pedestal.empty strong,
-.pedestal.pending strong {
+.pedestal.empty > strong,
+.pedestal.pending > strong {
+  border-style: dashed;
+  box-shadow: none;
+  background: transparent;
   color: var(--muted);
   font-weight: 600;
 }
 .pedestal.ready .pedestal-ring {
   background: var(--green);
+  box-shadow: none;
   animation: pulse-ring 1.6s ease-out infinite;
 }
 .ready-badge {
@@ -1456,16 +1537,20 @@ select:focus-visible {
   display: grid;
   place-items: center;
   opacity: 0.8;
+  box-shadow: 0 0 16px 2px #497cbf40;
+  animation: float-plus 2.6s ease-in-out infinite;
   transition:
-    transform 0.15s,
     background 0.15s,
     border-style 0.15s,
-    opacity 0.15s;
+    opacity 0.15s,
+    box-shadow 0.15s;
 }
 .invite-plus:hover {
   background: var(--green);
   border-style: solid;
   opacity: 1;
+  box-shadow: 0 0 20px 4px #ccd96c66;
+  animation-play-state: paused;
   transform: scale(1.06);
 }
 .popover-backdrop {
@@ -1580,6 +1665,24 @@ select:focus-visible {
 @keyframes pulse-ring {
   50% {
     box-shadow: 0 0 0 8px #ccd96c44;
+  }
+}
+@keyframes beam-flicker {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
+@keyframes float-plus {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-5px);
   }
 }
 
@@ -2955,6 +3058,142 @@ select:focus-visible {
   font-size: 8px;
   letter-spacing: 0.1em;
 }
+.leader-you-tag {
+  border: 1px solid var(--blue);
+  color: var(--blue-strong);
+  font: 700 8px var(--font-geist-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 2px 6px;
+  border-radius: var(--blob);
+}
+.leader-pagination {
+  max-width: 850px;
+  margin: 18px auto 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  font: 650 10px var(--font-geist-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.leader-pagination .lobby-exit-button {
+  padding: 8px 10px;
+}
+.leader-pagination .lobby-exit-button:disabled {
+  opacity: 0.35;
+  cursor: default;
+  box-shadow: 3px 3px 0 var(--ink);
+  transform: none;
+}
+.leader-jump-button {
+  border: 2px solid var(--blue);
+  background: #497cbf20;
+  color: var(--blue-strong);
+  box-shadow: 3px 3px 0 var(--blue);
+  padding: 8px 14px;
+  font: 650 10px var(--font-geist-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-radius: var(--blob);
+}
+.leader-jump-button:hover {
+  background: #497cbf35;
+}
+.icon-flip {
+  transform: rotate(180deg);
+}
+.audit-card {
+  max-width: 780px;
+  margin: auto;
+  background: var(--paper);
+  border: 2px solid var(--ink);
+  box-shadow: 8px 8px 0 var(--ink);
+  overflow: hidden;
+}
+.audit-row {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  align-items: start;
+  gap: 14px;
+  padding: 14px 20px;
+  border-bottom: 1px solid #d9d1b8;
+}
+.audit-row:last-child {
+  border: 0;
+}
+.audit-tag {
+  justify-self: start;
+  margin-top: 2px;
+  border: 1.5px solid var(--ink);
+  color: var(--ink);
+  background: var(--cream);
+  padding: 3px 8px;
+  border-radius: var(--blob);
+  font: 700 8px var(--font-geist-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+.audit-tag-login {
+  background: var(--blue);
+  color: var(--cream);
+  border-color: var(--blue-strong);
+}
+.audit-tag-admin {
+  background: var(--pink);
+}
+.audit-tag-match {
+  background: var(--orange);
+}
+.audit-tag-report {
+  background: var(--red);
+  color: var(--cream);
+  border-color: var(--red-strong);
+}
+.audit-tag-shop {
+  background: var(--green);
+}
+.audit-body p {
+  margin: 0;
+  font: 550 12px/1.5 var(--font-geist-mono);
+  color: var(--ink);
+}
+.audit-meta {
+  display: block;
+  margin-top: 4px;
+  font: 600 9px var(--font-geist-mono);
+  color: var(--muted);
+}
+.audit-empty {
+  margin: 0;
+  padding: 30px 20px;
+  text-align: center;
+  font: 500 10px var(--font-geist-mono);
+  color: var(--muted);
+}
+.admin-pagination {
+  max-width: 780px;
+  margin: 18px auto 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  font: 650 10px var(--font-geist-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.admin-pagination .lobby-exit-button {
+  padding: 8px 10px;
+}
+.admin-pagination .lobby-exit-button:disabled {
+  opacity: 0.35;
+  cursor: default;
+  box-shadow: 3px 3px 0 var(--ink);
+  transform: none;
+}
 .shop-page .subpage-head {
   max-width: 780px;
 }
@@ -3571,6 +3810,53 @@ select:focus-visible {
 .toast span {
   color: var(--pink);
   margin-left: 12px;
+}
+.global-invite-stack {
+  position: fixed;
+  z-index: 205;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(320px, calc(100vw - 24px));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.global-invite-card {
+  display: grid;
+  grid-template-columns: 34px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  background: var(--paper);
+  border: 2px solid var(--ink);
+  box-shadow: 5px 5px 0 var(--ink);
+  border-radius: var(--blob);
+  padding: 10px 14px;
+  animation: invite-drop 0.25s ease-out;
+}
+.global-invite-card .scribble-avatar {
+  transform: scale(0.58);
+}
+.global-invite-card strong {
+  display: block;
+  font: 700 11px var(--font-geist-mono);
+  color: var(--ink);
+}
+.global-invite-card span {
+  display: block;
+  margin-top: 2px;
+  font: 600 8px var(--font-geist-mono);
+  color: var(--muted);
+}
+@keyframes invite-drop {
+  from {
+    opacity: 0;
+    transform: translateY(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @keyframes pulse {

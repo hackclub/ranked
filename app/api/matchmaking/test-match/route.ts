@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { currentUser } from "@/app/lib/current-user";
 import { activeMatch, generateMatchTheme } from "@/app/lib/match-lifecycle";
-import { canUseTestLobby } from "@/app/lib/test-lobby";
+import { isAdmin } from "@/app/lib/admin";
+import { logAudit } from "@/app/lib/audit";
 import { getSql } from "@/db";
 
 export async function POST(request: NextRequest) {
@@ -15,7 +16,7 @@ export async function POST(request: NextRequest) {
       { status: 403 },
     );
   }
-  if (!canUseTestLobby(user.email)) return NextResponse.json({ error: "Not available for your account." }, { status: 403 });
+  if (!isAdmin(user.email)) return NextResponse.json({ error: "Not available for your account." }, { status: 403 });
 
   const body = await request.json().catch(() => ({}));
   const duration = [10, 30, 60].includes(Number(body.durationMinutes)) ? Number(body.durationMinutes) : 10;
@@ -27,6 +28,13 @@ export async function POST(request: NextRequest) {
     VALUES (${matchId}, ${mode}::match_mode, TRUE, ${duration}, ${theme}, NOW() + (${duration} || ' minutes')::interval)`;
   await getSql()`INSERT INTO match_players (match_id, user_id, team, slot, pre_elo, last_heartbeat_at)
     VALUES (${matchId}, ${user.id}, 'blue'::match_team, 0, ${user.elo}, NOW())`;
+  await logAudit({
+    actor: { id: user.id, name: user.name, email: user.email },
+    action: "admin.test_lobby.entered",
+    summary: `${user.name} entered an empty test lobby (${mode}, ${duration} min)`,
+    targetType: "match",
+    targetId: matchId,
+  });
 
   const match = await activeMatch(user.id);
   return NextResponse.json(match ? { status: "matched", match } : { status: "queued" });
