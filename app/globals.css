@@ -3709,6 +3709,86 @@ select:focus-visible {
   color: var(--muted);
   font: 500 8px/1.5 var(--font-geist-mono);
 }
+
+.hca-address-field {
+  display: grid;
+  gap: 7px;
+  margin-top: 14px;
+  text-align: left;
+}
+
+.hca-address-field > span {
+  font: 700 12px var(--font-geist-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.hca-address-field select {
+  width: 100%;
+  border: 2px solid var(--ink);
+  border-radius: 12px;
+  background: #fffdf2;
+  color: var(--ink);
+  padding: 11px 12px;
+  font: 500 13px var(--font-geist-mono);
+}
+
+.hca-address-field small,
+.hca-address-note,
+.hca-address-missing p {
+  font: 500 12px/1.45 var(--font-geist-mono);
+}
+
+.hca-address-field a,
+.airtable-status button {
+  color: #315f9b;
+  text-decoration: underline;
+}
+
+.submission-capture-frame {
+  position: fixed;
+  left: -2400px;
+  top: 0;
+  width: 1200px;
+  height: 675px;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.hca-address-missing {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 12px;
+  border: 2px dashed #bf5a5a;
+  border-radius: 14px;
+  background: #fff0e7;
+}
+
+.airtable-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 12px 0;
+  font: 600 12px/1.4 var(--font-geist-mono);
+}
+
+.airtable-status.submitted {
+  color: #476c29;
+}
+
+.airtable-status.error {
+  color: #9b3333;
+}
+
+.airtable-status button {
+  border: 0;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
 .forfeit-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
