@@ -12,7 +12,7 @@ export type MatchEndReason = "forfeit" | "disconnect";
 const THEME_FORMATS = [
   "an online shop",
   "the personal website",
-  "the landing page",
+  "A landing page",
   "a social media site",
   "a wikiHow guide",
   "a recipe blog",
@@ -74,7 +74,7 @@ const THEME_NOUNS = [
   "sentient soup",
   "glow-in-the-dark gravel",
   "malicious rubber ducks",
-  "artisanal air",
+  "artisanal trashcans",
   "electronic dance music",
   "poor ghosts",
   "invisible paint",

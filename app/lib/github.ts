@@ -176,12 +176,26 @@ async function pathExists(token: string, login: string, path: string) {
 }
 
 async function configureRankedRepoForPages(token: string, login: string) {
+  // The repo is shared across every match the user publishes, so this runs
+  // again on every publish after the first — .nojekyll already exists by
+  // then, and GitHub's contents API 422s on an update PUT with no "sha".
+  let nojekyllSha: string | undefined;
+  try {
+    const existing = await githubRequest<{ sha: string }>(
+      token,
+      repoContentsPath(login, ".nojekyll"),
+    );
+    nojekyllSha = existing.sha;
+  } catch (error) {
+    if (!isNotFound(error)) throw error;
+  }
   await githubRequest(token, repoContentsPath(login, ".nojekyll"), {
     method: "PUT",
     body: JSON.stringify({
       message: "Configure GitHub Pages",
       content: "",
       branch: "main",
+      ...(nojekyllSha ? { sha: nojekyllSha } : {}),
     }),
   });
   try {

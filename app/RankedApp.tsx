@@ -3176,6 +3176,7 @@ function Match({
 
   const isTestMatch = Boolean(match.isTest);
   const canSkipPublish = isTestMatch && isAdmin(auth.user?.email);
+  const canForceEndTimer = isAdmin(auth.user?.email);
 
   const disconnectSeconds = disconnect
     ? Math.max(0, disconnect.secondsRemaining)
@@ -3324,7 +3325,7 @@ function Match({
             >
               forfeit match
             </button>
-            {canSkipPublish && (
+            {canForceEndTimer && (
               <button
                 className="danger-button"
                 onClick={() => {
