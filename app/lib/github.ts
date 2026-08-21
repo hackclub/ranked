@@ -76,10 +76,39 @@ async function githubRequest<T>(
   });
   if (!response.ok) {
     const detail = await response.text();
-    if (response.status === 422 && url.endsWith("/user/repos"))
+    if (response.status === 422 && url.endsWith("/user/repos")) {
+      // 422 on repo creation covers *any* validation failure GitHub rejects
+      // the request for — a name collision is only one of them (account
+      // restrictions, an unverified email, a malformed field, etc. all land
+      // here too). Only show the "name already in use" message when GitHub's
+      // own error body actually says so; otherwise surface its real reason
+      // instead of a misleading one, since previously every 422 got the same
+      // "name already in use" text even when there was no conflicting repo.
+      let nameTaken = false;
+      let githubMessage: string | undefined;
+      try {
+        const parsed = JSON.parse(detail) as {
+          message?: string;
+          errors?: Array<{ field?: string; message?: string }>;
+        };
+        githubMessage = parsed.message;
+        nameTaken = Boolean(
+          parsed.errors?.some(
+            (entry) =>
+              entry.field === "name" ||
+              /name already exists/i.test(entry.message ?? ""),
+          ),
+        );
+      } catch {}
+      if (nameTaken) {
+        throw new Error(
+          "That repository name is already in use on your GitHub account. Choose another name.",
+        );
+      }
       throw new Error(
-        "That repository name is already in use on your GitHub account. Choose another name.",
+        `GitHub couldn't create your hackclubranked repo: ${githubMessage ?? detail.slice(0, 280)}`,
       );
+    }
     throw new Error(
       `GitHub request failed (${response.status}): ${detail.slice(0, 280)}`,
     );
