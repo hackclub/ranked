@@ -55,6 +55,15 @@ export const hackatimeConnections = pgTable("hackatime_connections", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, table => [index("hackatime_connections_slack_idx").on(table.slackId)]);
 
+// Birthdates and shipping addresses are sensitive HCA data. The application
+// stores them as one encrypted payload rather than exposing individual PII
+// columns or putting a potentially large address list in the session cookie.
+export const hackClubProfiles = pgTable("hack_club_profiles", {
+  userId: text("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  profileEncrypted: text("profile_encrypted").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const matches = pgTable("matches", {
   id: text("id").primaryKey(),
   mode: matchModeEnum("mode").notNull(),
@@ -159,6 +168,12 @@ export const publications = pgTable("publications", {
   githubRepo: text("github_repo").notNull(),
   description: text("description"),
   publishedBy: text("published_by").notNull().references(() => users.id),
+  hcaAddressId: text("hca_address_id"),
+  airtableStatus: text("airtable_status").notNull().default("pending"),
+  airtableRecordId: text("airtable_record_id"),
+  airtableError: text("airtable_error"),
+  airtableLastAttemptAt: timestamp("airtable_last_attempt_at", { withTimezone: true }),
+  airtableSubmittedAt: timestamp("airtable_submitted_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, table => [uniqueIndex("publication_match_user_unique").on(table.matchId, table.publishedBy), index("publication_match_team_idx").on(table.matchId, table.team)]);
 

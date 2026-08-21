@@ -2522,9 +2522,21 @@ function Match({
   const [publishState, setPublishState] = useState<{
     loading: boolean;
     error?: string;
+    publicationId?: string;
     repositoryUrl?: string;
     pagesUrl?: string;
+    airtableStatus?: string;
   }>({ loading: false });
+  const [submissionProfile, setSubmissionProfile] = useState<{
+    loading: boolean;
+    ready: boolean;
+    addresses: Array<{ id: string; label: string; primary: boolean }>;
+  }>({ loading: true, ready: false, addresses: [] });
+  const [submissionAddressId, setSubmissionAddressId] = useState("");
+  const [airtableSubmission, setAirtableSubmission] = useState<
+    "idle" | "waiting" | "submitting" | "submitted" | "error"
+  >("idle");
+  const submissionCaptureRef = useRef<HTMLIFrameElement>(null);
   const {
     ready: pagesReady,
     secondsLeft: pagesCountdown,
@@ -2552,6 +2564,42 @@ function Match({
     onPeerVideoLost,
   );
   const room = useCodeRoom(`ranked:code:${match.id}:${team}`);
+
+  useEffect(() => {
+    if (!publishOpen && !publishState.repositoryUrl) return;
+    let cancelled = false;
+    fetch("/api/airtable/profile")
+      .then(async (response) => {
+        const result = (await response.json()) as {
+          ready?: boolean;
+          addresses?: Array<{ id: string; label: string; primary: boolean }>;
+        };
+        if (!response.ok) throw new Error("Could not load HCA addresses");
+        return result;
+      })
+      .then((result) => {
+        if (cancelled) return;
+        const addresses = result.addresses ?? [];
+        setSubmissionProfile({
+          loading: false,
+          ready: result.ready === true,
+          addresses,
+        });
+        setSubmissionAddressId((current) =>
+          addresses.some((address) => address.id === current)
+            ? current
+            : (addresses.find((address) => address.primary) ?? addresses[0])?.id ?? "",
+        );
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSubmissionProfile({ loading: false, ready: false, addresses: [] });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [publishOpen, publishState.repositoryUrl]);
 
   useEffect(() => {
     if (status === "media-blocked") {
@@ -2919,6 +2967,13 @@ function Match({
       window.location.assign("/api/auth/github/start");
       return;
     }
+    if (!submissionProfile.ready || !submissionAddressId) {
+      setPublishState({
+        loading: false,
+        error: "Reconnect Hack Club Auth and choose a shipping address.",
+      });
+      return;
+    }
     setPublishState({ loading: true });
     try {
       const pages = Object.fromEntries(
@@ -2935,19 +2990,29 @@ function Match({
           pages,
           files,
           description,
+          addressId: submissionAddressId,
         }),
       });
       const result = (await response.json()) as {
         error?: string;
+        code?: string;
+        publicationId?: string;
         repositoryUrl?: string;
         pagesUrl?: string;
+        airtableStatus?: string;
       };
+      if (result.code === "hca_profile_required") {
+        window.location.assign("/api/auth/hackclub/start");
+        return;
+      }
       if (!response.ok || !result.repositoryUrl || !result.pagesUrl)
         throw new Error(result.error ?? "Publishing failed.");
       setPublishState({
         loading: false,
+        publicationId: result.publicationId,
         repositoryUrl: result.repositoryUrl,
         pagesUrl: result.pagesUrl,
+        airtableStatus: result.airtableStatus,
       });
       toast(`Published ${buildName}, GitHub Pages is building now`);
     } catch (error) {
@@ -2965,8 +3030,75 @@ function Match({
     publishState.repositoryUrl,
     buildName,
     description,
+    submissionAddressId,
+    submissionProfile.ready,
     toast,
   ]);
+
+  const submitToAirtable = useCallback(async () => {
+    if (!publishState.publicationId) return;
+    setAirtableSubmission("submitting");
+    try {
+      const frame = submissionCaptureRef.current;
+      const captureDocument = frame?.contentDocument;
+      if (!captureDocument?.body || !captureDocument.documentElement) {
+        throw new Error("The build preview is not ready to capture");
+      }
+      captureDocument.documentElement.style.width = "1200px";
+      captureDocument.documentElement.style.height = "675px";
+      captureDocument.body.style.width = "1200px";
+      captureDocument.body.style.minHeight = "675px";
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      );
+      const { toBlob } = await import("html-to-image");
+      const screenshot = await toBlob(captureDocument.body, {
+        width: 1200,
+        height: 675,
+        canvasWidth: 1200,
+        canvasHeight: 675,
+        backgroundColor: "#fffdf2",
+        cacheBust: true,
+        pixelRatio: 1,
+        skipFonts: true,
+      });
+      if (!screenshot) throw new Error("Could not capture the finished build");
+      const body = new FormData();
+      body.set("publicationId", publishState.publicationId);
+      body.set(
+        "screenshot",
+        new File([screenshot], "ranked-build.png", { type: "image/png" }),
+      );
+      const response = await fetch("/api/airtable/submissions", {
+        method: "POST",
+        body,
+      });
+      const result = (await response.json()) as { status?: string; error?: string };
+      if (response.status === 202) {
+        setAirtableSubmission("waiting");
+        window.setTimeout(() => setAirtableSubmission("idle"), 4000);
+        return;
+      }
+      if (!response.ok || result.status !== "submitted") {
+        throw new Error(result.error ?? "Airtable submission failed");
+      }
+      setAirtableSubmission("submitted");
+      toast("Your live build was submitted automatically");
+    } catch {
+      setAirtableSubmission("error");
+    }
+  }, [publishState.publicationId, toast]);
+
+  useEffect(() => {
+    if (
+      pagesReady &&
+      publishState.publicationId &&
+      airtableSubmission === "idle"
+    ) {
+      const timer = window.setTimeout(() => void submitToAirtable(), 0);
+      return () => window.clearTimeout(timer);
+    }
+  }, [airtableSubmission, pagesReady, publishState.publicationId, submitToAirtable]);
 
   const applyLifecycle = useCallback(
     (result: {
@@ -3421,7 +3553,7 @@ function Match({
             onClick={(event) => event.stopPropagation()}
           >
             <h2 id="delete-file-title">Delete {fileToDelete}?</h2>
-            <p>This removes it for the whole team and can't be undone.</p>
+            <p>This removes it for the whole team and can&apos;t be undone.</p>
             <div className="forfeit-actions">
               <button onClick={() => setFileToDelete(null)}>cancel</button>
               <button className="danger-button" onClick={confirmDeleteFile}>
@@ -4106,6 +4238,15 @@ function Match({
           aria-labelledby="publish-title"
         >
           <section className="modal publish-modal">
+            <iframe
+              ref={submissionCaptureRef}
+              className="submission-capture-frame"
+              title="Automatic submission screenshot"
+              srcDoc={previewDoc}
+              sandbox="allow-same-origin"
+              tabIndex={-1}
+              aria-hidden="true"
+            />
             <h2 id="publish-title">
               {publishState.repositoryUrl
                 ? "Your build is open source."
@@ -4141,11 +4282,31 @@ function Match({
                     </span>
                   )}
                 </div>
+                <div
+                  className={`airtable-status ${airtableSubmission}`}
+                  aria-live="polite"
+                >
+                  {airtableSubmission === "submitted" ? (
+                    <><Icon name="check" size={13} /> submitted to Ranked</>
+                  ) : airtableSubmission === "error" ? (
+                    <>
+                      Airtable submission needs another try.
+                      <button onClick={() => void submitToAirtable()}>retry</button>
+                    </>
+                  ) : pagesReady ? (
+                    <><i className="spinner" /> submitting automatically…</>
+                  ) : (
+                    <>Airtable submission starts when GitHub Pages is live.</>
+                  )}
+                </div>
                 <button
                   className="primary-button"
                   onClick={() => navigate("home")}
+                  disabled={airtableSubmission !== "submitted"}
                 >
-                  return home
+                  {airtableSubmission === "submitted"
+                    ? "return home"
+                    : "finishing submission…"}
                 </button>
               </>
             ) : (
@@ -4176,6 +4337,39 @@ function Match({
                     required
                   />
                 </label>
+                {submissionProfile.loading ? (
+                  <p className="hca-address-note">loading your HCA addresses…</p>
+                ) : submissionProfile.ready ? (
+                  <label className="hca-address-field">
+                    <span>shipping address from Hack Club Auth</span>
+                    <select
+                      value={submissionAddressId}
+                      onChange={(event) => setSubmissionAddressId(event.target.value)}
+                    >
+                      {submissionProfile.addresses.map((address) => (
+                        <option key={address.id} value={address.id}>
+                          {address.label}{address.primary ? " · primary" : ""}
+                        </option>
+                      ))}
+                    </select>
+                    <small>
+                      Manage addresses at{" "}
+                      <a href="https://auth.hackclub.com" target="_blank" rel="noreferrer">
+                        auth.hackclub.com
+                      </a>.
+                    </small>
+                  </label>
+                ) : (
+                  <div className="hca-address-missing">
+                    <p>
+                      Reconnect Hack Club Auth to share your verified birthday
+                      and choose an address for the automatic submission.
+                    </p>
+                    <a className="github-connect" href="/api/auth/hackclub/start">
+                      reconnect Hack Club Auth
+                    </a>
+                  </div>
+                )}
                 {publishState.error && (
                   <p className="publish-error">{publishState.error}</p>
                 )}
@@ -4183,7 +4377,13 @@ function Match({
                   <button
                     className="primary-button"
                     onClick={() => void publish()}
-                    disabled={publishState.loading || !buildName}
+                    disabled={
+                      publishState.loading ||
+                      !buildName ||
+                      submissionProfile.loading ||
+                      !submissionProfile.ready ||
+                      !submissionAddressId
+                    }
                   >
                     {publishState.loading ? (
                       "publishing…"
