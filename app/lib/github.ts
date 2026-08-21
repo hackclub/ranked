@@ -77,6 +77,12 @@ async function githubRequest<T>(
   if (!response.ok) {
     const detail = await response.text();
     if (response.status === 422 && url.endsWith("/user/repos")) {
+      // Log the raw body unconditionally, independent of whatever the parsing
+      // below manages to extract — if GitHub's response has a shape this
+      // doesn't anticipate, this is the one place the real ground truth is
+      // guaranteed to be visible (server logs), instead of the user-facing
+      // message depending on a guess about that shape being right.
+      console.error("GitHub repo creation 422 response body:", detail);
       // 422 on repo creation covers *any* validation failure GitHub rejects
       // the request for — a name collision is only one of them (account
       // restrictions, an unverified email, a malformed field, etc. all land
@@ -87,36 +93,43 @@ async function githubRequest<T>(
       let nameTaken = false;
       let githubMessage: string | undefined;
       try {
+        // GitHub's "errors" field is inconsistent across endpoints: some
+        // return an array of strings, others an array of {field, message}
+        // objects — handle both rather than assuming the structured shape,
+        // since assuming wrong silently drops the one part of the response
+        // that actually explains the failure.
         const parsed = JSON.parse(detail) as {
           message?: string;
-          errors?: Array<{ field?: string; message?: string }>;
+          errors?: Array<string | { field?: string; message?: string }>;
         };
+        const errorEntries = parsed.errors ?? [];
+        const errorTexts = errorEntries
+          .map((entry) => (typeof entry === "string" ? entry : entry.message))
+          .filter((text): text is string => Boolean(text));
         // GitHub's top-level "message" is a generic label ("Repository
-        // creation failed.") — the actual reason lives per-entry in
-        // "errors", so it has to be included or every non-name-conflict
-        // failure just says "creation failed" with no way to tell why.
-        const errorDetails = (parsed.errors ?? [])
-          .map((entry) => entry.message)
-          .filter((message): message is string => Boolean(message))
-          .join("; ");
-        githubMessage = errorDetails
-          ? `${parsed.message ?? "Repository creation failed."} (${errorDetails})`
+        // creation failed.") — the actual reason lives in "errors", so it
+        // has to be included or every non-name-conflict failure just says
+        // "creation failed" with no way to tell why.
+        githubMessage = errorTexts.length
+          ? `${parsed.message ?? "Repository creation failed."} (${errorTexts.join("; ")})`
           : parsed.message;
-        nameTaken = Boolean(
-          parsed.errors?.some(
-            (entry) =>
-              entry.field === "name" ||
-              /name already exists/i.test(entry.message ?? ""),
-          ),
-        );
+        nameTaken =
+          errorTexts.some((text) => /name already exists/i.test(text)) ||
+          errorEntries.some(
+            (entry) => typeof entry !== "string" && entry.field === "name",
+          );
       } catch {}
       if (nameTaken) {
         throw new Error(
           "That repository name is already in use on your GitHub account. Choose another name.",
         );
       }
+      // Fall back to the raw response body (rather than just the generic
+      // top-level message) whenever nothing structured could be pulled out
+      // of it, so a shape this parsing doesn't anticipate still surfaces
+      // instead of silently collapsing to "Repository creation failed."
       throw new Error(
-        `GitHub couldn't create your hackclubranked repo: ${githubMessage ?? detail.slice(0, 280)}`,
+        `GitHub couldn't create your hackclubranked repo: ${githubMessage ?? detail.slice(0, 280) ?? "Repository creation failed."}`,
       );
     }
     throw new Error(

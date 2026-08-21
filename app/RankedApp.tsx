@@ -4172,7 +4172,7 @@ function Match({
                     placeholder="my-ranked-build"
                     autoFocus
                     maxLength={100}
-                    pattern="[A-Za-z0-9._-]+"
+                    pattern="[A-Za-z0-9._\-]+"
                     required
                   />
                 </label>
