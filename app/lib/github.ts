@@ -221,7 +221,7 @@ async function ensureRankedRepo(token: string, login: string) {
         body: JSON.stringify({
           name: RANKED_REPO,
           description:
-            "Hack Club Ranked is a program run by [Hack Club](https://hackclub.com) where teenagers compete and collaborate to speedrun making websites according to a theme. Whoever has the best site at the end wins, and the more matches you win the higher your Ranking. The more matches you play and more hours you code, you can buy cool prizes in the shop like drawing tablets, iPads, hoodies, headphones, and more!",
+            "Hack Club Ranked: teenagers compete to speedrun making websites according to a theme. Win matches to raise your Ranking, and code more hours to earn H-Bucks for prizes like drawing tablets, iPads, hoodies, and headphones.",
           homepage: `https://${login}.github.io/${RANKED_REPO}/`,
           private: false,
           has_issues: true,

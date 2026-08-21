@@ -4009,8 +4009,7 @@ function Match({
           <section className="modal publish-modal">
             <h2 id="description-title">describe your site!</h2>
             <p>
-              a sentence or two on what you made for {match.theme}. voters see
-              this next to your site!
+              two sentences about what your website is, what it does, and how it works!
             </p>
             <label className="description-field">
               <textarea
