@@ -32,6 +32,7 @@ const THEME_FORMATS = [
   "a travel booking site",
   "a fortune-telling site",
   "a pet adoption site",
+  "an app that tracks {noun}"
 ];
 
 const THEME_ENTITIES = [
@@ -58,7 +59,6 @@ const THEME_ENTITIES = [
   "a giant",
   "a company advertising {noun}",
   "a startup selling {noun}",
-  "an app that tracks {noun}",
   "a museum dedicated to {noun}",
   "a shop that only sells {noun}",
   "a cult that worships {noun}",

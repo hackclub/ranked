@@ -4,8 +4,10 @@
 /* eslint-disable @next/next/no-img-element */
 import {
   AVATAR_COUNTS,
+  PREMIUM_AVATAR_ITEMS,
   normalizeAvatar,
   type AvatarConfig,
+  type PremiumAvatarItem,
   type ResolvedAvatarConfig,
 } from "@/app/lib/avatar";
 
@@ -202,18 +204,45 @@ export function ScribbleAvatar({
   );
 }
 
+function LockGlyph() {
+  return (
+    <svg
+      aria-hidden="true"
+      width="10"
+      height="10"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="avatar-lock-glyph"
+    >
+      <rect x="5" y="11" width="14" height="9" rx="2" />
+      <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+    </svg>
+  );
+}
+
 function PartPicker({
   part,
   value,
+  allowedValues,
   onChange,
+  lockedItems = [],
 }: {
   part: AvatarPart;
   value: number;
+  allowedValues: number[];
   onChange: (value: number) => void;
+  lockedItems?: PremiumAvatarItem[];
 }) {
-  const maximum = AVATAR_COUNTS[part];
-  const changeBy = (direction: -1 | 1) =>
-    onChange(((value - 1 + direction + maximum) % maximum) + 1);
+  const currentIndex = Math.max(0, allowedValues.indexOf(value));
+  const changeBy = (direction: -1 | 1) => {
+    const nextIndex =
+      (currentIndex + direction + allowedValues.length) % allowedValues.length;
+    onChange(allowedValues[nextIndex]);
+  };
 
   return (
     <fieldset
@@ -235,7 +264,9 @@ function PartPicker({
         </button>
         <div className="avatar-current-part" aria-live="polite">
           <img src={assetPath(part, value)} alt="" draggable={false} />
-          <span>{value} / {maximum}</span>
+          <span>
+            {currentIndex + 1} / {allowedValues.length}
+          </span>
         </div>
         <button
           type="button"
@@ -245,6 +276,27 @@ function PartPicker({
           <span aria-hidden="true">→</span>
         </button>
       </div>
+      {lockedItems.length > 0 && (
+        <div className="avatar-part-locked">
+          {lockedItems.map((item) => (
+            <span
+              key={item.id}
+              className="avatar-locked-chip"
+              title={`${item.name} — unlock in the Shop for ${item.cost} Ħ`}
+            >
+              <img
+                src={assetPath(part, item.value)}
+                alt=""
+                draggable={false}
+                onError={(event) => {
+                  event.currentTarget.style.visibility = "hidden";
+                }}
+              />
+              <LockGlyph />
+            </span>
+          ))}
+        </div>
+      )}
     </fieldset>
   );
 }
@@ -252,13 +304,40 @@ function PartPicker({
 export function AvatarCustomizer({
   value,
   onChange,
+  ownedPremiumIds,
 }: {
   value: AvatarConfig;
   onChange: (next: ResolvedAvatarConfig) => void;
+  // Omit entirely for the free onboarding pool (today's behavior, unchanged).
+  // Pass the user's owned item ids to additionally allow/show their purchased
+  // Wardrobe looks.
+  ownedPremiumIds?: Set<string>;
 }) {
   const avatar = normalizeAvatar(value);
   const setPart = (part: AvatarPart, next: number) =>
     onChange({ ...avatar, [part]: next });
+
+  const allowedValuesByPart = (Object.keys(LABELS) as AvatarPart[]).reduce(
+    (map, part) => {
+      const starterValues = Array.from(
+        { length: AVATAR_COUNTS[part] },
+        (_, index) => index + 1,
+      );
+      const ownedPremiumValues = ownedPremiumIds
+        ? PREMIUM_AVATAR_ITEMS.filter(
+            (item) => item.part === part && ownedPremiumIds.has(item.id),
+          ).map((item) => item.value)
+        : [];
+      map[part] = [...starterValues, ...ownedPremiumValues];
+      return map;
+    },
+    {} as Record<AvatarPart, number[]>,
+  );
+
+  const randomPick = (part: AvatarPart) => {
+    const options = allowedValuesByPart[part];
+    return options[Math.floor(Math.random() * options.length)];
+  };
 
   return (
     <div className="avatar-customizer">
@@ -271,7 +350,11 @@ export function AvatarCustomizer({
             key={part}
             part={part}
             value={avatar[part]}
+            allowedValues={allowedValuesByPart[part]}
             onChange={(next) => setPart(part, next)}
+            lockedItems={PREMIUM_AVATAR_ITEMS.filter(
+              (item) => item.part === part && !ownedPremiumIds?.has(item.id),
+            )}
           />
         ))}
       </div>
@@ -280,11 +363,11 @@ export function AvatarCustomizer({
         className="shuffle-button"
         onClick={() =>
           onChange({
-            shape: 1 + Math.floor(Math.random() * AVATAR_COUNTS.shape),
-            limbs: 1 + Math.floor(Math.random() * AVATAR_COUNTS.limbs),
-            eye: 1 + Math.floor(Math.random() * AVATAR_COUNTS.eye),
-            hair: 1 + Math.floor(Math.random() * AVATAR_COUNTS.hair),
-            mouth: 1 + Math.floor(Math.random() * AVATAR_COUNTS.mouth),
+            shape: randomPick("shape"),
+            limbs: randomPick("limbs"),
+            eye: randomPick("eye"),
+            hair: randomPick("hair"),
+            mouth: randomPick("mouth"),
           })
         }
       >
