@@ -79,7 +79,7 @@ type DashboardData = {
     friendshipId: string;
     name: string;
     slackId: string | null;
-    avatarUrl: string | null;
+    avatar: AvatarConfig | null;
     lastSeenAt: string | null;
     status: string;
     incoming: boolean;
@@ -89,7 +89,7 @@ type DashboardData = {
     theme: string;
     status: string;
     createdAt: string;
-    opponents: Array<{ id: string; name: string }>;
+    opponents: Array<{ id: string; name: string; avatar: AvatarConfig | null }>;
   }>;
   challenges: Array<{
     type: string;
@@ -848,27 +848,14 @@ function CardTitle({ children }: { children: React.ReactNode }) {
 
 function PersonFace({
   name,
-  avatarUrl,
-  tone = "blue",
+  avatar,
 }: {
   name: string;
-  avatarUrl?: string | null;
-  tone?: "blue" | "orange" | "green";
+  avatar?: AvatarConfig | null;
 }) {
-  if (avatarUrl) {
-    return (
-      // eslint-disable-next-line @next/next/no-img-element -- tiny 28px avatar, not worth the Image pipeline
-      <img
-        className="mini-face mini-face-photo"
-        src={avatarUrl}
-        alt=""
-        draggable={false}
-      />
-    );
-  }
   return (
-    <span className={`mini-face ${tone}`} aria-hidden="true">
-      {name[0]?.toUpperCase()}
+    <span className="mini-face mini-face-avatar">
+      <ScribbleAvatar size="sm" avatar={avatar} label={`${name}'s avatar`} />
     </span>
   );
 }
@@ -1077,10 +1064,7 @@ function Home({
                   const menuOpen = friendMenuOpen === friend.friendshipId;
                   return (
                     <li key={friend.id}>
-                      <PersonFace
-                        name={friend.name}
-                        avatarUrl={friend.avatarUrl}
-                      />
+                      <PersonFace name={friend.name} avatar={friend.avatar} />
                       <div>
                         <strong>{friend.name}</strong>
                         <small className="last-seen">
@@ -1232,14 +1216,12 @@ function Home({
             <CardTitle>recent interactions</CardTitle>
             <ul className="interaction-list">
               {recentInteractions.length ? (
-                recentInteractions.map((interaction, index) => (
+                recentInteractions.map((interaction) => (
                   <li key={`${interaction.matchId}-${interaction.id}`}>
-                    <span
-                      className="interaction-avatar"
-                      style={{ background: COLORS[index % COLORS.length] }}
-                    >
-                      {interaction.name[0].toUpperCase()}
-                    </span>
+                    <PersonFace
+                      name={interaction.name}
+                      avatar={interaction.avatar}
+                    />
                     <div>
                       <strong>{interaction.name}</strong>
                       <small>{interaction.theme}</small>
@@ -2046,7 +2028,7 @@ function Lobby({
                       className="invite-cancel"
                       onClick={() => void cancelDuo()}
                     >
-                      leave
+                      kick
                     </button>
                   </>
                 ) : duoState.outgoing ? (
@@ -2282,7 +2264,7 @@ function Lobby({
       <div className="lobby-footer">
         <small className="lobby-fineprint text-[10px] mb-2">
           By joining, you agree to abide by the{" "}
-          <a
+          <a target="_blank"
             href="https://hackclub.com/conduct"
             className="black bold underline"
           >
@@ -4280,23 +4262,6 @@ function Match({
                       deploying
                       {pagesCountdown > 0 ? ` · ~${pagesCountdown}s` : "…"}
                     </span>
-                  )}
-                </div>
-                <div
-                  className={`airtable-status ${airtableSubmission}`}
-                  aria-live="polite"
-                >
-                  {airtableSubmission === "submitted" ? (
-                    <><Icon name="check" size={13} /> submitted to Ranked</>
-                  ) : airtableSubmission === "error" ? (
-                    <>
-                      Airtable submission needs another try.
-                      <button onClick={() => void submitToAirtable()}>retry</button>
-                    </>
-                  ) : pagesReady ? (
-                    <><i className="spinner" /> submitting automatically…</>
-                  ) : (
-                    <>Airtable submission starts when GitHub Pages is live.</>
                   )}
                 </div>
                 <button

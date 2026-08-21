@@ -458,8 +458,7 @@ select:focus-visible {
 .people-list small.last-seen .status {
   flex-shrink: 0;
 }
-.mini-face,
-.interaction-avatar {
+.mini-face {
   width: 28px;
   height: 28px;
   display: grid;
@@ -468,15 +467,12 @@ select:focus-visible {
   font: 700 11px var(--font-geist-mono);
   border-radius: var(--blob);
 }
-.mini-face.blue {
-  background: var(--blue-strong);
-  color: white;
+.mini-face-avatar {
+  overflow: hidden;
+  background: var(--paper);
 }
-.mini-face.orange {
-  background: var(--orange);
-}
-.mini-face.green {
-  background: var(--green);
+.mini-face-avatar .scribble-avatar {
+  transform: scale(0.483);
 }
 .status {
   width: 6px;
@@ -491,11 +487,6 @@ select:focus-visible {
 }
 .status.offline {
   background: #c9c2b4;
-}
-.mini-face-photo {
-  display: block;
-  object-fit: cover;
-  background: var(--paper);
 }
 .friend-menu-anchor {
   position: relative;
