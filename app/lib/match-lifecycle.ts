@@ -18,21 +18,19 @@ const THEME_FORMATS = [
   "a recipe blog",
   "a dating app",
   "a weather site",
-  "a to-do list site",
-  "a support page",
   "a forum",
-  "a marketplace",
   "a portfolio site",
   "a museum exhibit",
   "an obituary page",
   "a subscription box landing page",
   "a conspiracy theory blog",
   "a search engine",
-  "a quiz site",
+  "a buzzfeed quiz",
   "a travel booking site",
   "a fortune-telling site",
   "a pet adoption site",
-  "an app that tracks {noun}"
+  "an app that tracks {noun}",
+  "a new york times article"
 ];
 
 const THEME_ENTITIES = [
@@ -59,7 +57,7 @@ const THEME_ENTITIES = [
   "a giant",
   "a company advertising {noun}",
   "a startup selling {noun}",
-  "a museum dedicated to {noun}",
+  "a museum about {noun}",
   "a shop that only sells {noun}",
   "a cult that worships {noun}",
   "a subscription that delivers {noun}",
@@ -80,7 +78,7 @@ const THEME_NOUNS = [
   "electronic dance music",
   "poor ghosts",
   "invisible paint",
-  "expired coupons",
+  "expired pickles",
   "made-up constellations",
   "airport food",
   "illegal fireworks",

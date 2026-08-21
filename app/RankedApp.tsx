@@ -333,6 +333,45 @@ document.addEventListener("click", function (e) {
   window.parent.postMessage({ source: "ranked-preview", type: "navigate", page: page }, "*");
 });`
     : "";
+  // Re-typing srcDoc on every keystroke would make the iframe do a full
+  // document navigation each time — an unload + load, which flashes the
+  // browser's blank white background between the old and new page. For
+  // anyone photosensitive that's a real hazard, not just a visual glitch, so
+  // live content updates come in over postMessage instead and get patched
+  // into the *existing* document (innerHTML swap, no navigation, no flash).
+  // Scripts don't re-run from an innerHTML assignment, so each one is
+  // recreated to force execution, same as the very first load.
+  // Each update's HTML is the full document rebuilt from scratch, which
+  // includes this very shim's own <script> tag — so recreating scripts below
+  // to force re-execution would also re-run this addEventListener call,
+  // stacking a second listener on top of the first. Each of those then does
+  // its own recreate-and-rebind on the next message, doubling again — an
+  // exponential pile-up (2, 4, 8, 16 listeners...) that grinds the page to a
+  // halt within a few update cycles. window survives every innerHTML swap
+  // (it's the frame's document that's being edited in place, not torn down),
+  // so a flag on it makes registration idempotent across re-executions.
+  const liveUpdateShim = preview
+    ? `
+if (!window.__rankedLiveUpdateBound) {
+  window.__rankedLiveUpdateBound = true;
+  window.addEventListener("message", function (e) {
+    if (!e.data || e.data.source !== "ranked-preview" || e.data.type !== "update") return;
+    var next = new DOMParser().parseFromString(e.data.html, "text/html");
+    document.head.innerHTML = next.head.innerHTML;
+    document.body.innerHTML = next.body.innerHTML;
+    var scripts = document.body.querySelectorAll("script");
+    for (var i = 0; i < scripts.length; i++) {
+      var old = scripts[i];
+      var fresh = document.createElement("script");
+      for (var j = 0; j < old.attributes.length; j++) {
+        fresh.setAttribute(old.attributes[j].name, old.attributes[j].value);
+      }
+      fresh.textContent = old.textContent;
+      old.parentNode.replaceChild(fresh, old);
+    }
+  });
+}`
+    : "";
   return `
 window.__RANKED_PREVIEW__ = ${preview};${normalize}
 window.goTo = function goTo(page) {
@@ -341,7 +380,7 @@ window.goTo = function goTo(page) {
   } else {
     window.location.href = page;
   }
-};${clickShim}`;
+};${clickShim}${liveUpdateShim}`;
 }
 
 // Assembles one HTML page for preview/publish by inlining every CSS file (as
@@ -2497,7 +2536,7 @@ function Match({
       toast(
         peer.team === team
           ? `${peer.name}'s video disconnected`
-          : `${peer.name}'s video disconnected (opponent)`,
+          : `${peer.name}'s video disconnected`,
       );
     },
     [team, toast],
@@ -2689,15 +2728,19 @@ function Match({
     setTabForPreviewReset(tab);
     setPreviewPage(null);
   }
-  const previewDoc = useMemo(() => {
-    const activeHtmlFile =
+  const activeHtmlFile = useMemo(
+    () =>
       previewPage && files[previewPage] !== undefined
         ? previewPage
         : tab.endsWith(".html") && files[tab] !== undefined
           ? tab
-          : "index.html";
-    return buildPage(files, fileOrder, activeHtmlFile, { preview: true });
-  }, [files, fileOrder, tab, previewPage]);
+          : "index.html",
+    [previewPage, tab, files],
+  );
+  const previewDoc = useMemo(
+    () => buildPage(files, fileOrder, activeHtmlFile, { preview: true }),
+    [files, fileOrder, activeHtmlFile],
+  );
   const previewDocRef = useRef(previewDoc);
   useEffect(() => {
     previewDocRef.current = previewDoc;
@@ -2705,10 +2748,72 @@ function Match({
   const ownPreviewFrames = useRef<Set<Window>>(new Set());
   const registerOwnPreviewFrame = useCallback(
     (el: HTMLIFrameElement | null) => {
-      if (el?.contentWindow) ownPreviewFrames.current.add(el.contentWindow);
+      if (!el?.contentWindow) return;
+      ownPreviewFrames.current.add(el.contentWindow);
+      // The debounced push below only fires when content changes, so a frame
+      // that mounts *after* the last change (e.g. opening the expanded
+      // preview once typing has settled) would otherwise never catch up to
+      // what's already been typed — it'd be stuck on whatever srcDoc had at
+      // that exact moment, forever. Catching it up on its own load event
+      // (rather than immediately) ensures the frame's message listener is
+      // actually registered before this arrives.
+      el.addEventListener("load", () => {
+        el.contentWindow?.postMessage(
+          { source: "ranked-preview", type: "update", html: previewDocRef.current },
+          "*",
+        );
+      });
     },
     [],
   );
+  // The iframe's srcDoc is only reset when the active page actually changes
+  // (a real "navigate to a different page" moment, where a fresh load reads
+  // as expected) — never on every keystroke. In-between, updated content is
+  // patched into the already-loaded document over postMessage (handled by
+  // the liveUpdateShim in buildNavShim) so typing never flashes the page.
+  const [iframeSrcDoc, setIframeSrcDoc] = useState(previewDoc);
+  const [lastPreviewFile, setLastPreviewFile] = useState(activeHtmlFile);
+  if (activeHtmlFile !== lastPreviewFile) {
+    setLastPreviewFile(activeHtmlFile);
+    setIframeSrcDoc(previewDoc);
+  }
+  // Tracks what the iframe's document last actually reflects — reset
+  // whenever iframeSrcDoc itself changes (a real navigation already carried
+  // the latest content), so the debounced push below only fires for content
+  // that arrived *after* that point.
+  const lastPushedPreviewRef = useRef(iframeSrcDoc);
+  useEffect(() => {
+    lastPushedPreviewRef.current = iframeSrcDoc;
+  }, [iframeSrcDoc]);
+  const debounceTimerRef = useRef<number | undefined>(undefined);
+  const maxWaitTimerRef = useRef<number | undefined>(undefined);
+  const pushPreviewUpdate = useCallback(() => {
+    window.clearTimeout(debounceTimerRef.current);
+    window.clearTimeout(maxWaitTimerRef.current);
+    debounceTimerRef.current = undefined;
+    maxWaitTimerRef.current = undefined;
+    const latest = previewDocRef.current;
+    if (latest === lastPushedPreviewRef.current) return;
+    lastPushedPreviewRef.current = latest;
+    for (const win of ownPreviewFrames.current) {
+      win.postMessage({ source: "ranked-preview", type: "update", html: latest }, "*");
+    }
+  }, []);
+  // Pushes shortly after typing actually pauses, rather than on a fixed
+  // clock — noticeably snappier for normal typing (short pauses between
+  // words/lines) than waiting out a fixed interval, while still not pushing
+  // on every single keystroke. maxWaitTimer is a ceiling for someone typing
+  // continuously without a long enough pause: it starts on the first edit
+  // of a burst and isn't reset by subsequent keystrokes, so a fast typist
+  // still sees occasional updates instead of none until they stop.
+  useEffect(() => {
+    window.clearTimeout(debounceTimerRef.current);
+    debounceTimerRef.current = window.setTimeout(pushPreviewUpdate, 400);
+    if (maxWaitTimerRef.current === undefined) {
+      maxWaitTimerRef.current = window.setTimeout(pushPreviewUpdate, 2000);
+    }
+    return () => window.clearTimeout(debounceTimerRef.current);
+  }, [previewDoc, pushPreviewUpdate]);
   useEffect(() => {
     function handleNavigateMessage(event: MessageEvent) {
       if (
@@ -3711,7 +3816,7 @@ function Match({
           <iframe
             ref={registerOwnPreviewFrame}
             title="Your website live preview"
-            srcDoc={previewDoc}
+            srcDoc={iframeSrcDoc}
             sandbox="allow-scripts"
             referrerPolicy="no-referrer"
           />
@@ -3856,7 +3961,7 @@ function Match({
             <iframe
               ref={registerOwnPreviewFrame}
               title="Expanded live preview"
-              srcDoc={previewDoc}
+              srcDoc={iframeSrcDoc}
               sandbox="allow-scripts"
               referrerPolicy="no-referrer"
             />
@@ -3949,7 +4054,7 @@ function Match({
                   <iframe
                     ref={registerOwnPreviewFrame}
                     title="Your build"
-                    srcDoc={previewDoc}
+                    srcDoc={iframeSrcDoc}
                     sandbox="allow-scripts"
                     referrerPolicy="no-referrer"
                   />
