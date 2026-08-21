@@ -65,6 +65,44 @@ export async function exchangeGitHubCode(
   };
 }
 
+// Thrown only when GitHub's own response body says a repo by this name
+// already exists on the account — every other 422 (account restrictions, an
+// unverified email, a malformed field, etc.) surfaces its real reason
+// instead of being lumped into the same "name taken" message.
+class GitHubNameConflictError extends Error {}
+
+function parseGitHubErrorBody(detail: string) {
+  // GitHub's "errors" field is inconsistent across endpoints: some return an
+  // array of strings, others an array of {field, message} objects — handle
+  // both rather than assuming one shape, since assuming wrong silently drops
+  // the one part of the response that actually explains the failure.
+  try {
+    const parsed = JSON.parse(detail) as {
+      message?: string;
+      errors?: Array<string | { field?: string; message?: string }>;
+    };
+    const errorEntries = parsed.errors ?? [];
+    const errorTexts = errorEntries
+      .map((entry) => (typeof entry === "string" ? entry : entry.message))
+      .filter((text): text is string => Boolean(text));
+    const nameTaken =
+      errorTexts.some((text) => /name already exists/i.test(text)) ||
+      errorEntries.some(
+        (entry) => typeof entry !== "string" && entry.field === "name",
+      );
+    // GitHub's top-level "message" is a generic label ("Repository creation
+    // failed.") — the actual reason lives in "errors", so it has to be
+    // included or every non-name-conflict failure just says "creation
+    // failed" with no way to tell why.
+    const message = errorTexts.length
+      ? `${parsed.message ?? "Repository creation failed."} (${errorTexts.join("; ")})`
+      : parsed.message;
+    return { nameTaken, message };
+  } catch {
+    return { nameTaken: false, message: undefined };
+  }
+}
+
 async function githubRequest<T>(
   token: string,
   url: string,
@@ -76,10 +114,27 @@ async function githubRequest<T>(
   });
   if (!response.ok) {
     const detail = await response.text();
-    if (response.status === 422 && url.endsWith("/user/repos"))
+    if (response.status === 422 && url.endsWith("/user/repos")) {
+      // Log the raw body unconditionally, independent of whatever the parsing
+      // above manages to extract — if GitHub's response has a shape that
+      // doesn't anticipate, this is the one place the real ground truth is
+      // guaranteed to be visible (server logs), instead of the user-facing
+      // message depending on a guess about that shape being right.
+      console.error("GitHub repo creation 422 response body:", detail);
+      const { nameTaken, message } = parseGitHubErrorBody(detail);
+      if (nameTaken) {
+        throw new GitHubNameConflictError(
+          "That repository name is already in use on your GitHub account. Choose another name.",
+        );
+      }
+      // Fall back to the raw response body (rather than just a generic
+      // label) whenever nothing structured could be pulled out of it, so a
+      // shape this parsing doesn't anticipate still surfaces instead of
+      // silently collapsing to "Repository creation failed."
       throw new Error(
-        "That repository name is already in use on your GitHub account. Choose another name.",
+        `GitHub couldn't create your hackclubranked repo: ${message ?? (detail.slice(0, 280) || "Repository creation failed.")}`,
       );
+    }
     throw new Error(
       `GitHub request failed (${response.status}): ${detail.slice(0, 280)}`,
     );
@@ -91,6 +146,20 @@ async function githubRequest<T>(
 const RANKED_REPO = "hackclubranked";
 const isNotFound = (error: unknown) =>
   error instanceof Error && error.message.includes("(404)");
+
+// The session caches the GitHub login from whenever the account was first
+// connected. If it's ever renamed on GitHub afterward, that cached login
+// becomes permanently wrong for the rest of the session — every existence
+// check against it 404s forever, even though the repo is really there under
+// the account's current name. Refetching right before anything that needs
+// to be correct avoids trusting a value that can go stale for weeks.
+async function currentGitHubLogin(token: string) {
+  const user = await githubRequest<{ login: string }>(
+    token,
+    "https://api.github.com/user",
+  );
+  return user.login;
+}
 
 function repoContentsPath(login: string, path = "") {
   return `https://api.github.com/repos/${login}/${RANKED_REPO}/contents/${path}`;
@@ -106,34 +175,7 @@ async function pathExists(token: string, login: string, path: string) {
   }
 }
 
-// Every player's builds live in one shared "hackclubranked" repo, one folder per match,
-// instead of a fresh repo per match cluttering their GitHub account.
-async function ensureRankedRepo(token: string, login: string) {
-  try {
-    return await githubRequest<{ html_url: string }>(
-      token,
-      `https://api.github.com/repos/${login}/${RANKED_REPO}`,
-    );
-  } catch (error) {
-    if (!isNotFound(error)) throw error;
-  }
-
-  const repository = await githubRequest<{ html_url: string }>(
-    token,
-    "https://api.github.com/user/repos",
-    {
-      method: "POST",
-      body: JSON.stringify({
-        name: RANKED_REPO,
-        description:
-          "Hack Club Ranked is a program run by [Hack Club](https://hackclub.com) where teenagers compete and collaborate to speedrun making websites according to a theme. Whoever has the best site at the end wins, and the more matches you win the higher your Ranking. The more matches you play and more hours you code, you can buy cool prizes in the shop like drawing tablets, iPads, hoodies, headphones, and more!",
-        homepage: `https://${login}.github.io/${RANKED_REPO}/`,
-        private: false,
-        has_issues: true,
-        auto_init: true,
-      }),
-    },
-  );
+async function configureRankedRepoForPages(token: string, login: string) {
   await githubRequest(token, repoContentsPath(login, ".nojekyll"), {
     method: "PUT",
     body: JSON.stringify({
@@ -155,6 +197,52 @@ async function ensureRankedRepo(token: string, login: string) {
     if (!(error instanceof Error) || !error.message.includes("409"))
       throw error;
   }
+}
+
+// Every player's builds live in one shared "hackclubranked" repo, one folder
+// per match, instead of a fresh repo per match cluttering their account.
+//
+// This creates first and only falls back to fetching on a genuine name
+// conflict — the opposite order from checking existence and creating only
+// if missing. That older order relied on two different sources of truth
+// agreeing (a GET keyed on a possibly-stale cached login, vs. a POST that
+// always acts on the token's real, current account): if they ever disagreed,
+// the GET would 404 forever while the POST 409/422'd forever, with no way
+// out. Creating directly is authoritative — it can't be wrong about whose
+// account it's acting on — and existence only needs checking in the one
+// case that actually implies it, when GitHub itself reports the name taken.
+async function ensureRankedRepo(token: string, login: string) {
+  try {
+    const repository = await githubRequest<{ html_url: string }>(
+      token,
+      "https://api.github.com/user/repos",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          name: RANKED_REPO,
+          description:
+            "Hack Club Ranked: teenagers compete to speedrun making websites according to a theme. Win matches to raise your Ranking, and code more hours to earn H-Bucks for prizes like drawing tablets, iPads, hoodies, and headphones.",
+          homepage: `https://${login}.github.io/${RANKED_REPO}/`,
+          private: false,
+          has_issues: true,
+          auto_init: true,
+        }),
+      },
+    );
+    await configureRankedRepoForPages(token, login);
+    return repository;
+  } catch (error) {
+    if (!(error instanceof GitHubNameConflictError)) throw error;
+  }
+  // Genuine name conflict: it already exists. Still run Pages setup — both
+  // steps are idempotent (the .nojekyll write is a no-op if unchanged, and
+  // the Pages POST already tolerates "already enabled") — in case an
+  // earlier attempt created the repo but died before finishing that part.
+  const repository = await githubRequest<{ html_url: string }>(
+    token,
+    `https://api.github.com/repos/${login}/${RANKED_REPO}`,
+  );
+  await configureRankedRepoForPages(token, login);
   return repository;
 }
 
@@ -164,7 +252,7 @@ export const PUBLISHABLE_FILE_NAME =
 
 export async function publishWebsite(
   token: string,
-  login: string,
+  sessionLogin: string,
   requestedName: string,
   pages: Record<string, string>,
   sourceFiles?: Record<string, string>,
@@ -186,6 +274,12 @@ export async function publishWebsite(
   if (!pages["index.html"]) {
     throw new Error("An index.html page is required.");
   }
+  // The session's cached login can go stale (see currentGitHubLogin above);
+  // refresh it so everything below acts on the account's real current name
+  // instead of risking a repeat of that mismatch. Falls back to the cached
+  // value only if this one extra call itself fails, so a transient hiccup
+  // here doesn't block publishing entirely.
+  const login = await currentGitHubLogin(token).catch(() => sessionLogin);
   const repository = await ensureRankedRepo(token, login);
   if (await pathExists(token, login, folderName)) {
     throw new Error(

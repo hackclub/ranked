@@ -30,7 +30,12 @@ type PeerState = {
   ignoreOffer: boolean;
   isSettingRemoteAnswerPending: boolean;
   polite: boolean;
+  name: string;
+  team: "blue" | "red";
+  videoLostNotified: boolean;
 };
+
+export type PeerVideoLost = { connectionId: number; name: string; team: "blue" | "red" };
 
 type RemotePeer = {
   connectionId: number;
@@ -55,7 +60,7 @@ function iceServers(): RTCIceServer[] {
   return servers;
 }
 
-export function useRealtimeRoom(roomId: string, mic: boolean, video: boolean, scope: "team" | "everyone", team: "blue" | "red", micDeviceId?: string, videoDeviceId?: string) {
+export function useRealtimeRoom(roomId: string, mic: boolean, video: boolean, scope: "team" | "everyone", team: "blue" | "red", micDeviceId?: string, videoDeviceId?: string, onPeerVideoLost?: (peer: PeerVideoLost) => void) {
   const [room, setRoom] = useState<Room | null>(null);
   const [status, setStatus] = useState("connecting");
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
@@ -65,6 +70,8 @@ export function useRealtimeRoom(roomId: string, mic: boolean, video: boolean, sc
   const roomRef = useRef<Room | null>(null);
   const settingsRef = useRef({ mic, video, scope, team });
   useEffect(() => { settingsRef.current = { mic, video, scope, team }; }, [mic, scope, team, video]);
+  const onPeerVideoLostRef = useRef(onPeerVideoLost);
+  useEffect(() => { onPeerVideoLostRef.current = onPeerVideoLost; }, [onPeerVideoLost]);
 
   useEffect(() => {
     let cancelled = false;
@@ -95,16 +102,26 @@ export function useRealtimeRoom(roomId: string, mic: boolean, video: boolean, sc
       };
     };
 
+    const notifyVideoLost = (connectionId: number, state: PeerState) => {
+      if (state.videoLostNotified) return;
+      state.videoLostNotified = true;
+      onPeerVideoLostRef.current?.({ connectionId, name: state.name, team: state.team });
+    };
+
     const ensurePeer = (connectionId: number) => {
       const existing = activePeers.get(connectionId);
       if (existing) return existing;
       const selfId = joinedRoom.getSelf()?.connectionId ?? 0;
+      const other = joinedRoom.getOthers().find(candidate => candidate.connectionId === connectionId);
       const state: PeerState = {
         pc: new RTCPeerConnection({ iceServers: iceServers() }),
         makingOffer: false,
         ignoreOffer: false,
         isSettingRemoteAnswerPending: false,
         polite: selfId > connectionId,
+        name: other?.info?.name ?? "Player",
+        team: other?.presence.team ?? "red",
+        videoLostNotified: false,
       };
       activePeers.set(connectionId, state);
       streamRef.current?.getTracks().forEach(track => {
@@ -120,6 +137,7 @@ export function useRealtimeRoom(roomId: string, mic: boolean, video: boolean, sc
       state.pc.ontrack = ({ streams }) => {
         const stream = streams[0];
         if (!stream) return;
+        state.videoLostNotified = false;
         setRemotePeers(current => [...current.filter(peer => peer.connectionId !== connectionId), peerDetails(connectionId, stream)]);
       };
       let disconnectTimer: number | undefined;
@@ -127,6 +145,7 @@ export function useRealtimeRoom(roomId: string, mic: boolean, video: boolean, sc
         const current = state.pc.connectionState;
         if (current === "failed" || current === "closed") {
           window.clearTimeout(disconnectTimer);
+          notifyVideoLost(connectionId, state);
           setRemotePeers(peers => peers.filter(peer => peer.connectionId !== connectionId));
           return;
         }
@@ -138,6 +157,7 @@ export function useRealtimeRoom(roomId: string, mic: boolean, video: boolean, sc
           window.clearTimeout(disconnectTimer);
           disconnectTimer = window.setTimeout(() => {
             if (state.pc.connectionState !== "connected") {
+              notifyVideoLost(connectionId, state);
               setRemotePeers(peers => peers.filter(peer => peer.connectionId !== connectionId));
             }
           }, 8000);
@@ -165,6 +185,7 @@ export function useRealtimeRoom(roomId: string, mic: boolean, video: boolean, sc
       for (const id of active) ensurePeer(id);
       for (const [id, peer] of activePeers) {
         if (!active.has(id)) {
+          notifyVideoLost(id, peer);
           peer.pc.getSenders().forEach(sender => sender.track?.stop());
           peer.pc.close();
           activePeers.delete(id);
@@ -204,29 +225,48 @@ export function useRealtimeRoom(roomId: string, mic: boolean, video: boolean, sc
       }
     });
 
-    navigator.mediaDevices.getUserMedia({
-      audio: micDeviceId ? { deviceId: { exact: micDeviceId } } : true,
-      video: videoDeviceId ? { deviceId: { exact: videoDeviceId } } : true,
-    }).then(stream => {
-      if (cancelled) { stream.getTracks().forEach(track => track.stop()); return; }
-      stream.getAudioTracks().forEach(track => { track.enabled = mic; });
-      stream.getVideoTracks().forEach(track => { track.enabled = video; });
-      streamRef.current = stream;
-      setLocalStream(stream);
-      for (const [connectionId, state] of activePeers) stream.getTracks().forEach(track => {
-        const clone = track.clone();
-        const otherTeam = joinedRoom.getOthers().find(other => other.connectionId === connectionId)?.presence.team;
-        const settings = settingsRef.current;
-        clone.enabled = clone.kind === "video" ? settings.video : settings.mic && (settings.scope === "everyone" || otherTeam === settings.team);
-        state.pc.addTrack(clone, stream);
-      });
-    }).catch(error => {
-      console.error("Camera/microphone permission failed", error);
-      setStatus("media-blocked");
-    });
+    // Right after a page refresh, the just-torn-down old tab can still be
+    // holding the camera/mic for a moment (OS-level device release isn't
+    // instant), so the very first getUserMedia() call here can fail with a
+    // transient "device in use" error even though nothing is actually wrong.
+    // Retry a few times with backoff before giving up — a single failed
+    // attempt used to be permanent (no retry, no user-visible message),
+    // which is exactly what made video never come back after a refresh.
+    let retryTimer: number | undefined;
+    const acquireMedia = async (attempt = 1) => {
+      if (cancelled) return;
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: micDeviceId ? { deviceId: { exact: micDeviceId } } : true,
+          video: videoDeviceId ? { deviceId: { exact: videoDeviceId } } : true,
+        });
+        if (cancelled) { stream.getTracks().forEach(track => track.stop()); return; }
+        stream.getAudioTracks().forEach(track => { track.enabled = mic; });
+        stream.getVideoTracks().forEach(track => { track.enabled = video; });
+        streamRef.current = stream;
+        setLocalStream(stream);
+        for (const [connectionId, state] of activePeers) stream.getTracks().forEach(track => {
+          const clone = track.clone();
+          const otherTeam = joinedRoom.getOthers().find(other => other.connectionId === connectionId)?.presence.team;
+          const settings = settingsRef.current;
+          clone.enabled = clone.kind === "video" ? settings.video : settings.mic && (settings.scope === "everyone" || otherTeam === settings.team);
+          state.pc.addTrack(clone, stream);
+        });
+      } catch (error) {
+        if (cancelled) return;
+        if (attempt >= 4) {
+          console.error("Camera/microphone permission failed", error);
+          setStatus("media-blocked");
+          return;
+        }
+        retryTimer = window.setTimeout(() => void acquireMedia(attempt + 1), attempt * 800);
+      }
+    };
+    void acquireMedia();
 
     return () => {
       cancelled = true;
+      window.clearTimeout(retryTimer);
       unsubscribeStatus();
       unsubscribeOthers();
       unsubscribeEvents();

@@ -3,19 +3,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CollaborativeEditor } from "./realtime/CollaborativeEditor";
 import { StreamVideo } from "./realtime/StreamVideo";
-import { useCodeRoom, useRealtimeRoom } from "./realtime/useRealtimeRoom";
+import { useCodeRoom, useRealtimeRoom, type PeerVideoLost } from "./realtime/useRealtimeRoom";
 import { getYjsProviderForRoom } from "@liveblocks/yjs";
 import { isAdmin } from "./lib/admin";
 import { AvatarCustomizer, ScribbleAvatar } from "./components/GoofyGuyAvatar";
 import {
   DEFAULT_AVATAR,
+  SHOP_CATALOG,
   avatarAccent,
   normalizeAvatar,
   type AvatarConfig,
+  type AvatarShopItem,
   type ResolvedAvatarConfig,
+  type ShopItem,
 } from "./lib/avatar";
 
-type Screen = "home" | "lobby" | "match" | "vote" | "leaderboard" | "shop" | "admin";
+type Screen = "home" | "lobby" | "match" | "vote" | "leaderboard" | "shop" | "wardrobe" | "admin";
 type Mode = "solo" | "duo";
 type Experience = "beginner" | "intermediate" | "expert";
 type AuthState = {
@@ -330,6 +333,45 @@ document.addEventListener("click", function (e) {
   window.parent.postMessage({ source: "ranked-preview", type: "navigate", page: page }, "*");
 });`
     : "";
+  // Re-typing srcDoc on every keystroke would make the iframe do a full
+  // document navigation each time — an unload + load, which flashes the
+  // browser's blank white background between the old and new page. For
+  // anyone photosensitive that's a real hazard, not just a visual glitch, so
+  // live content updates come in over postMessage instead and get patched
+  // into the *existing* document (innerHTML swap, no navigation, no flash).
+  // Scripts don't re-run from an innerHTML assignment, so each one is
+  // recreated to force execution, same as the very first load.
+  // Each update's HTML is the full document rebuilt from scratch, which
+  // includes this very shim's own <script> tag — so recreating scripts below
+  // to force re-execution would also re-run this addEventListener call,
+  // stacking a second listener on top of the first. Each of those then does
+  // its own recreate-and-rebind on the next message, doubling again — an
+  // exponential pile-up (2, 4, 8, 16 listeners...) that grinds the page to a
+  // halt within a few update cycles. window survives every innerHTML swap
+  // (it's the frame's document that's being edited in place, not torn down),
+  // so a flag on it makes registration idempotent across re-executions.
+  const liveUpdateShim = preview
+    ? `
+if (!window.__rankedLiveUpdateBound) {
+  window.__rankedLiveUpdateBound = true;
+  window.addEventListener("message", function (e) {
+    if (!e.data || e.data.source !== "ranked-preview" || e.data.type !== "update") return;
+    var next = new DOMParser().parseFromString(e.data.html, "text/html");
+    document.head.innerHTML = next.head.innerHTML;
+    document.body.innerHTML = next.body.innerHTML;
+    var scripts = document.body.querySelectorAll("script");
+    for (var i = 0; i < scripts.length; i++) {
+      var old = scripts[i];
+      var fresh = document.createElement("script");
+      for (var j = 0; j < old.attributes.length; j++) {
+        fresh.setAttribute(old.attributes[j].name, old.attributes[j].value);
+      }
+      fresh.textContent = old.textContent;
+      old.parentNode.replaceChild(fresh, old);
+    }
+  });
+}`
+    : "";
   return `
 window.__RANKED_PREVIEW__ = ${preview};${normalize}
 window.goTo = function goTo(page) {
@@ -338,7 +380,7 @@ window.goTo = function goTo(page) {
   } else {
     window.location.href = page;
   }
-};${clickShim}`;
+};${clickShim}${liveUpdateShim}`;
 }
 
 // Assembles one HTML page for preview/publish by inlining every CSS file (as
@@ -478,6 +520,7 @@ type IconName =
   | "clock"
   | "star"
   | "arrow-left"
+  | "lock"
   | "more";
 
 const FILLED_ICONS = new Set<IconName>(["github", "star"]);
@@ -648,6 +691,12 @@ const ICON_PATHS: Record<IconName, React.ReactNode> = {
       <path d="M11 6 5 12l6 6" />
     </>
   ),
+  lock: (
+    <>
+      <rect x="5" y="11" width="14" height="9" rx="2" />
+      <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+    </>
+  ),
   more: (
     <>
       <circle cx="12" cy="5" r="1.7" fill="currentColor" stroke="none" />
@@ -725,6 +774,8 @@ function SiteHeader({
   balance,
   avatar,
   showAdmin = false,
+  wardrobeUnlocked,
+  toast,
 }: {
   screen: Screen;
   navigate: (s: Screen) => void;
@@ -732,6 +783,8 @@ function SiteHeader({
   balance: number;
   avatar?: AvatarConfig;
   showAdmin?: boolean;
+  wardrobeUnlocked: boolean;
+  toast: (m: string) => void;
 }) {
   return (
     <header className="site-header">
@@ -747,6 +800,21 @@ function SiteHeader({
           onClick={() => navigate("leaderboard")}
         >
           leaderboard
+        </button>
+        <button
+          className={screen === "wardrobe" ? "active" : ""}
+          onClick={() =>
+            wardrobeUnlocked
+              ? navigate("wardrobe")
+              : toast("Buy your first avatar item in the Shop to unlock the Wardrobe")
+          }
+        >
+          wardrobe
+          {!wardrobeUnlocked && (
+            <span className="nav-pill nav-pill-locked">
+              <Icon name="lock" size={9} />
+            </span>
+          )}
         </button>
         {showAdmin && (
           <button
@@ -2475,6 +2543,16 @@ function Match({
     stalled: pagesStalled,
   } = usePagesReady(publishState.pagesUrl);
   const team = match.team;
+  const onPeerVideoLost = useCallback(
+    (peer: PeerVideoLost) => {
+      toast(
+        peer.team === team
+          ? `${peer.name}'s video disconnected`
+          : `${peer.name}'s video disconnected`,
+      );
+    },
+    [team, toast],
+  );
   const { status, localStream, remotePeers } = useRealtimeRoom(
     `ranked:call:${match.id}`,
     mic,
@@ -2483,6 +2561,7 @@ function Match({
     team,
     micDeviceId || undefined,
     videoDeviceId || undefined,
+    onPeerVideoLost,
   );
   const room = useCodeRoom(`ranked:code:${match.id}:${team}`);
 
@@ -2521,6 +2600,12 @@ function Match({
       cancelled = true;
     };
   }, [publishOpen, publishState.repositoryUrl]);
+
+  useEffect(() => {
+    if (status === "media-blocked") {
+      toast("Camera/mic blocked — check your browser permissions and rejoin");
+    }
+  }, [status, toast]);
 
   useEffect(() => {
     if (!room) return;
@@ -2691,15 +2776,19 @@ function Match({
     setTabForPreviewReset(tab);
     setPreviewPage(null);
   }
-  const previewDoc = useMemo(() => {
-    const activeHtmlFile =
+  const activeHtmlFile = useMemo(
+    () =>
       previewPage && files[previewPage] !== undefined
         ? previewPage
         : tab.endsWith(".html") && files[tab] !== undefined
           ? tab
-          : "index.html";
-    return buildPage(files, fileOrder, activeHtmlFile, { preview: true });
-  }, [files, fileOrder, tab, previewPage]);
+          : "index.html",
+    [previewPage, tab, files],
+  );
+  const previewDoc = useMemo(
+    () => buildPage(files, fileOrder, activeHtmlFile, { preview: true }),
+    [files, fileOrder, activeHtmlFile],
+  );
   const previewDocRef = useRef(previewDoc);
   useEffect(() => {
     previewDocRef.current = previewDoc;
@@ -2707,10 +2796,72 @@ function Match({
   const ownPreviewFrames = useRef<Set<Window>>(new Set());
   const registerOwnPreviewFrame = useCallback(
     (el: HTMLIFrameElement | null) => {
-      if (el?.contentWindow) ownPreviewFrames.current.add(el.contentWindow);
+      if (!el?.contentWindow) return;
+      ownPreviewFrames.current.add(el.contentWindow);
+      // The debounced push below only fires when content changes, so a frame
+      // that mounts *after* the last change (e.g. opening the expanded
+      // preview once typing has settled) would otherwise never catch up to
+      // what's already been typed — it'd be stuck on whatever srcDoc had at
+      // that exact moment, forever. Catching it up on its own load event
+      // (rather than immediately) ensures the frame's message listener is
+      // actually registered before this arrives.
+      el.addEventListener("load", () => {
+        el.contentWindow?.postMessage(
+          { source: "ranked-preview", type: "update", html: previewDocRef.current },
+          "*",
+        );
+      });
     },
     [],
   );
+  // The iframe's srcDoc is only reset when the active page actually changes
+  // (a real "navigate to a different page" moment, where a fresh load reads
+  // as expected) — never on every keystroke. In-between, updated content is
+  // patched into the already-loaded document over postMessage (handled by
+  // the liveUpdateShim in buildNavShim) so typing never flashes the page.
+  const [iframeSrcDoc, setIframeSrcDoc] = useState(previewDoc);
+  const [lastPreviewFile, setLastPreviewFile] = useState(activeHtmlFile);
+  if (activeHtmlFile !== lastPreviewFile) {
+    setLastPreviewFile(activeHtmlFile);
+    setIframeSrcDoc(previewDoc);
+  }
+  // Tracks what the iframe's document last actually reflects — reset
+  // whenever iframeSrcDoc itself changes (a real navigation already carried
+  // the latest content), so the debounced push below only fires for content
+  // that arrived *after* that point.
+  const lastPushedPreviewRef = useRef(iframeSrcDoc);
+  useEffect(() => {
+    lastPushedPreviewRef.current = iframeSrcDoc;
+  }, [iframeSrcDoc]);
+  const debounceTimerRef = useRef<number | undefined>(undefined);
+  const maxWaitTimerRef = useRef<number | undefined>(undefined);
+  const pushPreviewUpdate = useCallback(() => {
+    window.clearTimeout(debounceTimerRef.current);
+    window.clearTimeout(maxWaitTimerRef.current);
+    debounceTimerRef.current = undefined;
+    maxWaitTimerRef.current = undefined;
+    const latest = previewDocRef.current;
+    if (latest === lastPushedPreviewRef.current) return;
+    lastPushedPreviewRef.current = latest;
+    for (const win of ownPreviewFrames.current) {
+      win.postMessage({ source: "ranked-preview", type: "update", html: latest }, "*");
+    }
+  }, []);
+  // Pushes shortly after typing actually pauses, rather than on a fixed
+  // clock — noticeably snappier for normal typing (short pauses between
+  // words/lines) than waiting out a fixed interval, while still not pushing
+  // on every single keystroke. maxWaitTimer is a ceiling for someone typing
+  // continuously without a long enough pause: it starts on the first edit
+  // of a burst and isn't reset by subsequent keystrokes, so a fast typist
+  // still sees occasional updates instead of none until they stop.
+  useEffect(() => {
+    window.clearTimeout(debounceTimerRef.current);
+    debounceTimerRef.current = window.setTimeout(pushPreviewUpdate, 400);
+    if (maxWaitTimerRef.current === undefined) {
+      maxWaitTimerRef.current = window.setTimeout(pushPreviewUpdate, 2000);
+    }
+    return () => window.clearTimeout(debounceTimerRef.current);
+  }, [previewDoc, pushPreviewUpdate]);
   useEffect(() => {
     function handleNavigateMessage(event: MessageEvent) {
       if (
@@ -3797,7 +3948,7 @@ function Match({
           <iframe
             ref={registerOwnPreviewFrame}
             title="Your website live preview"
-            srcDoc={previewDoc}
+            srcDoc={iframeSrcDoc}
             sandbox="allow-scripts"
             referrerPolicy="no-referrer"
           />
@@ -3942,7 +4093,7 @@ function Match({
             <iframe
               ref={registerOwnPreviewFrame}
               title="Expanded live preview"
-              srcDoc={previewDoc}
+              srcDoc={iframeSrcDoc}
               sandbox="allow-scripts"
               referrerPolicy="no-referrer"
             />
@@ -3990,8 +4141,7 @@ function Match({
           <section className="modal publish-modal">
             <h2 id="description-title">describe your site!</h2>
             <p>
-              a sentence or two on what you made for {match.theme}. voters see
-              this next to your site!
+              two sentences about what your website is, what it does, and how it works!
             </p>
             <label className="description-field">
               <textarea
@@ -4035,7 +4185,7 @@ function Match({
                   <iframe
                     ref={registerOwnPreviewFrame}
                     title="Your build"
-                    srcDoc={previewDoc}
+                    srcDoc={iframeSrcDoc}
                     sandbox="allow-scripts"
                     referrerPolicy="no-referrer"
                   />
@@ -4182,7 +4332,7 @@ function Match({
                     placeholder="my-ranked-build"
                     autoFocus
                     maxLength={100}
-                    pattern="[A-Za-z0-9._-]+"
+                    pattern="[A-Za-z0-9._\-]+"
                     required
                   />
                 </label>
@@ -4569,48 +4719,23 @@ function AdminAuditLog({ navigate }: { navigate: (s: Screen) => void }) {
   );
 }
 
-const products: Array<[string, string, string, string, IconName, string]> = [
-  [
-    "stickers",
-    "Ranked sticker pack",
-    "Cover absolutely everything.",
-    "100",
-    "sticker",
-    COLORS[0],
-  ],
-  [
-    "flipper",
-    "Flipper Zero",
-    "For curious hardware hackers.",
-    "4500",
-    "flipper",
-    COLORS[4],
-  ],
-  ["ipad", "iPad", "Sketch the next strange thing.", "9000", "ipad", COLORS[2]],
-  [
-    "macbook",
-    "MacBook Air",
-    "A lot of hours. Very worth it.",
-    "18000",
-    "macbook",
-    COLORS[1],
-  ],
-];
-
 function Shop({
   navigate,
   toast,
   auth,
+  avatarInventory,
+  onAvatarPurchased,
 }: {
   navigate: (s: Screen) => void;
   toast: (m: string) => void;
   auth: AuthState;
+  avatarInventory: Set<string>;
+  onAvatarPurchased: () => void;
 }) {
-  const [selected, setSelected] = useState<(typeof products)[number] | null>(
-    null,
-  );
+  const [selected, setSelected] = useState<ShopItem | null>(null);
   useEscapeKey(Boolean(selected), () => setSelected(null));
   const [balance, setBalance] = useState(auth.user?.hBucks ?? 0);
+  const [redeemingId, setRedeemingId] = useState<string | null>(null);
   useEffect(() => {
     if (auth.user)
       fetch("/api/shop/orders")
@@ -4618,22 +4743,46 @@ function Shop({
         .then((data) => setBalance(data.balance ?? 0))
         .catch(() => undefined);
   }, [auth.user]);
-  const redeem = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!selected) return;
-    const form = new FormData(event.currentTarget);
-    const shipping = Object.fromEntries(form.entries());
+
+  const redeemItem = async (itemId: string, shipping?: Record<string, string>) => {
     const response = await fetch("/api/shop/orders", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ itemId: selected[0], shipping }),
+      body: JSON.stringify({ itemId, shipping }),
     });
     const result = await response.json();
-    if (!response.ok) return toast(result.error ?? "Redemption failed");
+    if (!response.ok) {
+      toast(result.error ?? "Redemption failed");
+      return false;
+    }
     setBalance(result.balance);
-    setSelected(null);
-    toast("Redemption submitted for approval");
+    return true;
   };
+
+  const redeemPhysical = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!selected) return;
+    const form = new FormData(event.currentTarget);
+    const shipping = Object.fromEntries(form.entries()) as Record<string, string>;
+    if (await redeemItem(selected.id, shipping)) {
+      setSelected(null);
+      toast("Redemption submitted for approval");
+    }
+  };
+
+  const redeemAvatarItem = async (item: AvatarShopItem) => {
+    if (redeemingId) return;
+    setRedeemingId(item.id);
+    try {
+      if (await redeemItem(item.id)) {
+        toast(`Unlocked "${item.name}" — equip it in the Wardrobe`);
+        onAvatarPurchased();
+      }
+    } finally {
+      setRedeemingId(null);
+    }
+  };
+
   return (
     <main className="subpage shop-page screen-pad">
       <button className="lobby-exit-button" onClick={() => navigate("home")}>
@@ -4647,42 +4796,55 @@ function Shop({
         </div>
       </div>
       <section className="product-grid">
-        {products.map((product) => {
-          const [id, name, desc, price, icon, color] = product;
+        {SHOP_CATALOG.map((item) => {
+          const owned = item.kind === "avatar" && avatarInventory.has(item.id);
           return (
             <article
-              key={id}
+              key={item.id}
               className="product-card"
-              style={{ "--product": color } as React.CSSProperties}
+              style={{ "--product": item.color } as React.CSSProperties}
             >
               <div className="product-art">
-                <Icon name={icon} size={56} />
+                {item.kind === "physical" ? (
+                  <Icon name={item.iconName as IconName} size={56} />
+                ) : (
+                  <ScribbleAvatar
+                    avatar={{ ...DEFAULT_AVATAR, [item.part]: item.value }}
+                    size="sm"
+                  />
+                )}
               </div>
-              <h2>{name}</h2>
-              <p>{desc}</p>
+              <h2>{item.name}</h2>
+              <p>{item.description}</p>
               <div>
-                <strong>{Number(price).toLocaleString()} Ħ</strong>
-                <button
-                  onClick={() =>
-                    Number(price) > balance
-                      ? toast(
-                          `Keep building, you need more H-Bucks for ${name}`,
-                        )
-                      : setSelected(product)
-                  }
-                >
-                  redeem
-                </button>
+                <strong>{item.cost.toLocaleString()} Ħ</strong>
+                {owned ? (
+                  <span className="product-owned">owned</span>
+                ) : (
+                  <button
+                    disabled={item.kind === "avatar" && redeemingId === item.id}
+                    onClick={() => {
+                      if (item.cost > balance)
+                        return toast(`Keep building, you need more H-Bucks for ${item.name}`);
+                      if (item.kind === "avatar") void redeemAvatarItem(item);
+                      else setSelected(item);
+                    }}
+                  >
+                    {item.kind === "avatar" && redeemingId === item.id
+                      ? "unlocking…"
+                      : "redeem"}
+                  </button>
+                )}
               </div>
             </article>
           );
         })}
       </section>
-      {selected && (
+      {selected && selected.kind === "physical" && (
         <div className="modal-backdrop">
           <form
             className="modal shipping-modal"
-            onSubmit={(event) => void redeem(event)}
+            onSubmit={(event) => void redeemPhysical(event)}
           >
             <button
               type="button"
@@ -4691,7 +4853,7 @@ function Shop({
             >
               ×
             </button>
-            <h2>Ship your {selected[1]}</h2>
+            <h2>Ship your {selected.name}</h2>
             <input name="name" placeholder="Full name" required />
             <input name="address1" placeholder="Address" required />
             <input name="address2" placeholder="Apartment / suite" />
@@ -4700,11 +4862,82 @@ function Shop({
             <input name="postalCode" placeholder="Postal code" required />
             <input name="country" placeholder="Country" required />
             <button className="primary-button" type="submit">
-              redeem {Number(selected[3]).toLocaleString()} Ħ
+              redeem {selected.cost.toLocaleString()} Ħ
             </button>
           </form>
         </div>
       )}
+    </main>
+  );
+}
+
+function Wardrobe({
+  navigate,
+  toast,
+  auth,
+  avatarInventory,
+  onAvatarUpdated,
+}: {
+  navigate: (s: Screen) => void;
+  toast: (m: string) => void;
+  auth: AuthState;
+  avatarInventory: Set<string>;
+  onAvatarUpdated: (avatar: ResolvedAvatarConfig) => void;
+}) {
+  const [draft, setDraft] = useState<ResolvedAvatarConfig>(() =>
+    normalizeAvatar(auth.user?.avatar),
+  );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const save = async () => {
+    if (!auth.user || saving) return;
+    setSaving(true);
+    setError("");
+    try {
+      const response = await fetch("/api/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ avatar: draft }),
+      });
+      const result = (await response.json()) as {
+        user?: { avatar: AvatarConfig };
+        error?: string;
+      };
+      if (!response.ok) throw new Error(result.error ?? "Could not save your Goofy Guy.");
+      onAvatarUpdated(normalizeAvatar(result.user!.avatar));
+      toast("Wardrobe updated");
+    } catch (saveError) {
+      setError(
+        saveError instanceof Error
+          ? saveError.message
+          : "Could not save your Goofy Guy. Try again.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <main className="subpage wardrobe-page screen-pad">
+      <button className="lobby-exit-button" onClick={() => navigate("home")}>
+        <Icon name="arrow-left" size={14} />
+        back to dash
+      </button>
+      <div className="subpage-head">
+        <h1>Wardrobe</h1>
+        <p>Swap in any look you&apos;ve bought from the Shop.</p>
+      </div>
+      <AvatarCustomizer value={draft} onChange={setDraft} ownedPremiumIds={avatarInventory} />
+      <div className="wardrobe-actions">
+        <button className="primary-button" onClick={() => void save()} disabled={saving}>
+          {saving ? "saving…" : "save goofy guy"}
+        </button>
+        <button type="button" className="wardrobe-shop-link" onClick={() => navigate("shop")}>
+          browse more looks in the shop <Icon name="external" size={11} />
+        </button>
+      </div>
+      {error && <p className="avatar-save-error">{error}</p>}
     </main>
   );
 }
@@ -4935,57 +5168,22 @@ function Voting({
 
 function ProfileModal({
   close,
+  navigate,
+  toast,
   auth,
-  onAvatarUpdated,
+  wardrobeUnlocked,
   logout,
   logoutLoading,
-  startEditingAvatar = false,
 }: {
   close: () => void;
+  navigate: (s: Screen) => void;
+  toast: (m: string) => void;
   auth: AuthState;
-  onAvatarUpdated: (avatar: ResolvedAvatarConfig) => void;
+  wardrobeUnlocked: boolean;
   logout: () => void;
   logoutLoading: boolean;
-  startEditingAvatar?: boolean;
 }) {
-  const [editingAvatar, setEditingAvatar] = useState(startEditingAvatar);
-  useEscapeKey(
-    true,
-    useCallback(() => {
-      if (!editingAvatar) return close();
-      if (startEditingAvatar) return close();
-      setEditingAvatar(false);
-    }, [close, editingAvatar, startEditingAvatar]),
-  );
-  const [avatarDraft, setAvatarDraft] = useState<ResolvedAvatarConfig>(() =>
-    normalizeAvatar(auth.user?.avatar),
-  );
-  const [avatarSaving, setAvatarSaving] = useState(false);
-  const [avatarSaveError, setAvatarSaveError] = useState("");
-
-  const saveAvatar = async () => {
-    if (!auth.user || avatarSaving) return;
-    setAvatarSaving(true);
-    setAvatarSaveError("");
-    try {
-      const response = await fetch("/api/profile", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ avatar: avatarDraft }),
-      });
-      if (!response.ok) throw new Error("Could not save avatar");
-      const result = (await response.json()) as {
-        user: { avatar: AvatarConfig };
-      };
-      onAvatarUpdated(normalizeAvatar(result.user.avatar));
-      if (startEditingAvatar) close();
-      else setEditingAvatar(false);
-    } catch {
-      setAvatarSaveError("Could not save your Goofy Guy. Try again.");
-    } finally {
-      setAvatarSaving(false);
-    }
-  };
+  useEscapeKey(true, close);
 
   return (
     <div
@@ -4994,119 +5192,80 @@ function ProfileModal({
       aria-modal="true"
       aria-labelledby="profile-title"
     >
-      <section
-        className={`modal profile-modal${editingAvatar ? " editing-avatar" : ""}`}
-      >
+      <section className="modal profile-modal">
         <button className="close-button" onClick={close}>
           ×
         </button>
-        {!editingAvatar && (
-          <>
-            <ScribbleAvatar avatar={auth.user?.avatar} size="md" />
-            <div>
-              <h2 id="profile-title">{auth.user?.name ?? "Guest player"}</h2>
-              <p>
-                {auth.user
-                  ? `${auth.user.email} · ${auth.user.elo} ELO · ${Math.round(auth.user.codingSeconds / 360) / 10}h`
-                  : "Sign in to join matches"}
-              </p>
-              {auth.user && (
-                <button
-                  type="button"
-                  className="avatar-edit-button"
-                  onClick={() => setEditingAvatar(true)}
-                >
-                  remix goofy guy
-                </button>
+        <ScribbleAvatar avatar={auth.user?.avatar} size="md" />
+        <div>
+          <h2 id="profile-title">{auth.user?.name ?? "Guest player"}</h2>
+          <p>
+            {auth.user
+              ? `${auth.user.email} · ${auth.user.elo} ELO · ${Math.round(auth.user.codingSeconds / 360) / 10}h`
+              : "Sign in to join matches"}
+          </p>
+          {auth.user && (
+            <button
+              type="button"
+              className="avatar-edit-button"
+              onClick={() => {
+                close();
+                if (wardrobeUnlocked) navigate("wardrobe");
+                else toast("Buy your first avatar item in the Shop to unlock the Wardrobe");
+              }}
+            >
+              visit wardrobe
+            </button>
+          )}
+        </div>
+        <div className="account-links">
+          <a href="/api/auth/hackclub/start">
+            <Icon name="flag" size={14} /> Hack Club Auth{" "}
+            <span>
+              {auth.user ? (
+                `connected${auth.user.slackId ? ` · ${auth.user.slackId}` : ""}`
+              ) : (
+                <>
+                  connect <Icon name="external" size={10} />
+                </>
               )}
-            </div>
-          </>
-        )}
-        {auth.user && editingAvatar && (
-          <>
-            <h2 id="profile-title" className="avatar-editor-title">
-              remix your goofy guy
-            </h2>
-            <div className="profile-avatar-editor">
-              <AvatarCustomizer value={avatarDraft} onChange={setAvatarDraft} />
-              <div className="profile-avatar-actions">
-                <button
-                  type="button"
-                  onClick={() =>
-                    startEditingAvatar ? close() : setEditingAvatar(false)
-                  }
-                >
-                  cancel
-                </button>
-                <button
-                  type="button"
-                  className="primary-button"
-                  onClick={() => void saveAvatar()}
-                  disabled={avatarSaving}
-                >
-                  {avatarSaving ? "saving…" : "save goofy guy"}
-                </button>
-              </div>
-              {avatarSaveError && (
-                <p className="avatar-save-error">{avatarSaveError}</p>
+            </span>
+          </a>
+          <a href="/api/auth/github/start">
+            <Icon name="github" size={14} /> GitHub{" "}
+            <span>
+              {auth.github ? (
+                `@${auth.github.login}`
+              ) : (
+                <>
+                  connect <Icon name="external" size={10} />
+                </>
               )}
-            </div>
-          </>
-        )}
-        {!editingAvatar && (
-          <>
-            <div className="account-links">
-              <a href="/api/auth/hackclub/start">
-                <Icon name="flag" size={14} /> Hack Club Auth{" "}
-                <span>
-                  {auth.user ? (
-                    `connected${auth.user.slackId ? ` · ${auth.user.slackId}` : ""}`
-                  ) : (
-                    <>
-                      connect <Icon name="external" size={10} />
-                    </>
-                  )}
-                </span>
-              </a>
-              <a href="/api/auth/github/start">
-                <Icon name="github" size={14} /> GitHub{" "}
-                <span>
-                  {auth.github ? (
-                    `@${auth.github.login}`
-                  ) : (
-                    <>
-                      connect <Icon name="external" size={10} />
-                    </>
-                  )}
-                </span>
-              </a>
-              <a href="/api/auth/hackatime/start">
-                <Icon name="clock" size={14} /> Hackatime{" "}
-                <span>
-                  {auth.hackatime ? (
-                    `connected${auth.hackatime.email ? ` · ${auth.hackatime.email}` : ""}`
-                  ) : (
-                    <>
-                      connect <Icon name="external" size={10} />
-                    </>
-                  )}
-                </span>
-              </a>
-            </div>
-            <small>
-              Completed builds are published open source to GitHub and deployed
-              to GitHub Pages.
-            </small>
-            {auth.user && (
-              <div className="logout-form">
-                <button type="button" onClick={logout} disabled={logoutLoading}>
-                  {logoutLoading
-                    ? "clearing site data…"
-                    : "log out & clear site data"}
-                </button>
-              </div>
-            )}
-          </>
+            </span>
+          </a>
+          <a href="/api/auth/hackatime/start">
+            <Icon name="clock" size={14} /> Hackatime{" "}
+            <span>
+              {auth.hackatime ? (
+                `connected${auth.hackatime.email ? ` · ${auth.hackatime.email}` : ""}`
+              ) : (
+                <>
+                  connect <Icon name="external" size={10} />
+                </>
+              )}
+            </span>
+          </a>
+        </div>
+        <small>
+          Completed builds are published open source to GitHub and deployed to
+          GitHub Pages.
+        </small>
+        {auth.user && (
+          <div className="logout-form">
+            <button type="button" onClick={logout} disabled={logoutLoading}>
+              {logoutLoading ? "clearing site data…" : "log out & clear site data"}
+            </button>
+          </div>
         )}
       </section>
     </div>
@@ -5117,7 +5276,7 @@ export default function RankedApp() {
   const [screen, setScreen] = useState<Screen>("home");
   const [toastMessage, setToastMessage] = useState("");
   const [profileOpen, setProfileOpen] = useState(false);
-  const [profileEditAvatar, setProfileEditAvatar] = useState(false);
+  const [avatarInventory, setAvatarInventory] = useState<Set<string>>(new Set());
   const [auth, setAuth] = useState<AuthState>({
     user: null,
     github: null,
@@ -5141,6 +5300,20 @@ export default function RankedApp() {
   const toast = useCallback((message: string) => {
     setToastMessage(message);
     window.setTimeout(() => setToastMessage(""), 2600);
+  }, []);
+
+  const refreshAvatarInventory = useCallback(() => {
+    fetch("/api/shop/orders")
+      .then((response) => response.json())
+      .then((data: { orders?: Array<{ itemId: string }> }) => {
+        const avatarItemIds = new Set(
+          SHOP_CATALOG.filter((item) => item.kind === "avatar").map((item) => item.id),
+        );
+        setAvatarInventory(
+          new Set((data.orders ?? []).map((order) => order.itemId).filter((id) => avatarItemIds.has(id))),
+        );
+      })
+      .catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -5179,6 +5352,7 @@ export default function RankedApp() {
           ),
         );
         if (next.user) {
+          refreshAvatarInventory();
           const queue = await fetch("/api/matchmaking/queue")
             .then((response) => response.json())
             .catch(() => null);
@@ -5221,12 +5395,18 @@ export default function RankedApp() {
       );
     if (["auth", "github", "hackatime"].some((key) => params.has(key)))
       window.history.replaceState({}, "", window.location.pathname);
-  }, [toast]);
+  }, [toast, refreshAvatarInventory]);
 
   const navigate = (next: Screen) => {
     setScreen(next);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
+
+  const handleAvatarUpdated = useCallback((avatar: ResolvedAvatarConfig) => {
+    setAuth((current) =>
+      current.user ? { ...current, user: { ...current.user, avatar } } : current,
+    );
+  }, []);
 
   const saveExperience = async (experience: Experience) => {
     const response = await fetch("/api/profile", {
@@ -5354,13 +5534,12 @@ export default function RankedApp() {
         <SiteHeader
           screen={screen}
           navigate={navigate}
-          onProfile={() => {
-            setProfileEditAvatar(false);
-            setProfileOpen(true);
-          }}
+          onProfile={() => setProfileOpen(true)}
           balance={auth.user?.hBucks ?? 0}
           avatar={auth.user?.avatar}
           showAdmin={isAdmin(auth.user?.email)}
+          wardrobeUnlocked={avatarInventory.size > 0}
+          toast={toast}
         />
       )}
       {screen === "home" && (
@@ -5375,8 +5554,8 @@ export default function RankedApp() {
               setPreAuthOpen(true);
               return;
             }
-            setProfileEditAvatar(true);
-            setProfileOpen(true);
+            if (avatarInventory.size > 0) navigate("wardrobe");
+            else toast("Buy your first avatar item in the Shop to unlock the Wardrobe");
           }}
         />
       )}
@@ -5421,8 +5600,8 @@ export default function RankedApp() {
               setPreAuthOpen(true);
               return;
             }
-            setProfileEditAvatar(true);
-            setProfileOpen(true);
+            if (avatarInventory.size > 0) navigate("wardrobe");
+            else toast("Buy your first avatar item in the Shop to unlock the Wardrobe");
           }}
         />
       )}
@@ -5431,26 +5610,33 @@ export default function RankedApp() {
         <Leaderboard navigate={navigate} auth={auth} />
       )}
       {screen === "shop" && (
-        <Shop navigate={navigate} toast={toast} auth={auth} />
+        <Shop
+          navigate={navigate}
+          toast={toast}
+          auth={auth}
+          avatarInventory={avatarInventory}
+          onAvatarPurchased={refreshAvatarInventory}
+        />
+      )}
+      {screen === "wardrobe" && (
+        <Wardrobe
+          navigate={navigate}
+          toast={toast}
+          auth={auth}
+          avatarInventory={avatarInventory}
+          onAvatarUpdated={handleAvatarUpdated}
+        />
       )}
       {screen === "admin" && auth.user && isAdmin(auth.user.email) && (
         <AdminAuditLog navigate={navigate} />
       )}
       {profileOpen && (
         <ProfileModal
-          close={() => {
-            setProfileOpen(false);
-            setProfileEditAvatar(false);
-          }}
+          close={() => setProfileOpen(false)}
+          navigate={navigate}
+          toast={toast}
           auth={auth}
-          startEditingAvatar={profileEditAvatar}
-          onAvatarUpdated={(avatar) =>
-            setAuth((current) =>
-              current.user
-                ? { ...current, user: { ...current.user, avatar } }
-                : current,
-            )
-          }
+          wardrobeUnlocked={avatarInventory.size > 0}
           logout={() => void logout()}
           logoutLoading={logoutLoading}
         />

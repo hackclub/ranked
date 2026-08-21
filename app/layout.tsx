@@ -1,10 +1,54 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
-import { Geist, Geist_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 
-const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
-const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
+const geistSans = localFont({
+  variable: "--font-geist-sans",
+  src: [
+    { path: "../public/fonts/Geist-Thin.ttf", weight: "100", style: "normal" },
+    { path: "../public/fonts/Geist-ThinItalic.ttf", weight: "100", style: "italic" },
+    { path: "../public/fonts/Geist-ExtraLight.ttf", weight: "200", style: "normal" },
+    { path: "../public/fonts/Geist-ExtraLightItalic.ttf", weight: "200", style: "italic" },
+    { path: "../public/fonts/Geist-Light.ttf", weight: "300", style: "normal" },
+    { path: "../public/fonts/Geist-LightItalic.ttf", weight: "300", style: "italic" },
+    { path: "../public/fonts/Geist-Regular.ttf", weight: "400", style: "normal" },
+    { path: "../public/fonts/Geist-Italic.ttf", weight: "400", style: "italic" },
+    { path: "../public/fonts/Geist-Medium.ttf", weight: "500", style: "normal" },
+    { path: "../public/fonts/Geist-MediumItalic.ttf", weight: "500", style: "italic" },
+    { path: "../public/fonts/Geist-SemiBold.ttf", weight: "600", style: "normal" },
+    { path: "../public/fonts/Geist-SemiBoldItalic.ttf", weight: "600", style: "italic" },
+    { path: "../public/fonts/Geist-Bold.ttf", weight: "700", style: "normal" },
+    { path: "../public/fonts/Geist-BoldItalic.ttf", weight: "700", style: "italic" },
+    { path: "../public/fonts/Geist-ExtraBold.ttf", weight: "800", style: "normal" },
+    { path: "../public/fonts/Geist-ExtraBoldItalic.ttf", weight: "800", style: "italic" },
+    { path: "../public/fonts/Geist-Black.ttf", weight: "900", style: "normal" },
+    { path: "../public/fonts/Geist-BlackItalic.ttf", weight: "900", style: "italic" },
+  ],
+});
+const geistMono = localFont({
+  variable: "--font-geist-mono",
+  src: [
+    { path: "../public/fonts/GeistMono-Thin.ttf", weight: "100", style: "normal" },
+    { path: "../public/fonts/GeistMono-ThinItalic.ttf", weight: "100", style: "italic" },
+    { path: "../public/fonts/GeistMono-ExtraLight.ttf", weight: "200", style: "normal" },
+    { path: "../public/fonts/GeistMono-ExtraLightItalic.ttf", weight: "200", style: "italic" },
+    { path: "../public/fonts/GeistMono-Light.ttf", weight: "300", style: "normal" },
+    { path: "../public/fonts/GeistMono-LightItalic.ttf", weight: "300", style: "italic" },
+    { path: "../public/fonts/GeistMono-Regular.ttf", weight: "400", style: "normal" },
+    { path: "../public/fonts/GeistMono-Italic.ttf", weight: "400", style: "italic" },
+    { path: "../public/fonts/GeistMono-Medium.ttf", weight: "500", style: "normal" },
+    { path: "../public/fonts/GeistMono-MediumItalic.ttf", weight: "500", style: "italic" },
+    { path: "../public/fonts/GeistMono-SemiBold.ttf", weight: "600", style: "normal" },
+    { path: "../public/fonts/GeistMono-SemiBoldItalic.ttf", weight: "600", style: "italic" },
+    { path: "../public/fonts/GeistMono-Bold.ttf", weight: "700", style: "normal" },
+    { path: "../public/fonts/GeistMono-BoldItalic.ttf", weight: "700", style: "italic" },
+    { path: "../public/fonts/GeistMono-ExtraBold.ttf", weight: "800", style: "normal" },
+    { path: "../public/fonts/GeistMono-ExtraBoldItalic.ttf", weight: "800", style: "italic" },
+    { path: "../public/fonts/GeistMono-Black.ttf", weight: "900", style: "normal" },
+    { path: "../public/fonts/GeistMono-BlackItalic.ttf", weight: "900", style: "italic" },
+  ],
+});
 
 export async function generateMetadata(): Promise<Metadata> {
   const requestHeaders = await headers();

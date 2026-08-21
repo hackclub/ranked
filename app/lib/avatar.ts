@@ -6,6 +6,47 @@ export const AVATAR_COUNTS = {
   mouth: 6,
 } as const;
 
+export type AvatarPartName = keyof typeof AVATAR_COUNTS;
+export const AVATAR_PARTS = Object.keys(AVATAR_COUNTS) as AvatarPartName[];
+
+export type PremiumAvatarItem = {
+  id: string;
+  part: AvatarPartName;
+  value: number;
+  name: string;
+  cost: number;
+};
+
+// Values continue numbering past each part's starter range (AVATAR_COUNTS) so they
+// never collide with the free onboarding pool. Assets are placeholders — rendering
+// already falls back to that part's first starter asset/layout (see GoofyGuyAvatar.tsx)
+// until real art lands at public/goofyguys/{shapes|limbs|eyes|hair|mouth}/{value}.png.
+export const PREMIUM_AVATAR_ITEMS: PremiumAvatarItem[] = [
+  { id: "avatar_shape_comet", part: "shape", value: AVATAR_COUNTS.shape + 1, name: "Comet Body", cost: 300 },
+  { id: "avatar_limbs_noodle", part: "limbs", value: AVATAR_COUNTS.limbs + 1, name: "Noodle Limbs", cost: 300 },
+  { id: "avatar_eye_starstruck", part: "eye", value: AVATAR_COUNTS.eye + 1, name: "Starstruck Eyes", cost: 250 },
+  { id: "avatar_hair_neon", part: "hair", value: AVATAR_COUNTS.hair + 1, name: "Neon Mohawk", cost: 250 },
+  { id: "avatar_mouth_grin", part: "mouth", value: AVATAR_COUNTS.mouth + 1, name: "Mega Grin", cost: 250 },
+];
+
+export function maxAvatarValue(part: AvatarPartName): number {
+  const premiumMax = PREMIUM_AVATAR_ITEMS.filter((item) => item.part === part).reduce(
+    (max, item) => Math.max(max, item.value),
+    0,
+  );
+  return Math.max(AVATAR_COUNTS[part], premiumMax);
+}
+
+export function isOwnedOrStarterValue(
+  part: AvatarPartName,
+  value: number,
+  ownedItemIds: Set<string>,
+): boolean {
+  if (value <= AVATAR_COUNTS[part]) return true;
+  const item = PREMIUM_AVATAR_ITEMS.find((entry) => entry.part === part && entry.value === value);
+  return Boolean(item && ownedItemIds.has(item.id));
+}
+
 export type AvatarConfig = {
   shape?: number;
   limbs?: number;
@@ -59,18 +100,67 @@ export function normalizeAvatar(value?: AvatarConfig | null): ResolvedAvatarConf
   const legacyShape = value?.color
     ? Math.max(1, LEGACY_COLORS.findIndex((color) => color.toLowerCase() === value.color?.toLowerCase()) + 1)
     : DEFAULT_AVATAR.shape;
-  const shape = option(value?.shape, AVATAR_COUNTS.shape, legacyShape);
+  const shape = option(value?.shape, maxAvatarValue("shape"), legacyShape);
   return {
     shape,
-    limbs: option(value?.limbs, AVATAR_COUNTS.limbs, shape),
-    eye: option(value?.eye ?? value?.eyes, AVATAR_COUNTS.eye, DEFAULT_AVATAR.eye),
-    hair: option(value?.hair, AVATAR_COUNTS.hair, DEFAULT_AVATAR.hair),
-    mouth: option(value?.mouth ?? value?.mouths, AVATAR_COUNTS.mouth, DEFAULT_AVATAR.mouth),
+    limbs: option(value?.limbs, maxAvatarValue("limbs"), shape),
+    eye: option(value?.eye ?? value?.eyes, maxAvatarValue("eye"), DEFAULT_AVATAR.eye),
+    hair: option(value?.hair, maxAvatarValue("hair"), DEFAULT_AVATAR.hair),
+    mouth: option(value?.mouth ?? value?.mouths, maxAvatarValue("mouth"), DEFAULT_AVATAR.mouth),
   };
 }
 
 export function avatarAccent(value?: AvatarConfig | null) {
   const avatar = normalizeAvatar(value);
   return SHAPE_ACCENTS[avatar.shape - 1] ?? SHAPE_ACCENTS[0];
+}
+
+export type PhysicalShopItem = {
+  id: string;
+  kind: "physical";
+  name: string;
+  description: string;
+  cost: number;
+  iconName: string;
+  color: string;
+};
+
+export type AvatarShopItem = {
+  id: string;
+  kind: "avatar";
+  name: string;
+  description: string;
+  cost: number;
+  part: AvatarPartName;
+  value: number;
+  color: string;
+};
+
+export type ShopItem = PhysicalShopItem | AvatarShopItem;
+
+const AVATAR_ITEM_COLORS = ["#D891D9", "#497CBF", "#CCD96C", "#D99F6C", "#BF5A5A"];
+
+// Single source of truth for the shop — the client (Shop/Wardrobe UI) and the
+// server (app/api/shop/orders/route.ts) both import this instead of keeping
+// hand-synced copies.
+export const SHOP_CATALOG: ShopItem[] = [
+  { id: "stickers", kind: "physical", name: "Ranked sticker pack", description: "Cover absolutely everything.", cost: 100, iconName: "sticker", color: "#D891D9" },
+  { id: "flipper", kind: "physical", name: "Flipper Zero", description: "For curious hardware hackers.", cost: 4500, iconName: "flipper", color: "#BF5A5A" },
+  { id: "ipad", kind: "physical", name: "iPad", description: "Sketch the next strange thing.", cost: 9000, iconName: "ipad", color: "#CCD96C" },
+  { id: "macbook", kind: "physical", name: "MacBook Air", description: "A lot of hours. Very worth it.", cost: 18000, iconName: "macbook", color: "#497CBF" },
+  ...PREMIUM_AVATAR_ITEMS.map((item, index) => ({
+    id: item.id,
+    kind: "avatar" as const,
+    name: item.name,
+    description: `Unlocks the "${item.name}" ${item.part} — equip it any time in the Wardrobe.`,
+    cost: item.cost,
+    part: item.part,
+    value: item.value,
+    color: AVATAR_ITEM_COLORS[index % AVATAR_ITEM_COLORS.length],
+  })),
+];
+
+export function shopItemById(id: string) {
+  return SHOP_CATALOG.find((item) => item.id === id);
 }
 
