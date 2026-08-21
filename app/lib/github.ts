@@ -91,7 +91,17 @@ async function githubRequest<T>(
           message?: string;
           errors?: Array<{ field?: string; message?: string }>;
         };
-        githubMessage = parsed.message;
+        // GitHub's top-level "message" is a generic label ("Repository
+        // creation failed.") — the actual reason lives per-entry in
+        // "errors", so it has to be included or every non-name-conflict
+        // failure just says "creation failed" with no way to tell why.
+        const errorDetails = (parsed.errors ?? [])
+          .map((entry) => entry.message)
+          .filter((message): message is string => Boolean(message))
+          .join("; ");
+        githubMessage = errorDetails
+          ? `${parsed.message ?? "Repository creation failed."} (${errorDetails})`
+          : parsed.message;
         nameTaken = Boolean(
           parsed.errors?.some(
             (entry) =>
