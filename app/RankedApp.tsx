@@ -935,32 +935,40 @@ function Home({
   const addFriend = async (id: string, name: string) => {
     if (friendRequests.includes(id))
       return toast(`You already nudged @${name}`);
-    const response = await fetch("/api/friends", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ targetUserId: id }),
-    });
-    const result = await response.json();
-    if (!response.ok)
-      return toast(result.error ?? "Could not send that request");
-    setFriendRequests((current) => [...current, id]);
-    toast(`Friend request sent to @${name}`);
+    try {
+      const response = await fetch("/api/friends", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targetUserId: id }),
+      });
+      const result = await response.json().catch(() => null);
+      if (!response.ok)
+        return toast(result?.error ?? "Could not send that request");
+      setFriendRequests((current) => [...current, id]);
+      toast(`Friend request sent to @${name}`);
+    } catch {
+      toast("Could not send that request — check your connection");
+    }
   };
 
   const addSlackFriend = async (event: React.FormEvent) => {
     event.preventDefault();
     if (selectedFriend) {
-      const response = await fetch("/api/friends", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ targetUserId: selectedFriend.id }),
-      });
-      const result = await response.json();
-      if (!response.ok)
-        return toast(result.error ?? "Could not send that friend request");
-      setSlackQuery("");
-      setSelectedFriend(null);
-      return toast("Friend request sent");
+      try {
+        const response = await fetch("/api/friends", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ targetUserId: selectedFriend.id }),
+        });
+        const result = await response.json().catch(() => null);
+        if (!response.ok)
+          return toast(result?.error ?? "Could not send that friend request");
+        setSlackQuery("");
+        setSelectedFriend(null);
+        return toast("Friend request sent");
+      } catch {
+        return toast("Could not send that friend request — check your connection");
+      }
     }
     const handle = slackQuery.replace(/^@/, "").trim();
     if (!handle) return;
@@ -1949,16 +1957,22 @@ function Lobby({
 
   const sendInvite = async (friendId: string) => {
     setInviteBusy(true);
-    const response = await fetch("/api/duo-invites", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ friendId, durationMinutes: length }),
-    });
-    const result = await response.json();
-    setInviteBusy(false);
-    if (!response.ok) return toast(result.error ?? "Could not send invite");
-    setDuoState((current) => ({ ...current, outgoing: result.outgoing }));
-    toast(`Invite sent to ${result.outgoing.partnerName}`);
+    try {
+      const response = await fetch("/api/duo-invites", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ friendId, durationMinutes: length }),
+      });
+      const result = await response.json().catch(() => null);
+      if (!response.ok || !result?.outgoing)
+        return toast(result?.error ?? "Could not send invite");
+      setDuoState((current) => ({ ...current, outgoing: result.outgoing }));
+      toast(`Invite sent to ${result.outgoing.partnerName}`);
+    } catch {
+      toast("Could not send invite — check your connection");
+    } finally {
+      setInviteBusy(false);
+    }
   };
 
   // The creator's chosen match length is the single source of truth once a
@@ -5627,21 +5641,25 @@ export default function RankedApp() {
 
   const respondToInvite = useCallback(
     async (inviteId: string, action: "accept" | "decline") => {
-      const response = await fetch("/api/duo-invites", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ inviteId, action }),
-      });
-      if (!response.ok) {
-        toast("Could not respond to that invite");
-        return;
-      }
-      setIncomingInvites((current) =>
-        current.filter((invite) => invite.id !== inviteId),
-      );
-      if (action === "accept") {
-        toast("You're teamed up!");
-        navigate("lobby");
+      try {
+        const response = await fetch("/api/duo-invites", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ inviteId, action }),
+        });
+        if (!response.ok) {
+          toast("Could not respond to that invite");
+          return;
+        }
+        setIncomingInvites((current) =>
+          current.filter((invite) => invite.id !== inviteId),
+        );
+        if (action === "accept") {
+          toast("You're teamed up!");
+          navigate("lobby");
+        }
+      } catch {
+        toast("Could not respond to that invite — check your connection");
       }
     },
     [toast],

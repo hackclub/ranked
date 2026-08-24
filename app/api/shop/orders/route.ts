@@ -42,7 +42,7 @@ export async function POST(request: NextRequest) {
     actor: { id: user.id, name: user.name, email: user.email },
     action: item.kind === "avatar" ? "shop.avatar_item.unlocked" : "shop.order.created",
     summary: item.kind === "avatar"
-      ? `${user.name} unlocked "${item.name}" for ${item.cost} Ħ`
+      ? `${user.name} bought "${item.name}" for ${item.cost} Ħ`
       : `${user.name} redeemed ${item.name} for ${item.cost} Ħ — pending shipping approval`,
     targetType: "shop_order",
     targetId: orderId,
