@@ -33,20 +33,46 @@ const FEED_CTE = `
   )
 `;
 
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
 export async function GET(request: NextRequest) {
   const user = await currentUser(request);
   if (!user || !isAdmin(user.email)) return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
 
   const sql = getSql();
-  const requestedPage = Number(request.nextUrl.searchParams.get("page"));
+  const params = request.nextUrl.searchParams;
+  const requestedPage = Number(params.get("page"));
   const page = Number.isFinite(requestedPage) && requestedPage > 0 ? Math.floor(requestedPage) : 1;
   const offset = (page - 1) * PAGE_SIZE;
 
+  const query = params.get("q")?.trim().slice(0, 200) || "";
+  const fromDate = params.get("from");
+  const toDate = params.get("to");
+
+  const conditions: string[] = [];
+  const values: unknown[] = [];
+  if (query) {
+    values.push(`%${query}%`);
+    const i = values.length;
+    conditions.push(
+      `("summary" ILIKE $${i} OR "action" ILIKE $${i} OR "actorName" ILIKE $${i} OR "actorEmail" ILIKE $${i})`,
+    );
+  }
+  if (fromDate && ISO_DATE.test(fromDate)) {
+    values.push(fromDate);
+    conditions.push(`"createdAt" >= $${values.length}::date`);
+  }
+  if (toDate && ISO_DATE.test(toDate)) {
+    values.push(toDate);
+    conditions.push(`"createdAt" < ($${values.length}::date + INTERVAL '1 day')`);
+  }
+  const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+
   const [countRows, entries] = await Promise.all([
-    sql.query(`${FEED_CTE} SELECT COUNT(*)::int AS count FROM combined`, []),
+    sql.query(`${FEED_CTE} SELECT COUNT(*)::int AS count FROM combined ${whereClause}`, values),
     sql.query(
-      `${FEED_CTE} SELECT * FROM combined ORDER BY "createdAt" DESC LIMIT $1 OFFSET $2`,
-      [PAGE_SIZE, offset],
+      `${FEED_CTE} SELECT * FROM combined ${whereClause} ORDER BY "createdAt" DESC LIMIT $${values.length + 1} OFFSET $${values.length + 2}`,
+      [...values, PAGE_SIZE, offset],
     ),
   ]);
 

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createRankedSubmission } from "@/app/lib/airtable";
+import { logAudit } from "@/app/lib/audit";
 import { currentUser } from "@/app/lib/current-user";
 import {
   completeSubmissionAddress,
@@ -134,12 +135,28 @@ export async function POST(request: NextRequest) {
     await getSql()`UPDATE publications SET airtable_status='submitted',
       airtable_record_id=${recordId}, airtable_error=NULL, airtable_submitted_at=NOW()
       WHERE id=${publication.id}`;
+    await logAudit({
+      actor: { id: user.id, name: user.name, email: user.email },
+      action: "airtable.submission.upserted",
+      summary: `${user.name}'s build was submitted to Airtable (record ${recordId})`,
+      targetType: "publication",
+      targetId: publication.id,
+      metadata: { recordId, codeUrl: publication.repositoryUrl, playableUrl: publication.pagesUrl },
+    });
     return NextResponse.json({ status: "submitted", recordId });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Airtable submission failed.";
     console.error(message);
     await getSql()`UPDATE publications SET airtable_status='error',
       airtable_error=${message.slice(0, 500)} WHERE id=${publication.id}`;
+    await logAudit({
+      actor: { id: user.id, name: user.name, email: user.email },
+      action: "airtable.submission.failed",
+      summary: `${user.name}'s Airtable submission failed: ${message}`,
+      targetType: "publication",
+      targetId: publication.id,
+      metadata: { error: message, codeUrl: publication.repositoryUrl },
+    });
     return NextResponse.json(
       { error: "Your build is live, but Airtable submission needs a retry." },
       { status: 502 },

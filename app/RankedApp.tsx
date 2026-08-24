@@ -1790,6 +1790,19 @@ function Lobby({
     return () => window.clearInterval(poll);
   }, [acceptQueueResult, matching]);
 
+  // Navigating away from the lobby while queued is treated the same as
+  // clicking "ready up" again to cancel — leaving the queue server-side
+  // instead of leaving a stale row behind.
+  const matchingRef = useRef(matching);
+  useEffect(() => {
+    matchingRef.current = matching;
+  }, [matching]);
+  useEffect(() => {
+    return () => {
+      if (matchingRef.current) void fetch("/api/matchmaking/queue", { method: "DELETE" });
+    };
+  }, []);
+
   // Live self-preview: mirrors Discord's device settings, a persistent camera
   // preview and mic level meter instead of a one-shot "test my setup" check.
   useEffect(() => {
@@ -2515,10 +2528,8 @@ function Match({
     addresses: Array<{ id: string; label: string; primary: boolean }>;
   }>({ loading: true, ready: false, addresses: [] });
   const [submissionAddressId, setSubmissionAddressId] = useState("");
-  const [airtableSubmission, setAirtableSubmission] = useState<
-    "idle" | "waiting" | "submitting" | "submitted" | "error"
-  >("idle");
   const submissionCaptureRef = useRef<HTMLIFrameElement>(null);
+  const airtableAttemptedRef = useRef<string | null>(null);
   const {
     ready: pagesReady,
     secondsLeft: pagesCountdown,
@@ -3017,70 +3028,78 @@ function Match({
     toast,
   ]);
 
+  // Captures the finished build and submits it to Airtable without blocking
+  // the player on it. Kicked off once GitHub Pages is actually live, the
+  // screenshot has been grabbed, and there's a valid postal address to ship
+  // to — then the upload itself keeps retrying quietly in the background
+  // (independent of this component) since a request can still transiently
+  // fail after all of that is true, and the player is free to navigate away
+  // before it finishes.
   const submitToAirtable = useCallback(async () => {
-    if (!publishState.publicationId) return;
-    setAirtableSubmission("submitting");
-    try {
-      const frame = submissionCaptureRef.current;
-      const captureDocument = frame?.contentDocument;
-      if (!captureDocument?.body || !captureDocument.documentElement) {
-        throw new Error("The build preview is not ready to capture");
-      }
-      captureDocument.documentElement.style.width = "1200px";
-      captureDocument.documentElement.style.height = "675px";
-      captureDocument.body.style.width = "1200px";
-      captureDocument.body.style.minHeight = "675px";
-      await new Promise<void>((resolve) =>
-        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-      );
-      const { toBlob } = await import("html-to-image");
-      const screenshot = await toBlob(captureDocument.body, {
-        width: 1200,
-        height: 675,
-        canvasWidth: 1200,
-        canvasHeight: 675,
-        backgroundColor: "#fffdf2",
-        cacheBust: true,
-        pixelRatio: 1,
-        skipFonts: true,
-      });
-      if (!screenshot) throw new Error("Could not capture the finished build");
-      const body = new FormData();
-      body.set("publicationId", publishState.publicationId);
-      body.set(
-        "screenshot",
-        new File([screenshot], "ranked-build.png", { type: "image/png" }),
-      );
-      const response = await fetch("/api/airtable/submissions", {
-        method: "POST",
-        body,
-      });
-      const result = (await response.json()) as { status?: string; error?: string };
-      if (response.status === 202) {
-        setAirtableSubmission("waiting");
-        window.setTimeout(() => setAirtableSubmission("idle"), 4000);
+    const publicationId = publishState.publicationId;
+    if (!publicationId) return;
+    const frame = submissionCaptureRef.current;
+    const captureDocument = frame?.contentDocument;
+    if (!captureDocument?.body || !captureDocument.documentElement) return;
+    captureDocument.documentElement.style.width = "1200px";
+    captureDocument.documentElement.style.height = "675px";
+    captureDocument.body.style.width = "1200px";
+    captureDocument.body.style.minHeight = "675px";
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+    );
+    const { toBlob } = await import("html-to-image");
+    const screenshot = await toBlob(captureDocument.body, {
+      width: 1200,
+      height: 675,
+      canvasWidth: 1200,
+      canvasHeight: 675,
+      backgroundColor: "#fffdf2",
+      cacheBust: true,
+      pixelRatio: 1,
+      skipFonts: true,
+    }).catch(() => null);
+    if (!screenshot) return;
+    const file = new File([screenshot], "ranked-build.png", { type: "image/png" });
+    for (let attempt = 0; attempt < 20; attempt++) {
+      try {
+        const body = new FormData();
+        body.set("publicationId", publicationId);
+        body.set("screenshot", file);
+        const response = await fetch("/api/airtable/submissions", {
+          method: "POST",
+          body,
+        });
+        if (response.status === 202) {
+          await new Promise((resolve) => window.setTimeout(resolve, 5000));
+          continue;
+        }
+        return;
+      } catch {
         return;
       }
-      if (!response.ok || result.status !== "submitted") {
-        throw new Error(result.error ?? "Airtable submission failed");
-      }
-      setAirtableSubmission("submitted");
-      toast("Your live build was submitted automatically");
-    } catch {
-      setAirtableSubmission("error");
     }
-  }, [publishState.publicationId, toast]);
+  }, [publishState.publicationId]);
 
   useEffect(() => {
+    const publicationId = publishState.publicationId;
     if (
-      pagesReady &&
-      publishState.publicationId &&
-      airtableSubmission === "idle"
-    ) {
-      const timer = window.setTimeout(() => void submitToAirtable(), 0);
-      return () => window.clearTimeout(timer);
-    }
-  }, [airtableSubmission, pagesReady, publishState.publicationId, submitToAirtable]);
+      !publicationId ||
+      !pagesReady ||
+      !submissionProfile.ready ||
+      !submissionAddressId ||
+      airtableAttemptedRef.current === publicationId
+    )
+      return;
+    airtableAttemptedRef.current = publicationId;
+    void submitToAirtable();
+  }, [
+    publishState.publicationId,
+    pagesReady,
+    submissionProfile.ready,
+    submissionAddressId,
+    submitToAirtable,
+  ]);
 
   const applyLifecycle = useCallback(
     (result: {
@@ -4264,14 +4283,8 @@ function Match({
                     </span>
                   )}
                 </div>
-                <button
-                  className="primary-button"
-                  onClick={() => navigate("home")}
-                  disabled={airtableSubmission !== "submitted"}
-                >
-                  {airtableSubmission === "submitted"
-                    ? "return home"
-                    : "finishing submission…"}
+                <button className="primary-button" onClick={() => navigate("home")}>
+                  return home
                 </button>
               </>
             ) : (
@@ -4610,17 +4623,62 @@ type AuditPage = {
 };
 
 function AdminAuditLog({ navigate }: { navigate: (s: Screen) => void }) {
+  const [queryInput, setQueryInput] = useState("");
+  const [fromInput, setFromInput] = useState("");
+  const [toInput, setToInput] = useState("");
+  const [query, setQuery] = useState("");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
   const [requestedPage, setRequestedPage] = useState<number | null>(null);
   const [data, setData] = useState<AuditPage | null>(null);
+  const hasFilters = Boolean(query || fromDate || toDate);
 
+  // Typing a date fires onChange per keystroke (each digit of the day/month/
+  // year segments), same as the search box — debounce all three so a filter
+  // only actually commits once the admin pauses, instead of every partial
+  // (often invalid, momentarily unfiltered) value firing its own request.
   useEffect(() => {
+    const timer = window.setTimeout(() => setQuery(queryInput.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [queryInput]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setFromDate(fromInput), 300);
+    return () => window.clearTimeout(timer);
+  }, [fromInput]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setToDate(toInput), 300);
+    return () => window.clearTimeout(timer);
+  }, [toInput]);
+
+  // Any filter change re-starts the browse from page 1 — staying on, say,
+  // page 6 of an unfiltered feed would otherwise land past the end of a
+  // narrower filtered result set.
+  useEffect(() => {
+    setRequestedPage(null);
+  }, [query, fromDate, toDate]);
+
+  // Debouncing narrows the race but doesn't close it — two requests can still
+  // be in flight together, and network ordering doesn't guarantee the newer
+  // one resolves last. Tag each request and drop any response that isn't
+  // from the most recently issued one, so a slow stale request can never
+  // clobber a newer result.
+  const latestRequestRef = useRef(0);
+  useEffect(() => {
+    const requestId = ++latestRequestRef.current;
     const params = new URLSearchParams();
     if (requestedPage) params.set("page", String(requestedPage));
+    if (query) params.set("q", query);
+    if (fromDate) params.set("from", fromDate);
+    if (toDate) params.set("to", toDate);
     fetch(`/api/admin/audit-log?${params}`)
       .then((response) => (response.ok ? response.json() : null))
-      .then((result) => setData(result))
-      .catch(() => setData(null));
-  }, [requestedPage]);
+      .then((result) => {
+        if (latestRequestRef.current === requestId) setData(result);
+      })
+      .catch(() => {
+        if (latestRequestRef.current === requestId) setData(null);
+      });
+  }, [requestedPage, query, fromDate, toDate]);
 
   return (
     <main className="subpage screen-pad">
@@ -4630,14 +4688,62 @@ function AdminAuditLog({ navigate }: { navigate: (s: Screen) => void }) {
       </button>
       <div className="subpage-head">
         <h1>Audit Log</h1>
-        <p>
-          Security and moderation events across the site — logins, matches,
-          reports, redemptions, and admin actions.
-        </p>
+      </div>
+      <div className="audit-filters">
+        <div className="audit-search">
+          <Icon name="search" size={12} />
+          <input
+            type="text"
+            value={queryInput}
+            onChange={(event) => setQueryInput(event.target.value)}
+            placeholder="search users, events, keywords"
+            aria-label="Search audit log"
+          />
+        </div>
+        <div className="audit-date-range">
+          <label>
+            <span>from</span>
+            <input
+              type="date"
+              value={fromInput}
+              max={toInput || undefined}
+              onChange={(event) => setFromInput(event.target.value)}
+              aria-label="From date"
+            />
+          </label>
+          <label>
+            <span>to</span>
+            <input
+              type="date"
+              value={toInput}
+              min={fromInput || undefined}
+              onChange={(event) => setToInput(event.target.value)}
+              aria-label="To date"
+            />
+          </label>
+          {hasFilters && (
+            <button
+              type="button"
+              className="audit-clear-filters"
+              onClick={() => {
+                setQueryInput("");
+                setQuery("");
+                setFromInput("");
+                setFromDate("");
+                setToInput("");
+                setToDate("");
+              }}
+            >
+              clear
+            </button>
+          )}
+        </div>
       </div>
       <section className="audit-card">
         {data && data.entries.length === 0 && (
-          <p className="audit-empty">Nothing logged yet.</p>
+          <p className="audit-empty">
+            {hasFilters ? "No events match those filters." : "Nothing logged yet."}
+          </p>
         )}
         {data?.entries.map((entry) => {
           const category = entry.action.split(".")[0];

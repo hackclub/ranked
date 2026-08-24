@@ -101,12 +101,18 @@ export function generateMatchTheme(): string {
 }
 
 export async function activeMatch(userId: string) {
+  // A match only flips out of 'active' once every player has published, so a slow
+  // or missing opponent can leave it 'active' long after this player's own timer
+  // ended. Once this player has finished (published) their side, it should stop
+  // counting as their active match — otherwise matchmaking keeps handing them
+  // back the same timed-out match instead of letting them queue for a new one.
   const rows = await getSql()`SELECT m.id, m.mode, m.is_test AS "isTest", m.duration_minutes AS "durationMinutes", m.theme, m.status,
       m.started_at AS "startedAt", m.ends_at AS "endsAt",
       GREATEST(0,CEIL(EXTRACT(EPOCH FROM (m.ends_at-NOW()))))::int AS "remainingSeconds",mp.team,
       (SELECT COUNT(*)::int FROM match_players WHERE match_id=m.id) AS "playerCount"
     FROM match_players mp JOIN matches m ON m.id = mp.match_id
-    WHERE mp.user_id = ${userId} AND m.status='active' ORDER BY m.created_at DESC LIMIT 1`;
+    WHERE mp.user_id = ${userId} AND m.status='active' AND mp.finished_at IS NULL
+    ORDER BY m.created_at DESC LIMIT 1`;
   return rows[0] ?? null;
 }
 

@@ -51,10 +51,12 @@ select:focus-visible {
   background-size: 17px 17px;
   overflow: hidden;
 }
-/* Leaderboard and shop are browse-style lists — let the whole page scroll
-   naturally instead of forcing their content into one viewport-height box. */
+/* Leaderboard, shop, and the audit log are browse-style lists — let the
+   whole page scroll naturally instead of forcing their content into one
+   viewport-height box. */
 .app-shell.screen-leaderboard,
-.app-shell.screen-shop {
+.app-shell.screen-shop,
+.app-shell.screen-admin {
   height: auto;
   min-height: 100dvh;
   overflow: visible;
@@ -461,8 +463,9 @@ select:focus-visible {
 .mini-face {
   width: 28px;
   height: 28px;
-  display: grid;
-  place-items: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border: 1px solid var(--ink);
   font: 700 11px var(--font-geist-mono);
   border-radius: var(--blob);
@@ -3102,6 +3105,84 @@ select:focus-visible {
 }
 .icon-flip {
   transform: rotate(180deg);
+}
+.audit-filters {
+  max-width: 780px;
+  margin: 0 auto 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+.audit-search {
+  position: relative;
+  flex: 1 1 220px;
+}
+.audit-search .icon {
+  position: absolute;
+  top: 50%;
+  left: 12px;
+  transform: translateY(-50%);
+  color: var(--muted);
+  pointer-events: none;
+}
+.audit-search input {
+  width: 100%;
+  border: 2px solid var(--ink);
+  background: var(--paper);
+  padding: 9px 12px 9px 30px;
+  font: 600 11px var(--font-geist-mono);
+  color: var(--ink);
+  border-radius: var(--blob);
+}
+.audit-search input::placeholder {
+  color: var(--muted);
+}
+.audit-search input:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 1px;
+}
+.audit-date-range {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.audit-date-range label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font: 650 9px var(--font-geist-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.audit-date-range input[type="date"] {
+  border: 2px solid var(--ink);
+  background: var(--paper);
+  padding: 7px 8px;
+  font: 600 10px var(--font-geist-mono);
+  color: var(--ink);
+  border-radius: 6px;
+  color-scheme: light;
+}
+.audit-date-range input[type="date"]:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 1px;
+}
+.audit-clear-filters {
+  border: 0;
+  background: transparent;
+  padding: 4px 2px;
+  font: 650 9px var(--font-geist-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--blue-strong);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.audit-clear-filters:hover {
+  color: var(--blue);
 }
 .audit-card {
   max-width: 780px;
