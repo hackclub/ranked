@@ -52,12 +52,13 @@ select:focus-visible {
   background-size: 17px 17px;
   overflow: hidden;
 }
-/* Leaderboard, shop, and the audit log are browse-style lists — let the
-   whole page scroll naturally instead of forcing their content into one
-   viewport-height box. */
+/* Leaderboard, shop, the audit log, and the wardrobe are browse-style
+   pages — let the whole page scroll naturally instead of forcing their
+   content into one viewport-height box. */
 .app-shell.screen-leaderboard,
 .app-shell.screen-shop,
-.app-shell.screen-admin {
+.app-shell.screen-admin,
+.app-shell.screen-wardrobe {
   height: auto;
   min-height: 100dvh;
   overflow: visible;

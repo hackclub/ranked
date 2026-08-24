@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { currentUser } from "@/app/lib/current-user";
+import { activeMatch } from "@/app/lib/match-lifecycle";
 import { getSql } from "@/db";
 
 type InvitePartner = {
@@ -56,9 +57,12 @@ export async function POST(request: NextRequest) {
   const friend = await sql`SELECT name, avatar FROM users WHERE id=${friendId}`;
   if (!friend[0]) return NextResponse.json({ error: "That player no longer exists." }, { status: 404 });
 
-  const inMatch = await sql`SELECT 1 FROM match_players mp JOIN matches m ON m.id = mp.match_id
-    WHERE mp.user_id=${friendId} AND m.status='active' LIMIT 1`;
-  if (inMatch.length) {
+  // Reuses activeMatch's definition of "still in a match" — a match stays
+  // status='active' until every player has published, so a player who's
+  // already finished their own side must not read as unavailable just
+  // because their opponent hasn't finished yet.
+  const inMatch = await activeMatch(friendId);
+  if (inMatch) {
     await sql`INSERT INTO duo_invites (id, from_user_id, to_user_id, status) VALUES (${crypto.randomUUID()}, ${user.id}, ${friendId}, 'missed')`;
     return NextResponse.json(
       { error: `${friend[0].name} is currently playing a match — try inviting them again once they're done.` },

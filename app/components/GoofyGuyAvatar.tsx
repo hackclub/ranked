@@ -342,7 +342,7 @@ export function AvatarCustomizer({
   return (
     <div className="avatar-customizer">
       <div className="avatar-stage">
-        <ScribbleAvatar avatar={avatar} label="Your customized Goofy Guy" />
+        <ScribbleAvatar avatar={avatar} label="Your customized Scrib" />
       </div>
       <div className="avatar-pickers">
         {(Object.keys(LABELS) as AvatarPart[]).map((part) => (

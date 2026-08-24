@@ -1269,7 +1269,7 @@ function Home({
             className="hero-avatar-button"
             onClick={customizeAvatar}
             aria-label={
-              auth.user ? "Customize your Goofy Guy" : "Create your Goofy Guy"
+              auth.user ? "Customize your Scrib" : "Create your Scrib"
             }
           >
             <ScribbleAvatar
@@ -1814,6 +1814,20 @@ function Lobby({
     return () => {
       if (matchingRef.current) void fetch("/api/matchmaking/queue", { method: "DELETE" });
     };
+  }, []);
+  // The unmount cleanup above only fires on in-app navigation — a closed
+  // tab, hard refresh, or browser-back out of the SPA entirely tears down
+  // the page before React gets to run it, leaving the queue row behind
+  // indefinitely. `pagehide` fires in exactly those cases too, and
+  // `keepalive` lets the request outlive the page that started it.
+  useEffect(() => {
+    const leaveQueueOnPageHide = () => {
+      if (matchingRef.current) {
+        void fetch("/api/matchmaking/queue", { method: "DELETE", keepalive: true });
+      }
+    };
+    window.addEventListener("pagehide", leaveQueueOnPageHide);
+    return () => window.removeEventListener("pagehide", leaveQueueOnPageHide);
   }, []);
 
   // Live self-preview: mirrors Discord's device settings, a persistent camera
@@ -5009,14 +5023,14 @@ function Wardrobe({
         user?: { avatar: AvatarConfig };
         error?: string;
       };
-      if (!response.ok) throw new Error(result.error ?? "Could not save your Goofy Guy.");
+      if (!response.ok) throw new Error(result.error ?? "Could not save your Scrib.");
       onAvatarUpdated(normalizeAvatar(result.user!.avatar));
       toast("Wardrobe updated");
     } catch (saveError) {
       setError(
         saveError instanceof Error
           ? saveError.message
-          : "Could not save your Goofy Guy. Try again.",
+          : "Could not save your Scrib. Try again.",
       );
     } finally {
       setSaving(false);
@@ -5036,7 +5050,7 @@ function Wardrobe({
       <AvatarCustomizer value={draft} onChange={setDraft} ownedPremiumIds={avatarInventory} />
       <div className="wardrobe-actions">
         <button className="primary-button" onClick={() => void save()} disabled={saving}>
-          {saving ? "saving…" : "save goofy guy"}
+          {saving ? "saving…" : "save Scrib"}
         </button>
         <button type="button" className="wardrobe-shop-link" onClick={() => navigate("shop")}>
           browse more looks in the shop <Icon name="external" size={11} />
