@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { publishWebsite, updateDirectoryIndex, PUBLISHABLE_FILE_NAME, type DirectoryBuild } from "@/app/lib/github";
 import { decryptSession, SESSION_COOKIE } from "@/app/lib/session";
+import { logAudit } from "@/app/lib/audit";
 import {
   completeSubmissionAddress,
   completeSubmissionProfile,
@@ -61,10 +62,20 @@ export async function POST(request: NextRequest) {
     await getSql()`UPDATE publications SET hca_address_id=${addressId}
       WHERE match_id=${matchId} AND published_by=${session.user.id}`;
     await getSql()`UPDATE match_players SET finished_at=NOW() WHERE match_id=${matchId} AND user_id=${session.user.id}`;
-    await getSql()`UPDATE matches SET status='voting',voting_ends_at=NOW()+INTERVAL '24 hours'
+    const votingOpened = await getSql()`UPDATE matches SET status='voting',voting_ends_at=NOW()+INTERVAL '24 hours'
       WHERE id=${matchId} AND status='active'
         AND (SELECT COUNT(*) FROM publications WHERE match_id=${matchId})=(SELECT COUNT(*) FROM match_players WHERE match_id=${matchId})
-        AND (SELECT COUNT(DISTINCT team) FROM publications WHERE match_id=${matchId})=2`;
+        AND (SELECT COUNT(DISTINCT team) FROM publications WHERE match_id=${matchId})=2
+      RETURNING id`;
+    if (votingOpened.length) {
+      await logAudit({
+        actor: null,
+        action: "match.ended",
+        summary: `A match ("${player.theme}") ended — every player published, community voting is open`,
+        targetType: "match",
+        targetId: matchId,
+      });
+    }
 
     const builds = await getSql()`SELECT p.github_repo AS "folderName", m.theme, p.created_at AS "publishedAt"
       FROM publications p JOIN matches m ON m.id=p.match_id

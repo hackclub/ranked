@@ -11,6 +11,7 @@
   --orange: #d99f6c;
   --red: #bf5a5a;
   --red-strong: #ad5252;
+  --purple: #a68cd9;
   --paper: #fffdf0;
   --line: #2c2b29;
   --blob: 255px 20px 225px 20px / 20px 225px 15px 255px;
@@ -3234,6 +3235,9 @@ select:focus-visible {
 }
 .audit-tag-shop {
   background: var(--green);
+}
+.audit-tag-vote {
+  background: var(--purple);
 }
 .audit-body p {
   margin: 0;

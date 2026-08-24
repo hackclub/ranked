@@ -25,19 +25,40 @@ export async function POST(request: NextRequest) {
     );
   }
   const body = await request.json();
-  const mode = body.mode === "duo" ? "duo" : "solo";
-  const duration = [10, 30, 60].includes(Number(body.durationMinutes)) ? Number(body.durationMinutes) : 10;
+  const requestedMode = body.mode === "duo" ? "duo" : "solo";
+  const requestedDuration = [10, 30, 60].includes(Number(body.durationMinutes)) ? Number(body.durationMinutes) : 10;
   const experience = ["beginner", "intermediate", "expert"].includes(body.experience) ? body.experience : user.experience;
   if (!experience) return NextResponse.json({ error: "Choose your experience level first.", code: "onboarding_required" }, { status: 400 });
   const voteGate = await getVoteGate(user.id, user.matchesPlayed);
   if (voteGate.due) {
     return NextResponse.json({ error: "Vote on a finished match to keep playing.", code: "vote_required" }, { status: 403 });
   }
-  const acceptedPartner = mode === "duo" ? await getSql()`
-    SELECT (CASE WHEN from_user_id=${user.id} THEN to_user_id ELSE from_user_id END) AS "partnerId"
+
+  // An accepted duo partner is the authority on match settings, resolved
+  // here rather than trusted from either client — that's the only way to
+  // guarantee two partnered players can never queue with different
+  // mode/duration. The creator's request re-persists their chosen duration;
+  // the joiner's request ignores whatever it sent and uses that value.
+  const partnerRow = await getSql()`
+    SELECT id, from_user_id AS "fromUserId",
+      (CASE WHEN from_user_id=${user.id} THEN to_user_id ELSE from_user_id END) AS "partnerId",
+      duration_minutes AS "durationMinutes"
     FROM duo_invites WHERE status='accepted' AND (from_user_id=${user.id} OR to_user_id=${user.id}) LIMIT 1
-  ` : [];
-  let partnerId = acceptedPartner[0]?.partnerId as string | undefined;
+  `;
+  const partnership = partnerRow[0] as
+    | { id: string; fromUserId: string; partnerId: string; durationMinutes: number }
+    | undefined;
+  const mode = partnership ? "duo" : requestedMode;
+  let duration = requestedDuration;
+  if (partnership) {
+    if (partnership.fromUserId === user.id) {
+      await getSql()`UPDATE duo_invites SET duration_minutes=${requestedDuration}, updated_at=NOW() WHERE id=${partnership.id}`;
+      duration = requestedDuration;
+    } else {
+      duration = partnership.durationMinutes;
+    }
+  }
+  let partnerId = partnership?.partnerId as string | undefined;
   let partyKey = partnerId ? [user.id, partnerId].sort().join(":") : null;
 
   // Duo player readied up with their partner slot open: auto-pair them with another
@@ -64,8 +85,8 @@ export async function POST(request: NextRequest) {
           AND (di.from_user_id IN (${user.id}, key."partnerId") OR di.to_user_id IN (${user.id}, key."partnerId"))
         RETURNING 1
       ), invite AS (
-        INSERT INTO duo_invites (id, from_user_id, to_user_id, status)
-        SELECT ${crypto.randomUUID()}, ${user.id}, "partnerId", 'accepted' FROM key
+        INSERT INTO duo_invites (id, from_user_id, to_user_id, status, duration_minutes)
+        SELECT ${crypto.randomUUID()}, ${user.id}, "partnerId", 'accepted', ${duration} FROM key
         RETURNING 1
       ), claimed AS (
         UPDATE matchmaking_queue q SET party_key = key."partyKey"

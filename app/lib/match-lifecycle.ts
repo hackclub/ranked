@@ -30,7 +30,7 @@ const THEME_FORMATS = [
   "a fortune-telling site",
   "a pet adoption site",
   "an app that tracks {noun}",
-  "a new york times article"
+  "a new york times game"
 ];
 
 const THEME_ENTITIES = [
@@ -51,7 +51,7 @@ const THEME_ENTITIES = [
   "a talking vending machine",
   "a cat running for mayor",
   "a medieval knight",
-  "a robot",
+  "a robot who is actually a real boy",
   "an octopus who plays the drums",
   "garden gnomes",
   "a giant",
@@ -72,7 +72,7 @@ const THEME_NOUNS = [
   "moon water",
   "haunted socks",
   "sentient soup",
-  "glow-in-the-dark gravel",
+  "glow-in-the-dark eyeballs",
   "malicious rubber ducks",
   "artisanal trashcans",
   "electronic dance music",

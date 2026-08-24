@@ -1,0 +1,1 @@
+ALTER TABLE "duo_invites" ADD COLUMN "duration_minutes" integer DEFAULT 30 NOT NULL;

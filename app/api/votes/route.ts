@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { logAudit } from "@/app/lib/audit";
 import { currentUser } from "@/app/lib/current-user";
 import { addChallengeProgress } from "@/app/lib/progression";
 import { getVoteGate } from "@/app/lib/vote-gate";
@@ -30,8 +31,18 @@ export async function POST(request: NextRequest) {
     AND NOT EXISTS (SELECT 1 FROM match_players WHERE match_id=m.id AND user_id=${user.id})
     AND (SELECT COUNT(DISTINCT team)::int FROM publications WHERE match_id=m.id)=2`;
   if (!eligible.length) return NextResponse.json({ error: "You cannot vote on this match." }, { status: 403 });
-  await getSql()`INSERT INTO votes (id, match_id, voter_id, choice) VALUES (${crypto.randomUUID()},${matchId},${user.id},${choice}::match_team)
-    ON CONFLICT (match_id,voter_id) DO NOTHING`;
+  const inserted = await getSql()`INSERT INTO votes (id, match_id, voter_id, choice) VALUES (${crypto.randomUUID()},${matchId},${user.id},${choice}::match_team)
+    ON CONFLICT (match_id,voter_id) DO NOTHING RETURNING id`;
+  if (inserted.length) {
+    await logAudit({
+      actor: { id: user.id, name: user.name, email: user.email },
+      action: "vote.cast",
+      summary: `${user.name} voted for the ${choice} team's build`,
+      targetType: "match",
+      targetId: matchId,
+      metadata: { choice },
+    });
+  }
   const threshold = Math.max(1, Number(process.env.VOTES_TO_FINALIZE ?? 3));
   const result = await getSql()`SELECT COUNT(*)::int AS total,
     COUNT(*) FILTER (WHERE choice='blue')::int AS blue, COUNT(*) FILTER (WHERE choice='red')::int AS red FROM votes WHERE match_id=${matchId}`;
@@ -39,7 +50,7 @@ export async function POST(request: NextRequest) {
   if (Number(tally.total) >= threshold) {
     const winner = Number(tally.blue) >= Number(tally.red) ? "blue" : "red";
     const claimed = await getSql()`UPDATE matches SET status='finalizing', winning_team=${winner}::match_team
-      WHERE id=${matchId} AND status='voting' RETURNING id`;
+      WHERE id=${matchId} AND status='voting' RETURNING id, theme, mode`;
     if (claimed.length) {
       await getSql().transaction([
         getSql()`WITH team_averages AS (
@@ -64,6 +75,18 @@ export async function POST(request: NextRequest) {
       ]);
       const players = await getSql()`SELECT user_id FROM match_players WHERE match_id=${matchId}`;
       await Promise.all(players.map(row => addChallengeProgress(String(row.user_id), "play_matches", 1)));
+
+      const roster = await getSql()`SELECT u.name, mp.team FROM match_players mp JOIN users u ON u.id=mp.user_id WHERE mp.match_id=${matchId}`;
+      const winners = roster.filter((row) => row.team === winner).map((row) => row.name).join(" & ");
+      const losers = roster.filter((row) => row.team !== winner).map((row) => row.name).join(" & ");
+      await logAudit({
+        actor: null,
+        action: "match.decided",
+        summary: `Community vote decided a ${claimed[0].mode} match ("${claimed[0].theme}"): ${winners || "the " + winner + " team"} beat ${losers || "the other team"} (blue ${tally.blue}–red ${tally.red})`,
+        targetType: "match",
+        targetId: matchId,
+        metadata: { winner, tally },
+      });
     }
   }
   return NextResponse.json({ ok: true, tally });

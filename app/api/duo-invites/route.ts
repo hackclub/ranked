@@ -2,7 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { currentUser } from "@/app/lib/current-user";
 import { getSql } from "@/db";
 
-type InvitePartner = { id: string; partnerId: string; partnerName: string; partnerAvatar: { color: string; eyes: number; mouths: number }; partnerQueued?: boolean };
+type InvitePartner = {
+  id: string;
+  partnerId: string;
+  partnerName: string;
+  partnerAvatar: { color: string; eyes: number; mouths: number };
+  partnerQueued?: boolean;
+  isCreator?: boolean;
+  durationMinutes?: number;
+};
 type MissedInvite = { id: string; partnerName: string; partnerAvatar: { color: string; eyes: number; mouths: number } };
 
 export async function GET(request: NextRequest) {
@@ -12,6 +20,7 @@ export async function GET(request: NextRequest) {
   const [partner, outgoing, incoming, missed] = await Promise.all([
     sql`SELECT di.id, (CASE WHEN di.from_user_id=${user.id} THEN di.to_user_id ELSE di.from_user_id END) AS "partnerId",
         u.name AS "partnerName", u.avatar AS "partnerAvatar",
+        (di.from_user_id=${user.id}) AS "isCreator", di.duration_minutes AS "durationMinutes",
         EXISTS(SELECT 1 FROM matchmaking_queue q WHERE q.user_id = (CASE WHEN di.from_user_id=${user.id} THEN di.to_user_id ELSE di.from_user_id END)) AS "partnerQueued"
       FROM duo_invites di JOIN users u ON u.id = (CASE WHEN di.from_user_id=${user.id} THEN di.to_user_id ELSE di.from_user_id END)
       WHERE di.status='accepted' AND (di.from_user_id=${user.id} OR di.to_user_id=${user.id})
@@ -37,8 +46,9 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const user = await currentUser(request);
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const { friendId } = await request.json() as { friendId?: string };
+  const { friendId, durationMinutes } = await request.json() as { friendId?: string; durationMinutes?: number };
   if (!friendId || friendId === user.id) return NextResponse.json({ error: "Choose a friend to invite." }, { status: 400 });
+  const duration = [10, 30, 60].includes(Number(durationMinutes)) ? Number(durationMinutes) : 30;
   const sql = getSql();
   const friendship = await sql`SELECT 1 FROM friendships WHERE status='accepted'
     AND ((requester_id=${user.id} AND addressee_id=${friendId}) OR (requester_id=${friendId} AND addressee_id=${user.id}))`;
@@ -57,17 +67,31 @@ export async function POST(request: NextRequest) {
   }
 
   await sql`DELETE FROM duo_invites WHERE status IN ('pending','accepted') AND (from_user_id=${user.id} OR to_user_id=${user.id})`;
-  const inserted = await sql`INSERT INTO duo_invites (id, from_user_id, to_user_id) VALUES (${crypto.randomUUID()}, ${user.id}, ${friendId}) RETURNING id`;
+  const inserted = await sql`INSERT INTO duo_invites (id, from_user_id, to_user_id, duration_minutes) VALUES (${crypto.randomUUID()}, ${user.id}, ${friendId}, ${duration}) RETURNING id`;
   return NextResponse.json({ outgoing: { id: inserted[0].id, partnerId: friendId, partnerName: friend[0].name, partnerAvatar: friend[0].avatar } });
 }
 
 export async function PATCH(request: NextRequest) {
   const user = await currentUser(request);
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const { inviteId, action } = await request.json() as { inviteId?: string; action?: string };
-  if (!inviteId || (action !== "accept" && action !== "decline" && action !== "acknowledge"))
-    return NextResponse.json({ error: "Invalid request." }, { status: 400 });
+  const { inviteId, action, durationMinutes } = await request.json() as {
+    inviteId?: string;
+    action?: string;
+    durationMinutes?: number;
+  };
+  if (!inviteId) return NextResponse.json({ error: "Invalid request." }, { status: 400 });
   const sql = getSql();
+  // Only the duo's creator (from_user_id) can change match settings — the
+  // joiner's client never sends this, but the check is enforced here too.
+  if (durationMinutes !== undefined) {
+    if (![10, 30, 60].includes(Number(durationMinutes)))
+      return NextResponse.json({ error: "Invalid match length." }, { status: 400 });
+    await sql`UPDATE duo_invites SET duration_minutes=${Number(durationMinutes)}, updated_at=NOW()
+      WHERE id=${inviteId} AND from_user_id=${user.id} AND status IN ('pending','accepted')`;
+    return NextResponse.json({ ok: true });
+  }
+  if (action !== "accept" && action !== "decline" && action !== "acknowledge")
+    return NextResponse.json({ error: "Invalid request." }, { status: 400 });
   if (action === "acknowledge") {
     await sql`UPDATE duo_invites SET status='declined', updated_at=NOW() WHERE id=${inviteId} AND to_user_id=${user.id} AND status='missed'`;
     return NextResponse.json({ ok: true });

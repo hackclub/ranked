@@ -1647,6 +1647,8 @@ type DuoInvitePartner = {
   partnerName: string;
   partnerAvatar: AvatarConfig;
   partnerQueued?: boolean;
+  isCreator?: boolean;
+  durationMinutes?: number;
 };
 type DuoInviteState = {
   partner: DuoInvitePartner | null;
@@ -1730,11 +1732,22 @@ function Lobby({
     [mic, micDeviceId, navigate, onMatched, toast, video, videoDeviceId],
   );
 
+  // Only the duo's creator picks match settings — a joiner queues for
+  // whatever duration the creator set, synced from the server, rather than
+  // their own local (possibly stale) selection.
+  const isDuoJoiner = Boolean(
+    mode === "duo" && duoState.partner && duoState.partner.isCreator === false,
+  );
+  const effectiveLength =
+    isDuoJoiner && duoState.partner?.durationMinutes
+      ? duoState.partner.durationMinutes
+      : length;
+
   const ready = async () => {
     if (matching) {
       setMatching(false);
       await fetch("/api/matchmaking/queue", { method: "DELETE" });
-      toast("Left the queue, change anything and ready up again");
+      toast("Left the matchmaking queue");
       return;
     }
     setMatching(true);
@@ -1746,7 +1759,7 @@ function Lobby({
     const response = await fetch("/api/matchmaking/queue", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode, durationMinutes: length, experience }),
+      body: JSON.stringify({ mode, durationMinutes: effectiveLength, experience }),
     });
     const result = await response.json();
     if (result.code === "hackatime_required") {
@@ -1765,7 +1778,7 @@ function Lobby({
     const response = await fetch("/api/matchmaking/test-match", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ durationMinutes: length, mode }),
+      body: JSON.stringify({ durationMinutes: effectiveLength, mode }),
     });
     const result = await response.json();
     if (result.code === "hackatime_required") {
@@ -1925,7 +1938,7 @@ function Lobby({
     const response = await fetch("/api/duo-invites", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ friendId }),
+      body: JSON.stringify({ friendId, durationMinutes: length }),
     });
     const result = await response.json();
     setInviteBusy(false);
@@ -1933,6 +1946,21 @@ function Lobby({
     setDuoState((current) => ({ ...current, outgoing: result.outgoing }));
     toast(`Invite sent to ${result.outgoing.partnerName}`);
   };
+
+  // The creator's chosen match length is the single source of truth once a
+  // duo is formed — push it to the invite row whenever it changes (or the
+  // instant a partner accepts) so the joiner's lobby, which can't change
+  // this itself, always reflects the creator's real setting.
+  const partnerInviteId = duoState.partner?.id;
+  const isDuoCreator = duoState.partner?.isCreator === true;
+  useEffect(() => {
+    if (!isDuoCreator || !partnerInviteId) return;
+    void fetch("/api/duo-invites", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ inviteId: partnerInviteId, durationMinutes: length }),
+    });
+  }, [isDuoCreator, partnerInviteId, length]);
 
   const cancelDuo = async () => {
     await fetch("/api/duo-invites", { method: "DELETE" });
@@ -2041,7 +2069,7 @@ function Lobby({
                       className="invite-cancel"
                       onClick={() => void cancelDuo()}
                     >
-                      kick
+                      {isDuoJoiner ? "leave duo" : "kick"}
                     </button>
                   </>
                 ) : duoState.outgoing ? (
@@ -2147,44 +2175,48 @@ function Lobby({
         </section>
 
         <aside className="hud-panel hud-panel-right">
-          <div className="hud-block">
-            <span className="hud-label">team size</span>
-            <div className="segmented">
-              <button
-                className={mode === "solo" ? "active" : ""}
-                onClick={() => setMode("solo")}
-              >
-                <Icon name="person" size={18} />
-                <span>
-                  solo<small>1 vs 1</small>
-                </span>
-              </button>
-              <button
-                className={mode === "duo" ? "active" : ""}
-                onClick={() => setMode("duo")}
-              >
-                <Icon name="people" size={18} />
-                <span>
-                  duos<small>2 vs 2</small>
-                </span>
-              </button>
-            </div>
-          </div>
-          <div className="hud-block">
-            <span className="hud-label">match length</span>
-            <div className="time-options">
-              {[10, 30, 60].map((time) => (
+          {!isDuoJoiner && (
+            <div className="hud-block">
+              <span className="hud-label">team size</span>
+              <div className="segmented">
                 <button
-                  key={time}
-                  className={length === time ? "active" : ""}
-                  onClick={() => setLength(time)}
+                  className={mode === "solo" ? "active" : ""}
+                  onClick={() => setMode("solo")}
                 >
-                  <strong>{time}</strong>
-                  <small>min</small>
+                  <Icon name="person" size={18} />
+                  <span>
+                    solo<small>1 vs 1</small>
+                  </span>
                 </button>
-              ))}
+                <button
+                  className={mode === "duo" ? "active" : ""}
+                  onClick={() => setMode("duo")}
+                >
+                  <Icon name="people" size={18} />
+                  <span>
+                    duos<small>2 vs 2</small>
+                  </span>
+                </button>
+              </div>
             </div>
-          </div>
+          )}
+          {!isDuoJoiner && (
+            <div className="hud-block">
+              <span className="hud-label">match length</span>
+              <div className="time-options">
+                {[10, 30, 60].map((time) => (
+                  <button
+                    key={time}
+                    className={length === time ? "active" : ""}
+                    onClick={() => setLength(time)}
+                  >
+                    <strong>{time}</strong>
+                    <small>min</small>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="hud-block hud-block-tight">
             <span className="hud-label">camera & microphone</span>
             <div className="camera-preview h-[20vh]">
@@ -4604,6 +4636,7 @@ const AUDIT_CATEGORY_LABELS: Record<string, string> = {
   match: "match",
   report: "report",
   shop: "shop",
+  vote: "vote",
 };
 
 type AuditEntry = {

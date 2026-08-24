@@ -92,6 +92,13 @@
       "when": 1787259832136,
       "tag": "0012_good_hex",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1787595464545,
+      "tag": "0013_huge_blade",
+      "breakpoints": true
     }
   ]
 }

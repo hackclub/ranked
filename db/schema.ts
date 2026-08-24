@@ -113,6 +113,10 @@ export const duoInvites = pgTable("duo_invites", {
   fromUserId: text("from_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   toUserId: text("to_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   status: duoInviteStatusEnum("status").notNull().default("pending"),
+  // Set by the inviter (from_user_id) and synced to the joiner — only the
+  // duo's creator may change match settings, so this is the single source
+  // of truth both players' lobbies read from once the invite is accepted.
+  durationMinutes: integer("duration_minutes").notNull().default(30),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, table => [index("duo_invites_from_idx").on(table.fromUserId), index("duo_invites_to_idx").on(table.toUserId)]);
