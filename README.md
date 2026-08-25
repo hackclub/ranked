@@ -19,6 +19,19 @@ npm run db:wipe-users -- --confirm WIPE_ALL_USER_DATA
 
 The command prints the database hostname and name before deleting anything. It does not delete published GitHub repositories or external Liveblocks rooms.
 
+To permanently remove every match while preserving user accounts and their
+current ELO, balances, coding totals, challenges, friendships, connections, and
+shop orders, run:
+
+```bash
+npm run db:clear-matches -- --confirm CLEAR_ALL_MATCHES
+```
+
+This also clears the matchmaking queue. Match players, votes, ELO ledger rows,
+publications, reports, and snapshots are removed automatically through their
+match foreign keys. Published GitHub repositories, Airtable submissions, and
+external Liveblocks rooms are not deleted.
+
 ## Vercel deployment
 
 The project uses vinext with Nitro's Vercel adapter. `vercel.json` runs the Vercel preset, which emits the Build Output API bundle in `.vercel/output` with a server function for the homepage and every API route.

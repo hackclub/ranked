@@ -109,6 +109,29 @@ type DashboardData = {
   globalRank: number | null;
 };
 
+const INTERACTIVE_REQUEST_TIMEOUT_MS = 12_000;
+
+async function fetchJsonWithTimeout<T>(
+  input: RequestInfo | URL,
+  init: RequestInit = {},
+  timeoutMs = INTERACTIVE_REQUEST_TIMEOUT_MS,
+) {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(input, { ...init, signal: controller.signal });
+    const data = (await response.json().catch(() => ({}))) as T;
+    return { response, data };
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("The server took too long to respond.");
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
 function msUntilNextUtcMidnight() {
   const now = new Date();
   const next = Date.UTC(
@@ -1689,6 +1712,9 @@ function Lobby({
   const [micDeviceId, setMicDeviceId] = useState("");
   const [videoDeviceId, setVideoDeviceId] = useState("");
   const [matching, setMatching] = useState(false);
+  const [matchingPhase, setMatchingPhase] = useState(
+    "contacting matchmaking service…",
+  );
   const [experienceOpen, setExperienceOpen] = useState(false);
   const [experience, setExperience] = useState<Experience>(
     user.experience ?? "beginner",
@@ -1720,22 +1746,45 @@ function Lobby({
   const acceptQueueResult = useCallback(
     (result: {
       status?: string;
+      phase?: string;
       match?: ActiveMatch;
       error?: string;
       code?: string;
-    }) => {
-      if (result.match)
-        return onMatched(result.match, {
+    }, fromPoll = false) => {
+      if (result.match) {
+        onMatched(result.match, {
           mic,
           video,
           micDeviceId: micDeviceId || undefined,
           videoDeviceId: videoDeviceId || undefined,
         });
+        return "matched" as const;
+      }
       if (result.code === "vote_required") {
         setMatching(false);
         toast(result.error ?? "Vote required");
         navigate("vote");
+        return "stopped" as const;
       }
+      if (result.status === "queued") {
+        setMatchingPhase(
+          result.phase === "waiting_for_teammate"
+            ? "waiting for your teammate to ready up…"
+            : result.phase === "finding_teammate"
+              ? "finding a compatible teammate…"
+              : result.phase === "waiting_for_opponents"
+                ? "team ready — finding another duo…"
+                : "searching for compatible players…",
+        );
+        return "queued" as const;
+      }
+      if (result.status === "idle") {
+        setMatching(false);
+        setMatchingPhase("contacting matchmaking service…");
+        if (fromPoll) toast("Matchmaking stopped — ready up again");
+        return "stopped" as const;
+      }
+      return "stopped" as const;
     },
     [mic, micDeviceId, navigate, onMatched, toast, video, videoDeviceId],
   );
@@ -1750,66 +1799,151 @@ function Lobby({
     isDuoJoiner && duoState.partner?.durationMinutes
       ? duoState.partner.durationMinutes
       : length;
+  const hasPendingDuoInvite = Boolean(
+    mode === "duo" && (duoState.outgoing || duoState.incoming.length > 0),
+  );
 
   const ready = async () => {
     if (matching) {
       setMatching(false);
-      await fetch("/api/matchmaking/queue", { method: "DELETE" });
-      toast("Left the matchmaking queue");
+      setMatchingPhase("contacting matchmaking service…");
+      try {
+        const { response } = await fetchJsonWithTimeout(
+          "/api/matchmaking/queue",
+          { method: "DELETE" },
+        );
+        toast(
+          response.ok
+            ? "Left the matchmaking queue"
+            : "You left locally, but the server cleanup needs another try",
+        );
+      } catch {
+        toast("You left locally, but the server cleanup needs another try");
+      }
+      return;
+    }
+    if (hasPendingDuoInvite) {
+      toast("Respond to or cancel the pending duo invite first");
       return;
     }
     setMatching(true);
-    await fetch("/api/profile", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ experience }),
-    });
-    const response = await fetch("/api/matchmaking/queue", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode, durationMinutes: effectiveLength, experience }),
-    });
-    const result = await response.json();
-    if (result.code === "hackatime_required") {
-      window.location.assign("/api/auth/hackatime/start");
-      return;
-    }
-    if (!response.ok && result.code !== "vote_required") {
+    setMatchingPhase("contacting matchmaking service…");
+    try {
+      const profile = await fetchJsonWithTimeout<{ error?: string }>(
+        "/api/profile",
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ experience }),
+        },
+      );
+      if (!profile.response.ok) {
+        throw new Error(profile.data.error ?? "Could not save your settings.");
+      }
+      const { response, data: result } = await fetchJsonWithTimeout<{
+        status?: string;
+        phase?: string;
+        match?: ActiveMatch;
+        error?: string;
+        code?: string;
+      }>("/api/matchmaking/queue", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode,
+          durationMinutes: effectiveLength,
+          experience,
+        }),
+      });
+      if (result.code === "hackatime_required") {
+        setMatching(false);
+        window.location.assign("/api/auth/hackatime/start");
+        return;
+      }
+      if (!response.ok && result.code !== "vote_required") {
+        throw new Error(result.error ?? "Could not join the queue");
+      }
+      acceptQueueResult(result);
+    } catch (error) {
       setMatching(false);
-      toast(result.error ?? "Could not join the queue");
-      return;
+      setMatchingPhase("contacting matchmaking service…");
+      toast(
+        error instanceof Error
+          ? error.message
+          : "Could not join the queue — check your connection",
+      );
     }
-    acceptQueueResult(result);
   };
 
   const testEmptyLobby = async () => {
-    const response = await fetch("/api/matchmaking/test-match", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ durationMinutes: effectiveLength, mode }),
-    });
-    const result = await response.json();
-    if (result.code === "hackatime_required") {
-      window.location.assign("/api/auth/hackatime/start");
-      return;
+    try {
+      const { response, data: result } = await fetchJsonWithTimeout<{
+        code?: string;
+        error?: string;
+        status?: string;
+        phase?: string;
+        match?: ActiveMatch;
+      }>("/api/matchmaking/test-match", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ durationMinutes: effectiveLength, mode }),
+      });
+      if (result.code === "hackatime_required") {
+        window.location.assign("/api/auth/hackatime/start");
+        return;
+      }
+      if (!response.ok)
+        return toast(result.error ?? "Could not start a test lobby");
+      acceptQueueResult(result);
+    } catch (error) {
+      toast(
+        error instanceof Error
+          ? error.message
+          : "Could not start a test lobby",
+      );
     }
-    if (!response.ok)
-      return toast(result.error ?? "Could not start a test lobby");
-    acceptQueueResult(result);
   };
 
   useEffect(() => {
     if (!matching) return;
-    const poll = window.setInterval(
-      () =>
-        fetch("/api/matchmaking/queue")
-          .then((response) => response.json())
-          .then(acceptQueueResult)
-          .catch(() => undefined),
-      2000,
-    );
-    return () => window.clearInterval(poll);
-  }, [acceptQueueResult, matching]);
+    let cancelled = false;
+    let pollTimer = 0;
+    const poll = async () => {
+      try {
+        const { response, data } = await fetchJsonWithTimeout<{
+          status?: string;
+          phase?: string;
+          match?: ActiveMatch;
+          error?: string;
+          code?: string;
+        }>("/api/matchmaking/queue");
+        if (cancelled) return;
+        if (!response.ok) {
+          setMatching(false);
+          toast(data.error ?? "Matchmaking stopped — ready up again");
+          return;
+        }
+        const state = acceptQueueResult(data, true);
+        if (state === "queued" && !cancelled) {
+          pollTimer = window.setTimeout(poll, 2000);
+        }
+      } catch (error) {
+        if (cancelled) return;
+        setMatching(false);
+        setMatchingPhase("contacting matchmaking service…");
+        toast(
+          error instanceof Error
+            ? `${error.message} Ready up to try again.`
+            : "Matchmaking lost connection — ready up to try again",
+        );
+      }
+    };
+    pollTimer = window.setTimeout(poll, 2000);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(pollTimer);
+    };
+  }, [acceptQueueResult, matching, toast]);
 
   // Navigating away from the lobby while queued is treated the same as
   // clicking "ready up" again to cancel — leaving the queue server-side
@@ -1941,35 +2075,57 @@ function Lobby({
       .catch(() => undefined);
   }, []);
 
-  const fetchDuoState = useCallback(() => {
-    fetch("/api/duo-invites")
-      .then((response) => response.json())
-      .then(setDuoState)
-      .catch(() => undefined);
+  const duoPollInFlight = useRef(false);
+  const fetchDuoState = useCallback(async () => {
+    if (duoPollInFlight.current) return;
+    duoPollInFlight.current = true;
+    try {
+      const { response, data } = await fetchJsonWithTimeout<
+        DuoInviteState & { error?: string }
+      >("/api/duo-invites", {}, 8000);
+      if (!response.ok) throw new Error(data.error ?? "Could not load your duo");
+      setDuoState(data);
+    } catch {
+      // The next bounded poll retries. Avoid replacing a known partner with an
+      // empty state just because one request failed.
+    } finally {
+      duoPollInFlight.current = false;
+    }
   }, []);
 
   useEffect(() => {
     if (mode !== "duo") return;
-    fetchDuoState();
+    const initialPoll = window.setTimeout(() => void fetchDuoState(), 0);
     const poll = window.setInterval(fetchDuoState, 3000);
-    return () => window.clearInterval(poll);
+    return () => {
+      window.clearTimeout(initialPoll);
+      window.clearInterval(poll);
+    };
   }, [fetchDuoState, mode]);
 
   const sendInvite = async (friendId: string) => {
+    if (inviteBusy || matching) return;
     setInviteBusy(true);
     try {
-      const response = await fetch("/api/duo-invites", {
+      const { response, data: result } = await fetchJsonWithTimeout<{
+        outgoing?: DuoInvitePartner;
+        error?: string;
+      }>("/api/duo-invites", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ friendId, durationMinutes: length }),
       });
-      const result = await response.json().catch(() => null);
-      if (!response.ok || !result?.outgoing)
-        return toast(result?.error ?? "Could not send invite");
-      setDuoState((current) => ({ ...current, outgoing: result.outgoing }));
-      toast(`Invite sent to ${result.outgoing.partnerName}`);
-    } catch {
-      toast("Could not send invite — check your connection");
+      if (!response.ok || !result.outgoing)
+        return toast(result.error ?? "Could not send invite");
+      const outgoing = result.outgoing;
+      setDuoState((current) => ({ ...current, outgoing }));
+      toast(`Invite sent to ${outgoing.partnerName}`);
+    } catch (error) {
+      toast(
+        error instanceof Error
+          ? error.message
+          : "Could not send invite — check your connection",
+      );
     } finally {
       setInviteBusy(false);
     }
@@ -1983,16 +2139,36 @@ function Lobby({
   const isDuoCreator = duoState.partner?.isCreator === true;
   useEffect(() => {
     if (!isDuoCreator || !partnerInviteId) return;
-    void fetch("/api/duo-invites", {
+    let cancelled = false;
+    void fetchJsonWithTimeout<{ error?: string }>("/api/duo-invites", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ inviteId: partnerInviteId, durationMinutes: length }),
+    }).then(({ response, data }) => {
+      if (!cancelled && !response.ok) {
+        toast(data.error ?? "Could not sync the match length");
+      }
+    }).catch(() => {
+      if (!cancelled) toast("Could not sync the match length");
     });
-  }, [isDuoCreator, partnerInviteId, length]);
+    return () => {
+      cancelled = true;
+    };
+  }, [isDuoCreator, partnerInviteId, length, toast]);
 
   const cancelDuo = async () => {
-    await fetch("/api/duo-invites", { method: "DELETE" });
-    setDuoState({ partner: null, outgoing: null, incoming: [] });
+    try {
+      const { response, data } = await fetchJsonWithTimeout<{ error?: string }>(
+        "/api/duo-invites",
+        { method: "DELETE" },
+      );
+      if (!response.ok) throw new Error(data.error ?? "Could not leave the duo");
+      setMatching(false);
+      setMatchingPhase("contacting matchmaking service…");
+      setDuoState({ partner: null, outgoing: null, incoming: [] });
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Could not leave the duo");
+    }
   };
 
   const leaveLobby = async () => {
@@ -2028,6 +2204,7 @@ function Lobby({
             <button
               className={`primary-button match-dock-button ${matching ? "matching" : ""}`}
               onClick={() => void ready()}
+              disabled={!matching && hasPendingDuoInvite}
             >
               {matching ? (
                 <>
@@ -2041,7 +2218,7 @@ function Lobby({
             </button>
             {matching && (
               <p className="match-dock-status">
-                <i className="dock-dot" /> contacting matchmaking service…
+                <i className="dock-dot" /> {matchingPhase}
               </p>
             )}
             {isAdmin(user.email) && !matching && (
@@ -2124,6 +2301,7 @@ function Lobby({
                       className="invite-plus"
                       aria-label="Invite a friend to duo"
                       aria-expanded={addOpen}
+                      disabled={matching}
                       onClick={() =>
                         addOpen ? closeInvitePopover() : setAddOpen(true)
                       }
@@ -2209,6 +2387,7 @@ function Lobby({
               <div className="segmented">
                 <button
                   className={mode === "solo" ? "active" : ""}
+                  disabled={matching}
                   onClick={() => setMode("solo")}
                 >
                   <Icon name="person" size={18} />
@@ -2218,6 +2397,7 @@ function Lobby({
                 </button>
                 <button
                   className={mode === "duo" ? "active" : ""}
+                  disabled={matching}
                   onClick={() => setMode("duo")}
                 >
                   <Icon name="people" size={18} />
@@ -2236,6 +2416,7 @@ function Lobby({
                   <button
                     key={time}
                     className={length === time ? "active" : ""}
+                    disabled={matching}
                     onClick={() => setLength(time)}
                   >
                     <strong>{time}</strong>
@@ -4715,7 +4896,8 @@ function AdminAuditLog({ navigate }: { navigate: (s: Screen) => void }) {
   // page 6 of an unfiltered feed would otherwise land past the end of a
   // narrower filtered result set.
   useEffect(() => {
-    setRequestedPage(null);
+    const resetPage = window.setTimeout(() => setRequestedPage(null), 0);
+    return () => window.clearTimeout(resetPage);
   }, [query, fromDate, toDate]);
 
   // Debouncing narrows the race but doesn't close it — two requests can still
@@ -5602,9 +5784,15 @@ export default function RankedApp() {
   >([]);
   const acknowledgingMissed = useRef<Set<string>>(new Set());
 
+  const globalInvitePollInFlight = useRef(false);
   const pollDuoInvites = useCallback(() => {
-    fetch("/api/duo-invites")
-      .then((response) => (response.ok ? response.json() : null))
+    if (globalInvitePollInFlight.current) return;
+    globalInvitePollInFlight.current = true;
+    fetchJsonWithTimeout<{
+      incoming?: Array<{ id: string; partnerName: string; partnerAvatar: AvatarConfig }>;
+      missed?: Array<{ id: string; partnerName: string; partnerAvatar: AvatarConfig }>;
+    } & { error?: string }>("/api/duo-invites", {}, 8000)
+      .then(({ response, data }) => (response.ok ? data : null))
       .then(
         (
           data: {
@@ -5629,7 +5817,10 @@ export default function RankedApp() {
           }
         },
       )
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => {
+        globalInvitePollInFlight.current = false;
+      });
   }, [screen, toast]);
 
   useEffect(() => {
@@ -5642,13 +5833,16 @@ export default function RankedApp() {
   const respondToInvite = useCallback(
     async (inviteId: string, action: "accept" | "decline") => {
       try {
-        const response = await fetch("/api/duo-invites", {
+        const { response, data } = await fetchJsonWithTimeout<{ error?: string }>(
+          "/api/duo-invites",
+          {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ inviteId, action }),
-        });
+          },
+        );
         if (!response.ok) {
-          toast("Could not respond to that invite");
+          toast(data.error ?? "Could not respond to that invite");
           return;
         }
         setIncomingInvites((current) =>
@@ -5658,8 +5852,12 @@ export default function RankedApp() {
           toast("You're teamed up!");
           navigate("lobby");
         }
-      } catch {
-        toast("Could not respond to that invite — check your connection");
+      } catch (error) {
+        toast(
+          error instanceof Error
+            ? error.message
+            : "Could not respond to that invite — check your connection",
+        );
       }
     },
     [toast],

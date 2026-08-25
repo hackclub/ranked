@@ -1017,6 +1017,18 @@ select:focus-visible {
 .segmented button:hover {
   background: var(--cream);
 }
+.segmented button:disabled,
+.time-options button:disabled,
+.invite-plus:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.segmented button:disabled:hover,
+.time-options button:disabled:hover,
+.invite-plus:disabled:hover {
+  transform: none;
+  animation-play-state: running;
+}
 .segmented button.active {
   background: var(--green);
   border-color: var(--ink);

@@ -13,6 +13,7 @@ type InvitePartner = {
   durationMinutes?: number;
 };
 type MissedInvite = { id: string; partnerName: string; partnerAvatar: { color: string; eyes: number; mouths: number } };
+const PENDING_INVITE_TTL = "15 minutes";
 
 export async function GET(request: NextRequest) {
   const user = await currentUser(request);
@@ -28,10 +29,14 @@ export async function GET(request: NextRequest) {
       ORDER BY di.updated_at DESC LIMIT 1`,
     sql`SELECT di.id, di.to_user_id AS "partnerId", u.name AS "partnerName", u.avatar AS "partnerAvatar"
       FROM duo_invites di JOIN users u ON u.id=di.to_user_id
-      WHERE di.from_user_id=${user.id} AND di.status='pending' ORDER BY di.created_at DESC LIMIT 1`,
+      WHERE di.from_user_id=${user.id} AND di.status='pending'
+        AND di.created_at>NOW()-${PENDING_INVITE_TTL}::interval
+      ORDER BY di.created_at DESC LIMIT 1`,
     sql`SELECT di.id, di.from_user_id AS "partnerId", u.name AS "partnerName", u.avatar AS "partnerAvatar"
       FROM duo_invites di JOIN users u ON u.id=di.from_user_id
-      WHERE di.to_user_id=${user.id} AND di.status='pending' ORDER BY di.created_at DESC`,
+      WHERE di.to_user_id=${user.id} AND di.status='pending'
+        AND di.created_at>NOW()-${PENDING_INVITE_TTL}::interval
+      ORDER BY di.created_at DESC`,
     sql`SELECT di.id, u.name AS "partnerName", u.avatar AS "partnerAvatar"
       FROM duo_invites di JOIN users u ON u.id=di.from_user_id
       WHERE di.to_user_id=${user.id} AND di.status='missed' ORDER BY di.created_at DESC`,
@@ -61,17 +66,64 @@ export async function POST(request: NextRequest) {
   // status='active' until every player has published, so a player who's
   // already finished their own side must not read as unavailable just
   // because their opponent hasn't finished yet.
-  const inMatch = await activeMatch(friendId);
-  if (inMatch) {
-    await sql`INSERT INTO duo_invites (id, from_user_id, to_user_id, status) VALUES (${crypto.randomUUID()}, ${user.id}, ${friendId}, 'missed')`;
+  const [inviterMatch, friendMatch] = await Promise.all([
+    activeMatch(user.id),
+    activeMatch(friendId),
+  ]);
+  if (inviterMatch) {
+    return NextResponse.json(
+      { error: "Finish or leave your current match before inviting a teammate." },
+      { status: 409 },
+    );
+  }
+  if (friendMatch) {
+    await sql`INSERT INTO duo_invites (id, from_user_id, to_user_id, status, duration_minutes)
+      VALUES (${crypto.randomUUID()}, ${user.id}, ${friendId}, 'missed', ${duration})`;
     return NextResponse.json(
       { error: `${friend[0].name} is currently playing a match — try inviting them again once they're done.` },
       { status: 409 },
     );
   }
 
-  await sql`DELETE FROM duo_invites WHERE status IN ('pending','accepted') AND (from_user_id=${user.id} OR to_user_id=${user.id})`;
-  const inserted = await sql`INSERT INTO duo_invites (id, from_user_id, to_user_id, duration_minutes) VALUES (${crypto.randomUUID()}, ${user.id}, ${friendId}, ${duration}) RETURNING id`;
+  const inviteId = crypto.randomUUID();
+  // Lock both identities in stable order. The conditional insert prevents two
+  // simultaneous invitations from stealing a queued player or splitting an
+  // already accepted duo.
+  const inserted = await sql`
+    WITH participant_locks AS (
+      SELECT pg_advisory_xact_lock(hashtextextended(participant_id, 0))
+      FROM (VALUES (${user.id}::text), (${friendId}::text)) participants(participant_id)
+      ORDER BY participant_id
+    ), available AS (
+      SELECT 1
+      WHERE (SELECT COUNT(*) FROM participant_locks)=2
+        AND NOT EXISTS (
+          SELECT 1 FROM duo_invites di
+          WHERE di.status='accepted' AND (
+            di.from_user_id IN (${user.id},${friendId}) OR
+            di.to_user_id IN (${user.id},${friendId})
+          )
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM matchmaking_queue q
+          WHERE q.user_id IN (${user.id},${friendId})
+        )
+    ), cleared_old_invites AS (
+      UPDATE duo_invites SET status='declined',updated_at=NOW()
+      WHERE status='pending' AND (from_user_id=${user.id} OR to_user_id=${user.id})
+        AND EXISTS (SELECT 1 FROM available)
+      RETURNING id
+    )
+    INSERT INTO duo_invites (id,from_user_id,to_user_id,duration_minutes)
+    SELECT ${inviteId},${user.id},${friendId},${duration} FROM available
+    RETURNING id
+  `;
+  if (!inserted.length) {
+    return NextResponse.json(
+      { error: "One of you is already teamed up or searching for a match." },
+      { status: 409 },
+    );
+  }
   return NextResponse.json({ outgoing: { id: inserted[0].id, partnerId: friendId, partnerName: friend[0].name, partnerAvatar: friend[0].avatar } });
 }
 
@@ -90,31 +142,119 @@ export async function PATCH(request: NextRequest) {
   if (durationMinutes !== undefined) {
     if (![10, 30, 60].includes(Number(durationMinutes)))
       return NextResponse.json({ error: "Invalid match length." }, { status: 400 });
-    await sql`UPDATE duo_invites SET duration_minutes=${Number(durationMinutes)}, updated_at=NOW()
-      WHERE id=${inviteId} AND from_user_id=${user.id} AND status IN ('pending','accepted')`;
+    const updated = await sql`
+      WITH changed AS (
+        UPDATE duo_invites SET duration_minutes=${Number(durationMinutes)},updated_at=NOW()
+        WHERE id=${inviteId} AND from_user_id=${user.id} AND status IN ('pending','accepted')
+        RETURNING from_user_id,to_user_id
+      ), cleared_queue AS (
+        DELETE FROM matchmaking_queue q
+        WHERE q.user_id IN (
+          SELECT from_user_id FROM changed UNION ALL SELECT to_user_id FROM changed
+        )
+        RETURNING user_id
+      )
+      SELECT from_user_id FROM changed
+    `;
+    if (!updated.length) {
+      return NextResponse.json({ error: "That duo is no longer available." }, { status: 404 });
+    }
     return NextResponse.json({ ok: true });
   }
   if (action !== "accept" && action !== "decline" && action !== "acknowledge")
     return NextResponse.json({ error: "Invalid request." }, { status: 400 });
   if (action === "acknowledge") {
-    await sql`UPDATE duo_invites SET status='declined', updated_at=NOW() WHERE id=${inviteId} AND to_user_id=${user.id} AND status='missed'`;
+    const acknowledged = await sql`UPDATE duo_invites SET status='declined',updated_at=NOW()
+      WHERE id=${inviteId} AND to_user_id=${user.id} AND status='missed' RETURNING id`;
+    if (!acknowledged.length) {
+      return NextResponse.json({ error: "That invite is no longer available." }, { status: 404 });
+    }
     return NextResponse.json({ ok: true });
   }
   if (action === "decline") {
-    await sql`UPDATE duo_invites SET status='declined', updated_at=NOW() WHERE id=${inviteId} AND to_user_id=${user.id} AND status='pending'`;
+    const declined = await sql`UPDATE duo_invites SET status='declined',updated_at=NOW()
+      WHERE id=${inviteId} AND to_user_id=${user.id} AND status='pending' RETURNING id`;
+    if (!declined.length) {
+      return NextResponse.json({ error: "That invite is no longer available." }, { status: 404 });
+    }
     return NextResponse.json({ ok: true });
   }
-  const accepted = await sql`UPDATE duo_invites SET status='accepted', updated_at=NOW()
-    WHERE id=${inviteId} AND to_user_id=${user.id} AND status='pending' RETURNING id`;
-  if (!accepted.length) return NextResponse.json({ error: "That invite is no longer available." }, { status: 404 });
-  await sql`UPDATE duo_invites SET status='declined', updated_at=NOW()
-    WHERE id<>${inviteId} AND status IN ('pending','accepted') AND (from_user_id=${user.id} OR to_user_id=${user.id})`;
+  const accepted = await sql`
+    WITH target AS (
+      SELECT id,from_user_id,to_user_id FROM duo_invites
+      WHERE id=${inviteId} AND to_user_id=${user.id} AND status='pending'
+        AND created_at>NOW()-${PENDING_INVITE_TTL}::interval
+    ), participants AS (
+      SELECT from_user_id AS user_id FROM target
+      UNION ALL SELECT to_user_id FROM target
+    ), participant_locks AS (
+      SELECT pg_advisory_xact_lock(hashtextextended(user_id, 0))
+      FROM participants ORDER BY user_id
+    ), available AS (
+      SELECT target.* FROM target
+      WHERE (SELECT COUNT(*) FROM participant_locks)=2
+        AND NOT EXISTS (
+          SELECT 1 FROM duo_invites di
+          WHERE di.id<>target.id AND di.status='accepted' AND (
+            di.from_user_id IN (target.from_user_id,target.to_user_id) OR
+            di.to_user_id IN (target.from_user_id,target.to_user_id)
+          )
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM match_players mp JOIN matches m ON m.id=mp.match_id
+          WHERE mp.user_id IN (target.from_user_id,target.to_user_id)
+            AND m.status='active' AND mp.finished_at IS NULL
+        )
+    ), accepted AS (
+      UPDATE duo_invites di SET status='accepted',updated_at=NOW()
+      FROM available a WHERE di.id=a.id
+      RETURNING di.id,di.from_user_id,di.to_user_id
+    ), declined_others AS (
+      UPDATE duo_invites di SET status='declined',updated_at=NOW()
+      WHERE di.id<>${inviteId} AND di.status='pending' AND EXISTS (
+        SELECT 1 FROM accepted a WHERE
+          di.from_user_id IN (a.from_user_id,a.to_user_id) OR
+          di.to_user_id IN (a.from_user_id,a.to_user_id)
+      )
+      RETURNING di.id
+    ), cleared_queue AS (
+      DELETE FROM matchmaking_queue q WHERE EXISTS (
+        SELECT 1 FROM accepted a
+        WHERE q.user_id IN (a.from_user_id,a.to_user_id)
+      )
+      RETURNING q.user_id
+    )
+    SELECT id FROM accepted
+  `;
+  if (!accepted.length) {
+    return NextResponse.json(
+      { error: "That invite expired, or one of you is already in another duo or match." },
+      { status: 409 },
+    );
+  }
   return NextResponse.json({ ok: true });
 }
 
 export async function DELETE(request: NextRequest) {
   const user = await currentUser(request);
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  await getSql()`DELETE FROM duo_invites WHERE status IN ('pending','accepted') AND (from_user_id=${user.id} OR to_user_id=${user.id})`;
-  return NextResponse.json({ ok: true });
+  const removed = await getSql()`
+    WITH removed AS (
+      DELETE FROM duo_invites
+      WHERE status IN ('pending','accepted') AND (from_user_id=${user.id} OR to_user_id=${user.id})
+      RETURNING from_user_id,to_user_id
+    ), participants AS (
+      SELECT ${user.id}::text AS user_id
+      UNION SELECT from_user_id FROM removed
+      UNION SELECT to_user_id FROM removed
+    ), cleared_queue AS (
+      DELETE FROM matchmaking_queue q
+      WHERE q.user_id IN (SELECT user_id FROM participants)
+      RETURNING q.user_id
+    )
+    SELECT
+      (SELECT COUNT(*)::int FROM removed) AS invites,
+      (SELECT COUNT(*)::int FROM cleared_queue) AS queue_entries
+  `;
+  return NextResponse.json({ ok: true, cleared: removed[0] });
 }
