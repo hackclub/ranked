@@ -2381,51 +2381,53 @@ function Lobby({
         </section>
 
         <aside className="hud-panel hud-panel-right">
-          {!isDuoJoiner && (
-            <div className="hud-block">
-              <span className="hud-label">team size</span>
-              <div className="segmented">
-                <button
-                  className={mode === "solo" ? "active" : ""}
-                  disabled={matching}
-                  onClick={() => setMode("solo")}
-                >
-                  <Icon name="person" size={18} />
-                  <span>
-                    solo<small>1 vs 1</small>
-                  </span>
-                </button>
-                <button
-                  className={mode === "duo" ? "active" : ""}
-                  disabled={matching}
-                  onClick={() => setMode("duo")}
-                >
-                  <Icon name="people" size={18} />
-                  <span>
-                    duos<small>2 vs 2</small>
-                  </span>
-                </button>
-              </div>
+          <div className={`hud-block ${isDuoJoiner ? "hud-block-locked" : ""}`}>
+            <span className="hud-label">
+              team size
+              {isDuoJoiner && <small>set by team leader</small>}
+            </span>
+            <div className="segmented">
+              <button
+                className={mode === "solo" ? "active" : ""}
+                disabled={matching || isDuoJoiner}
+                onClick={() => setMode("solo")}
+              >
+                <Icon name="person" size={18} />
+                <span>
+                  solo<small>1 vs 1</small>
+                </span>
+              </button>
+              <button
+                className={mode === "duo" ? "active" : ""}
+                disabled={matching || isDuoJoiner}
+                onClick={() => setMode("duo")}
+              >
+                <Icon name="people" size={18} />
+                <span>
+                  duos<small>2 vs 2</small>
+                </span>
+              </button>
             </div>
-          )}
-          {!isDuoJoiner && (
-            <div className="hud-block">
-              <span className="hud-label">match length</span>
-              <div className="time-options">
-                {[10, 30, 60].map((time) => (
-                  <button
-                    key={time}
-                    className={length === time ? "active" : ""}
-                    disabled={matching}
-                    onClick={() => setLength(time)}
-                  >
-                    <strong>{time}</strong>
-                    <small>min</small>
-                  </button>
-                ))}
-              </div>
+          </div>
+          <div className={`hud-block ${isDuoJoiner ? "hud-block-locked" : ""}`}>
+            <span className="hud-label">
+              match length
+              {isDuoJoiner && <small>set by team leader</small>}
+            </span>
+            <div className="time-options">
+              {[10, 30, 60].map((time) => (
+                <button
+                  key={time}
+                  className={effectiveLength === time ? "active" : ""}
+                  disabled={matching || isDuoJoiner}
+                  onClick={() => setLength(time)}
+                >
+                  <strong>{time}</strong>
+                  <small>min</small>
+                </button>
+              ))}
             </div>
-          )}
+          </div>
           <div className="hud-block hud-block-tight">
             <span className="hud-label">camera & microphone</span>
             <div className="camera-preview h-[20vh]">

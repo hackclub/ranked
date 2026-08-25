@@ -40,3 +40,12 @@ test("interactive matchmaking requests time out and recover from an idle queue",
   assert.match(source, /result\.status === "idle"/);
   assert.match(source, /Matchmaking stopped — ready up again/);
 });
+
+test("invited teammates can see, but cannot change, leader-owned settings", async () => {
+  const source = await readFile(appPath, "utf8");
+
+  assert.match(source, /hud-block-locked/);
+  assert.match(source, /set by team leader/);
+  assert.match(source, /disabled=\{matching \|\| isDuoJoiner\}/);
+  assert.match(source, /className=\{effectiveLength === time \? "active" : ""\}/);
+});
