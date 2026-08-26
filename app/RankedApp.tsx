@@ -4608,14 +4608,21 @@ function Match({
                 <div className="vote-site">
                   <iframe
                     ref={registerOwnPreviewFrame}
-                    title="Your build"
+                    title="Your site"
                     srcDoc={iframeSrcDoc}
                     sandbox="allow-scripts"
                     referrerPolicy="no-referrer"
                   />
+                  <button
+                    className="preview-expand-button"
+                    onClick={() => setPreviewOpen(true)}
+                    aria-label="View your site full screen"
+                  >
+                    <Icon name="external" size={13} />
+                  </button>
                 </div>
                 <footer>
-                  <span>YOUR BUILD</span>
+                  <span>YOUR SITE</span>
                 </footer>
               </article>
               <div className="versus">VS</div>
@@ -4623,7 +4630,7 @@ function Match({
                 <div className="vote-site">
                   {opponentSnapshot ? (
                     <iframe
-                      title="Opponent's build"
+                      title="Opponent's site"
                       srcDoc={opponentSnapshot}
                       sandbox="allow-scripts"
                       referrerPolicy="no-referrer"
@@ -4635,9 +4642,18 @@ function Match({
                       <b>no snapshot synced yet</b>
                     </div>
                   )}
+                  {opponentSnapshot && (
+                    <button
+                      className="preview-expand-button"
+                      onClick={() => setOpponentPreviewOpen(true)}
+                      aria-label="View opponent's site full screen"
+                    >
+                      <Icon name="external" size={13} />
+                    </button>
+                  )}
                 </div>
                 <footer>
-                  <span>OPPONENT&apos;S BUILD</span>
+                  <span>OPPONENT&apos;S SITE</span>
                 </footer>
               </article>
             </div>

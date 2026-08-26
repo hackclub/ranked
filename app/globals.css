@@ -1792,6 +1792,13 @@ select:focus-visible {
   background: #171714b8;
   backdrop-filter: blur(5px);
 }
+/* Fullscreening a site preview can be triggered from inside another modal
+   (e.g. the end-of-match results screen), so it needs to stack above the
+   generic .modal-backdrop tier rather than tying with it — a shared z-index
+   would leave the fullscreen view painted underneath whatever opened it. */
+.preview-modal {
+  z-index: 110;
+}
 .modal {
   width: min(710px, 100%);
   max-height: calc(100vh - 40px);
@@ -1803,6 +1810,18 @@ select:focus-visible {
   position: relative;
   border-radius: var(--blob);
 }
+
+.modal-no-blob {
+  width: min(710px, 100%);
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  background: var(--cream);
+  border: 2px solid var(--ink);
+  box-shadow: 10px 10px 0 var(--ink);
+  padding: 39px;
+  position: relative;
+}
+
 .close-button {
   position: absolute;
   top: 12px;
@@ -3030,7 +3049,6 @@ select:focus-visible {
   overflow: hidden;
   display: grid;
   place-items: center;
-  border-radius: var(--blob);
 }
 .snapshot-art b {
   font: 650 14px/1.1 var(--font-geist-mono);
@@ -3530,7 +3548,7 @@ select:focus-visible {
   box-shadow: 6px 6px 0 var(--ink);
   padding: 10px;
   transition: transform 0.2s;
-  border-radius: var(--blob);
+  border-radius: 1rem;
 }
 .vote-grid > article.chosen {
   transform: rotate(-1deg);
@@ -3544,8 +3562,8 @@ select:focus-visible {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  border-radius: var(--blob);
 }
+
 .build-description {
   margin: 10px 2px 0;
   padding: 10px 12px;
