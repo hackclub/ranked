@@ -146,6 +146,8 @@ async function githubRequest<T>(
 const RANKED_REPO = "hackclubranked";
 const isNotFound = (error: unknown) =>
   error instanceof Error && error.message.includes("(404)");
+const isConflict = (error: unknown) =>
+  error instanceof Error && error.message.includes("(409)");
 
 // The session caches the GitHub login from whenever the account was first
 // connected. If it's ever renamed on GitHub afterward, that cached login
@@ -558,15 +560,15 @@ function renderDirectoryIndex(login: string, builds: DirectoryBuild[]) {
     display: inline-flex;
     max-width: 100%;
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    white-space: normal;
+    word-break: break-word;
     border: 1.5px solid var(--ink);
     background: var(--cream);
     color: var(--ink);
     padding: 3px 10px;
     font: 700 11px var(--font-mono);
     letter-spacing: -0.01em;
+    line-height: 1.4;
     border-radius: var(--blob);
   }
   .gallery-grid li:nth-child(4n+1) .build-card-tag { background: var(--green); }
@@ -685,24 +687,54 @@ export async function updateDirectoryIndex(
   login: string,
   builds: DirectoryBuild[],
 ) {
-  let sha: string | undefined;
-  try {
-    const existing = await githubRequest<{ sha: string }>(
-      token,
-      repoContentsPath(login, "index.html"),
-    );
-    sha = existing.sha;
-  } catch (error) {
-    if (!isNotFound(error)) throw error;
+  // The directory is rendered from the publications table, not the repo's
+  // actual contents — there's no in-app unpublish, so the only way a listed
+  // folder goes missing is someone deleting it directly on GitHub, but
+  // without this check the gallery would keep linking to it forever.
+  // Checking here (rather than trusting the DB) keeps it self-healing.
+  const checked = await Promise.all(
+    builds.map(async (build) => ({
+      build,
+      exists: await pathExists(token, login, build.folderName),
+    })),
+  );
+  const liveBuilds = checked
+    .filter(({ exists }) => exists)
+    .map(({ build }) => build);
+  const html = renderDirectoryIndex(login, liveBuilds);
+  // Two publishes landing close together (e.g. duo teammates finishing
+  // within moments of each other, or back-to-back matches) can both read
+  // index.html's sha before either writes — GitHub's contents API then
+  // rejects the second PUT with a 409 rather than merging it, and that
+  // used to just be swallowed by the caller, silently dropping whichever
+  // publish lost the race and leaving the directory stuck without its
+  // newest build. `builds` is already this call's complete, current list
+  // (a fresh query, not a diff), so recovering just means re-reading the
+  // sha and retrying the same write.
+  for (let attempt = 1; ; attempt++) {
+    let sha: string | undefined;
+    try {
+      const existing = await githubRequest<{ sha: string }>(
+        token,
+        repoContentsPath(login, "index.html"),
+      );
+      sha = existing.sha;
+    } catch (error) {
+      if (!isNotFound(error)) throw error;
+    }
+    try {
+      await githubRequest(token, repoContentsPath(login, "index.html"), {
+        method: "PUT",
+        body: JSON.stringify({
+          message: "Update builds directory",
+          content: Buffer.from(html, "utf8").toString("base64"),
+          branch: "main",
+          ...(sha ? { sha } : {}),
+        }),
+      });
+      return;
+    } catch (error) {
+      if (!isConflict(error) || attempt >= 3) throw error;
+    }
   }
-  const html = renderDirectoryIndex(login, builds);
-  await githubRequest(token, repoContentsPath(login, "index.html"), {
-    method: "PUT",
-    body: JSON.stringify({
-      message: "Update builds directory",
-      content: Buffer.from(html, "utf8").toString("base64"),
-      branch: "main",
-      ...(sha ? { sha } : {}),
-    }),
-  });
 }
