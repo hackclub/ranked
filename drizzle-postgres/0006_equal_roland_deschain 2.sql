@@ -1,1 +1,0 @@
-ALTER TABLE "publications" ADD COLUMN "description" text;

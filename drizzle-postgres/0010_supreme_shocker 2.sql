@@ -1,1 +1,0 @@
-ALTER TYPE "public"."duo_invite_status" ADD VALUE 'missed';
