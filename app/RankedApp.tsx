@@ -1,6 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 import { CollaborativeEditor } from "./realtime/CollaborativeEditor";
 import { StreamVideo } from "./realtime/StreamVideo";
@@ -902,6 +910,295 @@ function PersonFace({
   );
 }
 
+type PublicPlayerProfile = {
+  id: string;
+  name: string;
+  avatar: AvatarConfig | null;
+  elo: number;
+  hours: number;
+  matchesPlayed: number;
+  githubRepoUrl: string | null;
+  githubGalleryUrl: string | null;
+};
+
+const HOVER_CARD_WIDTH = 264;
+// Rough ceiling on the card's rendered height (identity row + stat row +
+// link row + padding), used only to decide which side of the trigger has
+// room — not for pixel-perfect placement, so an estimate is fine; the
+// useLayoutEffect clamp below corrects against the card's *real* height
+// once it's rendered. Kept deliberately generous rather than tuned to the
+// exact current layout, since a condensed card that's shorter than this
+// estimate is safe (it'll just have a bit more clearance than strictly
+// needed) while an estimate that's too small is what actually risks
+// clipping — see the friends-card-avatar regression this constant exists
+// to prevent, from when the card briefly had a much taller hero banner.
+const HOVER_CARD_EST_HEIGHT = 260;
+
+type HoverCardAnchor = { left: number; top?: number; bottom?: number };
+
+// Anchored just above the trigger by default, clamped to stay on-screen
+// horizontally. Flips below the trigger instead when there isn't
+// reasonably enough room above for the card *and* below actually has
+// more room — `bottom`/`top` (rather than a placement computed from the
+// card's own measured height) anchors it without needing to measure the
+// card first, so it never flashes in the wrong spot for a frame before
+// correcting itself.
+function hoverCardPosition(rect: DOMRect) {
+  const gap = 10;
+  const edgeMargin = 12;
+  const left = Math.min(
+    Math.max(rect.left + rect.width / 2 - HOVER_CARD_WIDTH / 2, edgeMargin),
+    window.innerWidth - HOVER_CARD_WIDTH - edgeMargin,
+  );
+  const spaceAbove = rect.top;
+  const spaceBelow = window.innerHeight - rect.bottom;
+  const openBelow =
+    spaceAbove < HOVER_CARD_EST_HEIGHT + gap && spaceBelow > spaceAbove;
+  return openBelow
+    ? { left, top: rect.bottom + gap }
+    : { left, bottom: window.innerHeight - rect.top + gap };
+}
+
+// Shared by every screen that shows other players' profile pictures
+// (friends, recent interactions, the leaderboard): hovering (or focusing,
+// for keyboard/touch users who can't hover) a trigger opens the card
+// anchored to it. A short close delay lets the cursor travel from the
+// trigger onto the card itself — e.g. to click its gallery/repo links —
+// without it vanishing first; entering the card cancels that delay.
+function useProfileHoverCard() {
+  const [openProfileId, setOpenProfileId] = useState<string | null>(null);
+  const [anchor, setAnchor] = useState<HoverCardAnchor | null>(null);
+  const closeTimer = useRef<number | undefined>(undefined);
+
+  const cancelClose = useCallback(() => {
+    window.clearTimeout(closeTimer.current);
+  }, []);
+  const scheduleClose = useCallback(() => {
+    cancelClose();
+    closeTimer.current = window.setTimeout(
+      () => setOpenProfileId(null),
+      150,
+    );
+  }, [cancelClose]);
+  useEffect(() => () => window.clearTimeout(closeTimer.current), []);
+
+  const triggerProps = (userId: string) => ({
+    onMouseEnter: (event: React.MouseEvent<HTMLElement>) => {
+      cancelClose();
+      setOpenProfileId(userId);
+      setAnchor(hoverCardPosition(event.currentTarget.getBoundingClientRect()));
+    },
+    onMouseLeave: scheduleClose,
+    onFocus: (event: React.FocusEvent<HTMLElement>) => {
+      cancelClose();
+      setOpenProfileId(userId);
+      setAnchor(hoverCardPosition(event.currentTarget.getBoundingClientRect()));
+    },
+    onBlur: scheduleClose,
+  });
+
+  return { openProfileId, anchor, triggerProps, cancelClose, scheduleClose };
+}
+
+// Anyone's profile picture — leaderboard rows, friends, recent opponents —
+// opens this same read-only hover card. Deliberately not the account
+// ProfileModal (that one edits *your own* avatar/connections and has a
+// logout button); this is a public glance at someone else's stats.
+function PlayerProfileCard({
+  userId,
+  anchor,
+  onMouseEnter,
+  onMouseLeave,
+}: {
+  userId: string;
+  anchor: HoverCardAnchor;
+  onMouseEnter: () => void;
+  onMouseLeave: () => void;
+}) {
+  const [profile, setProfile] = useState<PublicPlayerProfile | null>(null);
+  const [failed, setFailed] = useState(false);
+  const cardRef = useRef<HTMLElement>(null);
+  // Unique per mount so multiple cards (unlikely today, but not impossible
+  // across a hot reload) never collide on the same gradient id.
+  const ringGradientId = useId();
+
+  // hoverCardPosition's above/below choice only has an *estimate* of the
+  // card's height to work with (it has to decide before anything has
+  // rendered). Once the real content is in and the card has its actual
+  // height, re-check against the viewport and clamp — this is what catches
+  // the case the estimate got wrong (e.g. a long name wrapping to two
+  // lines) instead of letting the card run off the top or bottom of the
+  // screen. useLayoutEffect (not useEffect) so the correction lands before
+  // the browser paints, not as a visible jump after.
+  useLayoutEffect(() => {
+    const el = cardRef.current;
+    if (!el) return;
+    const margin = 12;
+    const rect = el.getBoundingClientRect();
+    if (rect.top < margin) {
+      el.style.top = `${margin}px`;
+      el.style.bottom = "auto";
+    } else if (rect.bottom > window.innerHeight - margin) {
+      el.style.top = `${Math.max(margin, window.innerHeight - margin - rect.height)}px`;
+      el.style.bottom = "auto";
+    }
+  }, [profile, failed, anchor]);
+
+  useEffect(() => {
+    // A fresh PlayerProfileCard mounts each time a new userId opens (the
+    // caller only ever renders it behind `openProfileId &&`), so there's no
+    // stale profile/failed state from a previous hover to clear here — the
+    // useState initial values already are that reset.
+    let cancelled = false;
+    fetch(`/api/users/${userId}/profile`)
+      .then((response) => (response.ok ? response.json() : Promise.reject()))
+      .then((data: PublicPlayerProfile) => {
+        if (!cancelled) setProfile(data);
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
+  // Mirrors the exact floor/ceiling and copy the home screen's own
+  // ProgressBar already uses (1500 "meteor" -> 3000 "celestial") — Ranked
+  // only has this one band today, not a multi-tier ladder, so the ring
+  // shows progress toward that same single target rather than inventing a
+  // tier system that doesn't exist elsewhere in the product.
+  const eloProgressRaw = profile
+    ? Math.max(0, Math.min(100, ((profile.elo - 1500) / 1500) * 100))
+    : 0;
+  // Anyone below 1500 (a brand new account, or anyone who's lost more than
+  // won) legitimately computes to 0% — which, rendered as an actual 0-length
+  // arc, is indistinguishable from no fill at all: exactly the "this just
+  // looks like a plain circle" report. A small floor keeps a sliver of the
+  // fill color always visible so the ring reads as a live progress meter
+  // even at the bottom of the range, not as decoration that happens to be
+  // empty right now.
+  const eloProgress = Math.max(eloProgressRaw, 7);
+  const eloRemaining = profile ? Math.max(0, 3000 - profile.elo) : 0;
+  const ringRadius = 24;
+  const ringCircumference = 2 * Math.PI * ringRadius;
+  const ringOffset = ringCircumference * (1 - eloProgress / 100);
+
+  return createPortal(
+    <section
+      ref={cardRef}
+      className="player-card-modal"
+      role="dialog"
+      aria-labelledby="player-card-title"
+      style={{
+        left: anchor.left,
+        top: anchor.top,
+        bottom: anchor.bottom,
+        width: HOVER_CARD_WIDTH,
+      }}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+    >
+      {failed ? (
+        <p className="player-card-status">Couldn&apos;t load that profile.</p>
+      ) : !profile ? (
+        <p className="player-card-status">loading…</p>
+      ) : (
+        <>
+          <div className="player-card-identity">
+            <ScribbleAvatar avatar={profile.avatar} size="sm" />
+            <div className="player-card-identity-text">
+              <h2 id="player-card-title">{profile.name}</h2>
+            </div>
+            <div
+              className="player-card-ring"
+              aria-hidden="true"
+              title={
+                eloRemaining > 0
+                  ? `${eloRemaining} to celestial`
+                  : "celestial rank"
+              }
+            >
+              <svg viewBox="0 0 60 60" width="60" height="60">
+                <defs>
+                  {/* Same two stops as the home screen's own ELO bar
+                      (.rank-fill: linear-gradient(90deg, #aec158, var(--green)))
+                      — this ring and that bar are the same signal in two
+                      shapes, so they're built from the same gradient. */}
+                  <linearGradient
+                    id={ringGradientId}
+                    x1="0"
+                    y1="0"
+                    x2="1"
+                    y2="0"
+                  >
+                    <stop offset="0%" stopColor="#aec158" />
+                    <stop offset="100%" stopColor="var(--green)" />
+                  </linearGradient>
+                </defs>
+                <circle
+                  className="player-card-ring-track"
+                  cx="30"
+                  cy="30"
+                  r={ringRadius}
+                />
+                <circle
+                  className="player-card-ring-fill"
+                  cx="30"
+                  cy="30"
+                  r={ringRadius}
+                  stroke={`url(#${ringGradientId})`}
+                  style={{
+                    strokeDasharray: ringCircumference,
+                    strokeDashoffset: ringOffset,
+                  }}
+                />
+              </svg>
+              <div className="player-card-ring-label">
+                <strong>{profile.elo}</strong>
+                <span>elo</span>
+              </div>
+            </div>
+          </div>
+          <div className="player-card-stats">
+            <div>
+              <strong>{profile.hours}</strong>
+              <span>hours coded</span>
+            </div>
+            <div>
+              <strong>{profile.matchesPlayed}</strong>
+              <span>{profile.matchesPlayed === 1 ? "match" : "matches"}</span>
+            </div>
+          </div>
+          {profile.githubGalleryUrl || profile.githubRepoUrl ? (
+            <div className="player-card-links">
+              {profile.githubGalleryUrl && (
+                <a
+                  href={profile.githubGalleryUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <Icon name="external" size={13} /> gallery
+                </a>
+              )}
+              {profile.githubRepoUrl && (
+                <a href={profile.githubRepoUrl} target="_blank" rel="noreferrer">
+                  <Icon name="github" size={13} /> repo
+                </a>
+              )}
+            </div>
+          ) : (
+            <p className="player-card-status">
+              hasn&apos;t published a build yet
+            </p>
+          )}
+        </>
+      )}
+    </section>,
+    document.body,
+  );
+}
+
 function Home({
   navigate,
   toast,
@@ -915,6 +1212,7 @@ function Home({
   startOnboarding: () => void;
   customizeAvatar: () => void;
 }) {
+  const profileCard = useProfileHoverCard();
   const [friendRequests, setFriendRequests] = useState<string[]>([]);
   const [friendDirectory, setFriendDirectory] = useState<
     Array<{ id: string; name: string; email: string }>
@@ -1214,7 +1512,14 @@ function Home({
                   const menuOpen = friendMenuOpen === friend.friendshipId;
                   return (
                     <li key={friend.id}>
-                      <PersonFace name={friend.name} avatar={friend.avatar} />
+                      <button
+                        type="button"
+                        className="person-face-button"
+                        {...profileCard.triggerProps(friend.id)}
+                        aria-label={`View ${friend.name}'s profile`}
+                      >
+                        <PersonFace name={friend.name} avatar={friend.avatar} />
+                      </button>
                       <div>
                         <strong>{friend.name}</strong>
                         <small className="last-seen">
@@ -1385,10 +1690,17 @@ function Home({
               {recentInteractions.length ? (
                 recentInteractions.map((interaction) => (
                   <li key={`${interaction.matchId}-${interaction.id}`}>
-                    <PersonFace
-                      name={interaction.name}
-                      avatar={interaction.avatar}
-                    />
+                    <button
+                      type="button"
+                      className="person-face-button"
+                      {...profileCard.triggerProps(interaction.id)}
+                      aria-label={`View ${interaction.name}'s profile`}
+                    >
+                      <PersonFace
+                        name={interaction.name}
+                        avatar={interaction.avatar}
+                      />
+                    </button>
                     <div>
                       <strong>{interaction.name}</strong>
                       <small>{interaction.theme}</small>
@@ -1444,7 +1756,7 @@ function Home({
               label="Your scribble avatar"
             />
             <span>
-              {auth.user ? "customize" : "make yours"} <i>↗</i>
+              {auth.user ? "customize" : "make your scrib"} <i>↗</i>
             </span>
           </button>
           <div className="hero-copy">
@@ -1567,6 +1879,14 @@ function Home({
             </button>
           </section>
         </div>
+      )}
+      {profileCard.openProfileId && profileCard.anchor && (
+        <PlayerProfileCard
+          userId={profileCard.openProfileId}
+          anchor={profileCard.anchor}
+          onMouseEnter={profileCard.cancelClose}
+          onMouseLeave={profileCard.scheduleClose}
+        />
       )}
     </main>
   );
@@ -4916,6 +5236,7 @@ type LeaderboardPage = {
   players: Array<{
     id: string;
     name: string;
+    avatar: AvatarConfig | null;
     score: number | string;
     matchesPlayed: number;
   }>;
@@ -4931,6 +5252,7 @@ function Leaderboard({
   const [board, setBoard] = useState<"elo" | "hours">("hours");
   const [requestedPage, setRequestedPage] = useState<number | null>(null);
   const [data, setData] = useState<LeaderboardPage | null>(null);
+  const profileCard = useProfileHoverCard();
 
   const changeBoard = (next: "hours" | "elo") => {
     setBoard(next);
@@ -4991,9 +5313,14 @@ function Leaderboard({
             >
               <strong>#{rank}</strong>
               <span>
-                <i style={{ background: COLORS[index % COLORS.length] }}>
-                  {row.name[0].toUpperCase()}
-                </i>
+                <button
+                  type="button"
+                  className="person-face-button"
+                  {...profileCard.triggerProps(row.id)}
+                  aria-label={`View ${row.name}'s profile`}
+                >
+                  <PersonFace name={row.name} avatar={row.avatar} />
+                </button>
                 <b>{row.name}</b>
                 {isYou && <em className="leader-you-tag">you</em>}
               </span>
@@ -5031,6 +5358,14 @@ function Leaderboard({
             </button>
           )}
         </div>
+      )}
+      {profileCard.openProfileId && profileCard.anchor && (
+        <PlayerProfileCard
+          userId={profileCard.openProfileId}
+          anchor={profileCard.anchor}
+          onMouseEnter={profileCard.cancelClose}
+          onMouseLeave={profileCard.scheduleClose}
+        />
       )}
     </main>
   );

@@ -376,7 +376,7 @@ select:focus-visible {
   font: 600 13px var(--font-geist-mono);
   display: block;
 }
-.people-list li > button {
+.people-list li > button:not(.person-face-button) {
   border: 1px solid var(--ink);
   background: var(--green);
   padding: 4px;
@@ -478,6 +478,22 @@ select:focus-visible {
 }
 .mini-face-avatar .scribble-avatar {
   transform: scale(0.483);
+}
+.person-face-button {
+  display: inline-flex;
+  flex-shrink: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  border-radius: var(--blob);
+  cursor: pointer;
+  transition: transform 0.15s;
+}
+.person-face-button:hover {
+  transform: scale(1.08);
+}
+.person-face-button:active {
+  transform: scale(0.96);
 }
 .status {
   width: 6px;
@@ -610,7 +626,7 @@ select:focus-visible {
 .blocked-menu li button:hover {
   background: #f4ff00;
 }
-.interaction-list li button {
+.interaction-list li button:not(.person-face-button) {
   width: 27px;
   height: 27px;
   border: 1.5px solid var(--ink);
@@ -653,7 +669,7 @@ select:focus-visible {
   bottom: 0;
   padding: 6px 11px;
   border: 1px solid var(--ink);
-  border-radius: 999px;
+  border-radius: var(--blob);
   background: var(--paper);
   box-shadow: 2px 2px 0 var(--ink);
   font: 650 8px var(--font-geist-mono);
@@ -1567,7 +1583,7 @@ select:focus-visible {
 }
 .pedestal > strong {
   display: block;
-  margin-top: 10px;
+  margin-top: 1rem;
   max-width: 100%;
   padding: 4px 12px;
   border: 1.5px solid var(--ink);
@@ -1576,9 +1592,6 @@ select:focus-visible {
   box-shadow: 2px 2px 0 var(--ink);
   font: 700 10px var(--font-geist-mono);
   color: var(--ink);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 .pedestal.empty > strong,
 .pedestal.pending > strong {
@@ -3156,16 +3169,6 @@ select:focus-visible {
   align-items: center;
   gap: 13px;
 }
-.leader-row > span:nth-child(2) i {
-  width: 34px;
-  height: 34px;
-  border: 1px solid var(--ink);
-  display: grid;
-  place-items: center;
-  font-style: normal;
-  font-weight: 800;
-  border-radius: var(--blob);
-}
 .leader-row.you {
   background: #497cbf20;
   border-top: 2px solid var(--blue);
@@ -3694,6 +3697,194 @@ select:focus-visible {
 }
 .account-links span {
   color: #2f7a45;
+}
+/* Portaled to <body> and positioned via inline style (see
+   hoverCardPosition in RankedApp.tsx) — anchored just above whichever
+   avatar triggered it, clamped so it never runs off the left/right edge
+   of the viewport. Sits above the standard .modal-backdrop tier (100) so
+   it can float over an open modal too, not just page content. The slight
+   rotation matches every other card in this app (.paper-card, .friend-menu,
+   .daily-card) — without it, this was the one flat, un-rotated rectangle
+   in an otherwise consistently "paper" world, which read as out of place
+   and lifeless next to everything around it.
+
+   Pass one (background: var(--paper), a bordered pale-cream stat strip,
+   generous padding throughout) still read as flat and empty: every surface
+   — page, card, and stat strip — sat within a few points of the same cream
+   hue, so nothing in the card actually separated from anything else, and
+   the padding had nothing dense to push against. Pass two committed to real
+   contrast instead of another shade of cream: pure white card body against
+   the page's cream, and an ink-black stat strip.
+
+   Pass three restructures around a reference brief (scrib banner up top,
+   radial ELO progress, stats on the bottom) — same white-card/ink-strip
+   contrast strategy underneath, new composition on top of it: a cream
+   "banner" strip carries the scrib the way a cover photo would, ELO moves
+   out of the stat strip into its own progress ring (echoing the home
+   screen's own meteor->celestial ProgressBar instead of a flat number). */
+.player-card-modal {
+  position: fixed;
+  z-index: 120;
+  background: #fff;
+  border: 2px solid var(--ink);
+  box-shadow: 5px 5px 0 var(--ink);
+  padding: 9px;
+  border-radius: var(--blob);
+  transform: rotate(-1deg);
+}
+/* No boxed "banner" around the avatar — it sits directly in the identity
+   row, at the actual "sm" ScribbleAvatar size (58px) rather than scaled
+   further down like the tiny .mini-face treatment friends-list/leaderboard
+   rows use (PersonFace) — this card is the one place a bigger look at
+   someone's avatar makes sense, so it gets its own size instead of
+   borrowing the icon-scale one everything else uses. */
+.player-card-identity {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 6px;
+}
+.player-card-identity .scribble-avatar {
+  flex-shrink: 0;
+}
+.player-card-identity-text {
+  flex: 1;
+  min-width: 0;
+}
+.player-card-identity-text h2 {
+  margin: 0;
+  font-size: 17px;
+  letter-spacing: -0.045em;
+  line-height: 1.2;
+}
+/* The ring *is* the "how much elo to celestial" signal — its fill arc, not
+   a restated "X to celestial" caption underneath the name. The same figure
+   is still available as a native tooltip (title attr) for anyone who wants
+   the exact number without adding visible text back to the card face.
+
+   Both the track and fill are pulled directly from the home screen's own
+   linear ELO bar (.rank-track / .rank-fill) rather than invented one-off
+   colors — same signal, same two-color language, just a different shape.
+   The fill's actual gradient is defined inline in the SVG (an SVG stroke
+   can't take a CSS linear-gradient() background); this class only carries
+   the shape/motion properties the gradient itself doesn't. */
+.player-card-ring {
+  position: relative;
+  width: 60px;
+  height: 60px;
+  flex-shrink: 0;
+}
+.player-card-ring svg {
+  transform: rotate(-90deg);
+}
+.player-card-ring-track {
+  fill: none;
+  /* The darker stop of .rank-track's own gradient (#fffbe2 -> #f1eac2) —
+     a flat color here since a thin ring has no room to show a visible
+     gradient direction, but pulled from the exact same track family. */
+  stroke: #f1eac2;
+  stroke-width: 6;
+}
+.player-card-ring-fill {
+  fill: none;
+  stroke-width: 6;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.4s ease;
+}
+.player-card-ring-label {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+.player-card-ring-label strong {
+  font: 800 13px var(--font-geist-mono);
+  letter-spacing: -0.03em;
+  color: var(--ink);
+  line-height: 1.1;
+}
+.player-card-ring-label span {
+  font: 650 6px var(--font-geist-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+/* A solid ink-black bar was the previous attempt at making these numbers
+   stand out (see git history) — inside a card that's otherwise entirely
+   white/paper with soft cream and green accents, a flat black rectangle
+   reads as a foreign element bolted on, not a considered part of the same
+   card. Plain typography on the card's own white background, divided by a
+   single hairline, says "these are numbers" without contradicting
+   everything else on the card. */
+.player-card-stats {
+  display: flex;
+  margin-bottom: 7px;
+}
+.player-card-stats > div {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 0 4px;
+  text-align: center;
+}
+.player-card-stats > div + div {
+  border-left: 1.5px dashed #cfc7ad;
+}
+.player-card-stats strong {
+  font: 800 18px var(--font-geist-mono);
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+.player-card-stats span {
+  font: 650 7px var(--font-geist-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.player-card-links {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+}
+.player-card-links a {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 1.5px solid var(--ink);
+  padding: 6px 6px;
+  font: 650 9px var(--font-geist-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  border-radius: var(--blob);
+  text-decoration: none;
+  color: var(--ink);
+  transition:
+    transform 0.15s,
+    box-shadow 0.15s;
+}
+.player-card-links a:first-child {
+  background: var(--green);
+}
+.player-card-links a:last-child {
+  background: #fff;
+}
+.player-card-links a:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 2px 2px 0 var(--ink);
+}
+.player-card-links a:active {
+  transform: translate(1px, 1px);
+  box-shadow: none;
+}
+.player-card-status {
+  font: 500 9px/1.5 var(--font-geist-mono);
+  color: var(--muted);
 }
 .profile-modal > small {
   grid-column: 1 / -1;
