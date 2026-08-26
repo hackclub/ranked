@@ -26,8 +26,15 @@ export async function POST(request: NextRequest, context: { params: Promise<{ ma
   if (!player) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const { html } = await request.json();
   if (typeof html !== "string" || html.length > 1_000_000) return NextResponse.json({ error: "Invalid snapshot" }, { status: 400 });
-  await getSql()`INSERT INTO match_snapshots (match_id, team, html) VALUES (${matchId}, ${player.team}::match_team, ${html})
-    ON CONFLICT (match_id, team) DO UPDATE SET html=EXCLUDED.html, updated_at=NOW()`;
-  return NextResponse.json({ ok: true });
+  const opponent = player.team === "blue" ? "red" : "blue";
+  // Fold the opponent read into the same round-trip as the write (rather than
+  // a separate GET right after) so the client's poll loop stays at one
+  // request per tick even as the tick rate increases.
+  const [rows] = await Promise.all([
+    getSql()`SELECT html, updated_at AS "updatedAt" FROM match_snapshots WHERE match_id=${matchId} AND team=${opponent}::match_team`,
+    getSql()`INSERT INTO match_snapshots (match_id, team, html) VALUES (${matchId}, ${player.team}::match_team, ${html})
+      ON CONFLICT (match_id, team) DO UPDATE SET html=EXCLUDED.html, updated_at=NOW()`,
+  ]);
+  return NextResponse.json({ ok: true, snapshot: rows[0] ?? null });
 }
 

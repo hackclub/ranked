@@ -3983,54 +3983,48 @@ function Match({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [previewOpen, opponentPreviewOpen]);
 
-  useEffect(() => {
-    const sync = async () => {
-      await fetch(`/api/matches/${match.id}/snapshot`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          html: matchEndedRef.current
-            ? finalPreviewDocRef.current
-            : previewDocRef.current,
-        }),
-      });
-      const response = await fetch(`/api/matches/${match.id}/snapshot`);
-      if (response.ok) {
-        const result = (await response.json()) as {
-          snapshot?: { html?: string } | null;
-        };
-        if (result.snapshot?.html) setOpponentSnapshot(result.snapshot.html);
-      }
+  const postSnapshot = useCallback(async (html: string) => {
+    // The opponent's snapshot rides back on the same response as the write
+    // (see snapshot/route.ts), so one request covers a full sync tick
+    // instead of a POST followed by a separate GET.
+    const response = await fetch(`/api/matches/${match.id}/snapshot`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ html }),
+    });
+    if (!response.ok) return;
+    const result = (await response.json()) as {
+      snapshot?: { html?: string } | null;
     };
+    if (result.snapshot?.html) setOpponentSnapshot(result.snapshot.html);
+  }, [match.id]);
+
+  useEffect(() => {
+    const sync = () =>
+      postSnapshot(
+        matchEndedRef.current ? finalPreviewDocRef.current : previewDocRef.current,
+      );
     const initial = window.setTimeout(() => void sync(), 1000);
-    const interval = window.setInterval(() => void sync(), 30_000);
+    // Fast enough that the opponent panel reads as close to live; 3s already
+    // matches the cadence the duo-state poll runs at elsewhere in this app
+    // without issue, and folding the GET into the POST above keeps this from
+    // doubling request volume on top of the faster tick.
+    const interval = window.setInterval(() => void sync(), 3_000);
     return () => {
       window.clearTimeout(initial);
       window.clearInterval(interval);
     };
-  }, [match.id]);
+  }, [postSnapshot]);
 
-  // The periodic sync above can take up to 30s to catch up once the timer
-  // hits zero, which is long enough that the results screen (opened right
-  // after) would still show the last mid-match snapshot. Push the
-  // index.html-anchored one immediately instead of waiting for that tick.
+  // The periodic sync above can take up to a few seconds to catch up once
+  // the timer hits zero, which is long enough that the results screen
+  // (opened right after) would still show a stale mid-match snapshot. Push
+  // the index.html-anchored one immediately instead of waiting for that tick.
   const matchJustEnded = seconds === 0;
   useEffect(() => {
     if (!matchJustEnded) return;
-    void (async () => {
-      await fetch(`/api/matches/${match.id}/snapshot`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ html: finalPreviewDocRef.current }),
-      });
-      const response = await fetch(`/api/matches/${match.id}/snapshot`);
-      if (!response.ok) return;
-      const result = (await response.json()) as {
-        snapshot?: { html?: string } | null;
-      };
-      if (result.snapshot?.html) setOpponentSnapshot(result.snapshot.html);
-    })();
-  }, [matchJustEnded, match.id]);
+    void postSnapshot(finalPreviewDocRef.current);
+  }, [matchJustEnded, postSnapshot]);
 
   useEffect(() => {
     if (seconds === 0 && !outcome)
