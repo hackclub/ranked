@@ -9,13 +9,14 @@
     "dev": "vinext dev --hostname 0.0.0.0",
     "build": "vite build",
     "start": "node .output/server/index.mjs",
-    "test": "NITRO_PRESET=vercel npm run build && node --test tests/rendered-html.test.mjs",
+    "test": "NITRO_PRESET=vercel npm run build && node --test tests/*.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern .output --ignore-pattern .vercel --ignore-pattern .wrangler",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
     "db:migrate:hackatime": "npm run db:migrate",
-    "db:wipe-users": "node scripts/wipe-users.mjs"
+    "db:wipe-users": "node scripts/wipe-users.mjs",
+    "db:clear-matches": "node scripts/clear-matches.mjs"
   },
   "dependencies": {
     "@liveblocks/client": "^3.23.0",
