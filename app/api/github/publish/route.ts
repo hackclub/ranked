@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { publishWebsite, updateDirectoryIndex, PUBLISHABLE_FILE_NAME, type DirectoryBuild } from "@/app/lib/github";
+import { publishWebsite, PUBLISHABLE_FILE_NAME, type DirectoryBuild } from "@/app/lib/github";
 import { decryptSession, SESSION_COOKIE } from "@/app/lib/session";
 import { logAudit } from "@/app/lib/audit";
 import {
@@ -54,7 +54,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(prior[0]);
     }
     if (files !== undefined && !validFileMap(files, 50, 500_000)) return NextResponse.json({ error: "Invalid source files." }, { status: 400 });
-    const result = await publishWebsite(session.github.accessToken, session.github.login, name, pages!, files, trimmedDescription);
+    // Read before the commit so the freshly-published build can be folded
+    // into the same directory-listing render inside publishWebsite, instead
+    // of that listing needing its own follow-up commit after the fact.
+    const existingBuilds = await getSql()`SELECT p.github_repo AS "folderName", m.theme, p.created_at AS "publishedAt"
+      FROM publications p JOIN matches m ON m.id=p.match_id
+      WHERE p.published_by=${session.user.id} ORDER BY p.created_at DESC`;
+    const result = await publishWebsite(session.github.accessToken, session.github.login, name, player.theme, pages!, files, trimmedDescription, existingBuilds as DirectoryBuild[]);
     const publicationId = crypto.randomUUID();
     await getSql()`INSERT INTO publications (id,match_id,team,repository_url,pages_url,github_repo,published_by,description)
       VALUES (${publicationId},${matchId},${player.team}::match_team,${result.repositoryUrl},${result.pagesUrl},${result.folderName},${session.user.id},${trimmedDescription})
@@ -75,15 +81,6 @@ export async function POST(request: NextRequest) {
         targetType: "match",
         targetId: matchId,
       });
-    }
-
-    const builds = await getSql()`SELECT p.github_repo AS "folderName", m.theme, p.created_at AS "publishedAt"
-      FROM publications p JOIN matches m ON m.id=p.match_id
-      WHERE p.published_by=${session.user.id} ORDER BY p.created_at DESC`;
-    try {
-      await updateDirectoryIndex(session.github.accessToken, session.github.login, builds as DirectoryBuild[]);
-    } catch (error) {
-      console.error("Failed to update builds directory index", error);
     }
 
     const saved = await getSql()`SELECT id AS "publicationId",airtable_status AS "airtableStatus"

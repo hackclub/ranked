@@ -146,8 +146,6 @@ async function githubRequest<T>(
 const RANKED_REPO = "hackclubranked";
 const isNotFound = (error: unknown) =>
   error instanceof Error && error.message.includes("(404)");
-const isConflict = (error: unknown) =>
-  error instanceof Error && error.message.includes("(409)");
 
 // The session caches the GitHub login from whenever the account was first
 // connected. If it's ever renamed on GitHub afterward, that cached login
@@ -178,28 +176,11 @@ async function pathExists(token: string, login: string, path: string) {
 }
 
 async function configureRankedRepoForPages(token: string, login: string) {
-  // The repo is shared across every match the user publishes, so this runs
-  // again on every publish after the first — .nojekyll already exists by
-  // then, and GitHub's contents API 422s on an update PUT with no "sha".
-  let nojekyllSha: string | undefined;
-  try {
-    const existing = await githubRequest<{ sha: string }>(
-      token,
-      repoContentsPath(login, ".nojekyll"),
-    );
-    nojekyllSha = existing.sha;
-  } catch (error) {
-    if (!isNotFound(error)) throw error;
-  }
-  await githubRequest(token, repoContentsPath(login, ".nojekyll"), {
-    method: "PUT",
-    body: JSON.stringify({
-      message: "Configure GitHub Pages",
-      content: "",
-      branch: "main",
-      ...(nojekyllSha ? { sha: nojekyllSha } : {}),
-    }),
-  });
+  // .nojekyll itself is committed alongside the build's own files in
+  // commitFiles (see publishWebsite) rather than PUT here on its own — that
+  // used to cost every publish an extra standalone commit just to re-affirm
+  // a file that, after the first publish, never actually changes. Only the
+  // repo settings call (not a content commit) belongs here.
   try {
     await githubRequest(
       token,
@@ -250,10 +231,9 @@ async function ensureRankedRepo(token: string, login: string) {
   } catch (error) {
     if (!(error instanceof GitHubNameConflictError)) throw error;
   }
-  // Genuine name conflict: it already exists. Still run Pages setup — both
-  // steps are idempotent (the .nojekyll write is a no-op if unchanged, and
-  // the Pages POST already tolerates "already enabled") — in case an
-  // earlier attempt created the repo but died before finishing that part.
+  // Genuine name conflict: it already exists. Still run Pages setup — it's
+  // idempotent (the POST tolerates "already enabled") — in case an earlier
+  // attempt created the repo but died before finishing that part.
   const repository = await githubRequest<{ html_url: string }>(
     token,
     `https://api.github.com/repos/${login}/${RANKED_REPO}`,
@@ -266,13 +246,79 @@ const RESERVED_FOLDER_NAMES = ["index.html", "readme.md", ".nojekyll"];
 export const PUBLISHABLE_FILE_NAME =
   /^[A-Za-z0-9][A-Za-z0-9._-]*\.(html|css|js)$/;
 
+const isRefUpdateFailure = (error: unknown) =>
+  error instanceof Error &&
+  (error.message.includes("(409)") || error.message.includes("(422)"));
+
+// Commits every entry in `files` (path -> content) as ONE commit on main,
+// via the Git Data API (tree + commit + ref update) instead of the Contents
+// API's per-file PUT — a PUT creates its own commit each time, so publishing
+// a build with a handful of pages, a README, css/js sources, .nojekyll, and
+// the root directory listing used to cost 6-8+ separate commits for one
+// publish. Building one tree with every changed path lands them all at once.
+async function commitFiles(
+  token: string,
+  login: string,
+  files: Record<string, string>,
+  message: string,
+) {
+  const refUrl = `https://api.github.com/repos/${login}/${RANKED_REPO}/git/ref/heads/main`;
+  const treesUrl = `https://api.github.com/repos/${login}/${RANKED_REPO}/git/trees`;
+  const commitsUrl = `https://api.github.com/repos/${login}/${RANKED_REPO}/git/commits`;
+  const updateRefUrl = `https://api.github.com/repos/${login}/${RANKED_REPO}/git/refs/heads/main`;
+  const entries = Object.entries(files).map(([path, content]) => ({
+    path,
+    mode: "100644",
+    type: "blob",
+    content,
+  }));
+  // Retries against a freshly-read base if another commit (a concurrent
+  // publish landing on main between the read and the write) beat this one to
+  // the ref update — the same race the old per-file PUTs could hit, but now
+  // there's one ref update to retry instead of several.
+  for (let attempt = 1; ; attempt++) {
+    const ref = await githubRequest<{ object: { sha: string } }>(
+      token,
+      refUrl,
+    );
+    const baseCommitSha = ref.object.sha;
+    const baseCommit = await githubRequest<{ tree: { sha: string } }>(
+      token,
+      `https://api.github.com/repos/${login}/${RANKED_REPO}/git/commits/${baseCommitSha}`,
+    );
+    const tree = await githubRequest<{ sha: string }>(token, treesUrl, {
+      method: "POST",
+      body: JSON.stringify({ base_tree: baseCommit.tree.sha, tree: entries }),
+    });
+    const commit = await githubRequest<{ sha: string }>(token, commitsUrl, {
+      method: "POST",
+      body: JSON.stringify({
+        message,
+        tree: tree.sha,
+        parents: [baseCommitSha],
+      }),
+    });
+    try {
+      await githubRequest(token, updateRefUrl, {
+        method: "PATCH",
+        body: JSON.stringify({ sha: commit.sha }),
+      });
+      return;
+    } catch (error) {
+      if (!isRefUpdateFailure(error) || attempt >= 3) throw error;
+    }
+  }
+}
+
 export async function publishWebsite(
   token: string,
   sessionLogin: string,
   requestedName: string,
+  theme: string,
   pages: Record<string, string>,
-  sourceFiles?: Record<string, string>,
-  description?: string,
+  sourceFiles: Record<string, string> | undefined,
+  description: string | undefined,
+  existingBuilds: DirectoryBuild[],
 ) {
   const folderName = requestedName.trim();
   if (
@@ -303,30 +349,15 @@ export async function publishWebsite(
     );
   }
 
-  const putFile = (path: string, content: string, message: string) =>
-    githubRequest(token, repoContentsPath(login, path), {
-      method: "PUT",
-      body: JSON.stringify({
-        message,
-        content: Buffer.from(content, "utf8").toString("base64"),
-        branch: "main",
-      }),
-    });
+  const files: Record<string, string> = { ".nojekyll": "" };
 
   for (const [name, content] of Object.entries(pages)) {
     if (!PUBLISHABLE_FILE_NAME.test(name) || !name.endsWith(".html")) continue;
-    await putFile(
-      `${folderName}/${name}`,
-      content,
-      `Publish ${folderName} ${name}`,
-    );
+    files[`${folderName}/${name}`] = content;
   }
   const trimmedDescription = description?.trim();
-  await putFile(
-    `${folderName}/README.md`,
-    `# ${folderName}\n\n${trimmedDescription ? `${trimmedDescription}\n\n` : ""}This website was built live on [Hack Club Ranked](https://ranked.hackclub.com).\n`,
-    `Add README for ${folderName}`,
-  );
+  files[`${folderName}/README.md`] =
+    `# ${folderName}\n\n${trimmedDescription ? `${trimmedDescription}\n\n` : ""}This website was built live on [Hack Club Ranked](https://ranked.hackclub.com).\n`;
   // .html source is skipped here — the bundled version above already covers
   // it, so keeping the raw copy too would just duplicate every page. .css/.js
   // still need their unbundled originals (the pages above only carry them
@@ -334,12 +365,29 @@ export async function publishWebsite(
   for (const [name, content] of Object.entries(sourceFiles ?? {})) {
     if (!PUBLISHABLE_FILE_NAME.test(name) || name.endsWith(".html")) continue;
     const subfolder = name.endsWith(".css") ? "styles" : "scripts";
-    await putFile(
-      `${folderName}/${subfolder}/${name}`,
-      content,
-      `Publish ${folderName} ${name} source`,
-    );
+    files[`${folderName}/${subfolder}/${name}`] = content;
   }
+
+  // The root directory listing folds into this same commit too — it used to
+  // be a separate PUT (and thus a separate commit) after the fact. Existing
+  // entries are re-checked against the repo (rather than trusted from the
+  // database) since there's no in-app unpublish: the only way a listed
+  // folder goes missing is someone deleting it directly on GitHub, and
+  // without this check the gallery would keep linking to it forever. The
+  // build landing in *this* commit obviously doesn't need that check yet.
+  const checkedExisting = await Promise.all(
+    existingBuilds.map(async (build) => ({
+      build,
+      exists: await pathExists(token, login, build.folderName),
+    })),
+  );
+  const liveBuilds: DirectoryBuild[] = [
+    { folderName, theme, publishedAt: new Date().toISOString() },
+    ...checkedExisting.filter(({ exists }) => exists).map(({ build }) => build),
+  ];
+  files["index.html"] = renderDirectoryIndex(login, liveBuilds);
+
+  await commitFiles(token, login, files, `Publish ${folderName}`);
 
   return {
     repositoryUrl: `${repository.html_url}/tree/main/${folderName}`,
@@ -682,59 +730,3 @@ function renderDirectoryIndex(login: string, builds: DirectoryBuild[]) {
 `;
 }
 
-export async function updateDirectoryIndex(
-  token: string,
-  login: string,
-  builds: DirectoryBuild[],
-) {
-  // The directory is rendered from the publications table, not the repo's
-  // actual contents — there's no in-app unpublish, so the only way a listed
-  // folder goes missing is someone deleting it directly on GitHub, but
-  // without this check the gallery would keep linking to it forever.
-  // Checking here (rather than trusting the DB) keeps it self-healing.
-  const checked = await Promise.all(
-    builds.map(async (build) => ({
-      build,
-      exists: await pathExists(token, login, build.folderName),
-    })),
-  );
-  const liveBuilds = checked
-    .filter(({ exists }) => exists)
-    .map(({ build }) => build);
-  const html = renderDirectoryIndex(login, liveBuilds);
-  // Two publishes landing close together (e.g. duo teammates finishing
-  // within moments of each other, or back-to-back matches) can both read
-  // index.html's sha before either writes — GitHub's contents API then
-  // rejects the second PUT with a 409 rather than merging it, and that
-  // used to just be swallowed by the caller, silently dropping whichever
-  // publish lost the race and leaving the directory stuck without its
-  // newest build. `builds` is already this call's complete, current list
-  // (a fresh query, not a diff), so recovering just means re-reading the
-  // sha and retrying the same write.
-  for (let attempt = 1; ; attempt++) {
-    let sha: string | undefined;
-    try {
-      const existing = await githubRequest<{ sha: string }>(
-        token,
-        repoContentsPath(login, "index.html"),
-      );
-      sha = existing.sha;
-    } catch (error) {
-      if (!isNotFound(error)) throw error;
-    }
-    try {
-      await githubRequest(token, repoContentsPath(login, "index.html"), {
-        method: "PUT",
-        body: JSON.stringify({
-          message: "Update builds directory",
-          content: Buffer.from(html, "utf8").toString("base64"),
-          branch: "main",
-          ...(sha ? { sha } : {}),
-        }),
-      });
-      return;
-    } catch (error) {
-      if (!isConflict(error) || attempt >= 3) throw error;
-    }
-  }
-}

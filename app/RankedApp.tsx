@@ -4928,11 +4928,11 @@ function Leaderboard({
   navigate: (s: Screen) => void;
   auth: AuthState;
 }) {
-  const [board, setBoard] = useState<"elo" | "hours">("elo");
+  const [board, setBoard] = useState<"elo" | "hours">("hours");
   const [requestedPage, setRequestedPage] = useState<number | null>(null);
   const [data, setData] = useState<LeaderboardPage | null>(null);
 
-  const changeBoard = (next: "elo" | "hours") => {
+  const changeBoard = (next: "hours" | "elo") => {
     setBoard(next);
     setRequestedPage(null);
     setData(null);
@@ -4962,16 +4962,16 @@ function Leaderboard({
       </div>
       <div className="board-toggle">
         <button
-          className={board === "elo" ? "active" : ""}
-          onClick={() => changeBoard("elo")}
-        >
-          elo
-        </button>
-        <button
           className={board === "hours" ? "active" : ""}
           onClick={() => changeBoard("hours")}
         >
           hours
+        </button>
+        <button
+          className={board === "elo" ? "active" : ""}
+          onClick={() => changeBoard("elo")}
+        >
+          elo
         </button>
       </div>
       <section className="leader-card">
