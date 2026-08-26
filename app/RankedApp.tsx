@@ -305,16 +305,16 @@ const starterFiles: Record<string, string> = {
   <body>
     <!-- to add another page, use a link: <a href="about.html">about</a>
          or a button: <button onclick="goTo('about.html')">about</button> -->
-    <!-- Tailwind utility classes work out of the box, e.g. class="flex items-center gap-4" -->
-    <main><div class="planet"><h1>hello, orbit!</h1></div></main>
+    <!-- Tailwind is enabled! e.g. class="flex items-center gap-4" -->
+    <main><div class="blob"><h1>get started!</h1></div></main>
   </body>
 </html>`,
-  "styles.css": `body { margin: 0; font-family: system-ui; background: #08131f; color: #fff; }
-main { min-height: 100vh; display: grid; place-items: center; overflow: hidden; }
-.planet { width: 220px; aspect-ratio: 1; border-radius: 50%; background: #D891D9;
-  box-shadow: 0 0 0 32px #497CBF22, 0 0 90px #D891D988; display: grid; place-items: center; }
-h1 { font-size: 36px; transform: rotate(-4deg); }`,
-  "script.js": `document.querySelector('.planet')?.addEventListener('click', () => {
+  "styles.css": `body { margin: 0; font-family: ui-monospace, Menlo, monospace; background: #f8eeff; color: #20201f; }
+main { min-height: 100vh; display: grid; place-items: center; }
+.blob { background: #fff3b8; border: 3px solid #20201f; padding: 48px 64px;
+  border-radius: 40% 60% 55% 45% / 45% 40% 60% 55%; box-shadow: 6px 6px 0 #20201f; transform: rotate(-2deg); }
+h1 { font-size: 32px; margin: 0; }`,
+  "script.js": `document.querySelector('.blob')?.addEventListener('click', () => {
   document.body.classList.toggle('clicked');
 });`,
 };
