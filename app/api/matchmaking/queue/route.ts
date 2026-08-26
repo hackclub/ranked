@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { currentUser } from "@/app/lib/current-user";
 import { activeMatch, generateMatchTheme } from "@/app/lib/match-lifecycle";
 import { getVoteGate } from "@/app/lib/vote-gate";
+import { logAudit } from "@/app/lib/audit";
 import { getSql } from "@/db";
 
 export async function GET(request: NextRequest) {
@@ -110,7 +111,7 @@ export async function POST(request: NextRequest) {
   const matchId = crypto.randomUUID();
   const needed = mode === "duo" ? 4 : 2;
   const theme = generateMatchTheme();
-  await getSql()`
+  const clearedQueue = await getSql()`
     WITH candidates AS (
       SELECT q.user_id, q.joined_at, COALESCE(${partyKey}::text IS NOT NULL AND q.party_key=${partyKey}, false) AS is_party
       FROM matchmaking_queue q JOIN users u ON u.id=q.user_id
@@ -134,8 +135,25 @@ export async function POST(request: NextRequest) {
         CASE WHEN s.ord < ${needed / 2} THEN 'blue'::match_team ELSE 'red'::match_team END,
         s.ord, u.elo, NOW() FROM selected s JOIN users u ON u.id=s.user_id CROSS JOIN made RETURNING user_id
     )
-    DELETE FROM matchmaking_queue q USING players p WHERE q.user_id=p.user_id
+    DELETE FROM matchmaking_queue q USING players p WHERE q.user_id=p.user_id RETURNING p.user_id AS "userId"
   `;
+  // The CTE above only inserts into `players`/deletes from the queue when it
+  // actually formed a match (gated on `made`, which only inserts when enough
+  // candidates were found) — a non-empty result here is the only way to tell
+  // whether *this* request was the one that just started a match, versus one
+  // that simply left the requester still queued.
+  if (clearedQueue.length) {
+    const roster = await getSql()`SELECT u.name, mp.team FROM match_players mp JOIN users u ON u.id=mp.user_id
+      WHERE mp.match_id=${matchId} ORDER BY mp.slot`;
+    await logAudit({
+      actor: null,
+      action: "match.started",
+      summary: `A ${mode} match ("${theme}") started — ${roster.map((p) => `${p.name} (${p.team})`).join(", ")}`,
+      targetType: "match",
+      targetId: matchId,
+      metadata: { mode, durationMinutes: duration, theme, players: roster },
+    });
+  }
   const match = await activeMatch(user.id);
   return NextResponse.json(match ? { status: "matched", match } : { status: "queued" });
 }

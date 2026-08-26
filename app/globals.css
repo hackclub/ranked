@@ -514,10 +514,8 @@ select:focus-visible {
   background: var(--green);
 }
 .friend-menu {
-  position: absolute;
+  position: fixed;
   z-index: 31;
-  top: calc(100% + 8px);
-  right: 0;
   width: 152px;
   display: flex;
   flex-direction: column;
@@ -552,6 +550,65 @@ select:focus-visible {
 .friend-menu button.confirming:hover {
   background: var(--red-strong);
   color: white;
+}
+.blocked-menu-anchor {
+  position: relative;
+  display: inline-flex;
+  vertical-align: middle;
+}
+.blocked-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 8px);
+  left: 0;
+  width: 190px;
+  max-height: 220px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  background: var(--paper);
+  border: 2px solid var(--ink);
+  box-shadow: 4px 4px 0 var(--ink);
+  padding: 9px;
+  border-radius: var(--blob);
+}
+.blocked-menu strong {
+  font: 600 9px var(--font-geist-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #5b554d;
+}
+.blocked-menu ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.blocked-menu li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.blocked-menu li span {
+  font: 600 10px var(--font-geist-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.blocked-menu li button {
+  border: 1px solid var(--ink);
+  background: var(--green);
+  padding: 4px 7px;
+  font: 600 8px var(--font-geist-mono);
+  border-radius: var(--blob);
+  flex-shrink: 0;
+}
+.blocked-menu li button:hover {
+  background: #f4ff00;
 }
 .interaction-list li button {
   width: 27px;

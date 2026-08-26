@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { currentUser } from "@/app/lib/current-user";
 import { activeMatch } from "@/app/lib/match-lifecycle";
+import { logAudit } from "@/app/lib/audit";
 import { getSql } from "@/db";
 
 type InvitePartner = {
@@ -72,6 +73,14 @@ export async function POST(request: NextRequest) {
 
   await sql`DELETE FROM duo_invites WHERE status IN ('pending','accepted') AND (from_user_id=${user.id} OR to_user_id=${user.id})`;
   const inserted = await sql`INSERT INTO duo_invites (id, from_user_id, to_user_id, duration_minutes) VALUES (${crypto.randomUUID()}, ${user.id}, ${friendId}, ${duration}) RETURNING id`;
+  await logAudit({
+    actor: { id: user.id, name: user.name, email: user.email },
+    action: "match_invite.sent",
+    summary: `${user.name} invited ${friend[0].name} to a duo match (${duration} min)`,
+    targetType: "duo_invite",
+    targetId: inserted[0].id,
+    metadata: { partnerId: friendId, durationMinutes: duration },
+  });
   return NextResponse.json({ outgoing: { id: inserted[0].id, partnerId: friendId, partnerName: friend[0].name, partnerAvatar: friend[0].avatar } });
 }
 

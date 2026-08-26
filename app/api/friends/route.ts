@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { currentUser } from "@/app/lib/current-user";
+import { currentUser, type DbUser } from "@/app/lib/current-user";
 import { addChallengeProgress } from "@/app/lib/progression";
+import { logAudit } from "@/app/lib/audit";
 import { getSql } from "@/db";
+
+function auditActor(user: DbUser) {
+  return { id: user.id, name: user.name, email: user.email };
+}
 
 async function upsertFriendship(requesterId: string, targetId: string) {
   const pairKey = [requesterId, targetId].sort().join(":");
@@ -29,7 +34,19 @@ export async function POST(request: NextRequest) {
   const targetId = body.targetUserId as string | undefined;
   if (!targetId) return NextResponse.json({ error: "That person has not joined Ranked yet." }, { status: 404 });
   if (targetId === user.id) return NextResponse.json({ error: "You are already your own teammate." }, { status: 400 });
-  return NextResponse.json({ friendship: await upsertFriendship(user.id, targetId) });
+  const friendship = await upsertFriendship(user.id, targetId);
+  if (friendship?.status === "pending") {
+    const target = await getSql()`SELECT name FROM users WHERE id=${targetId}`;
+    await logAudit({
+      actor: auditActor(user),
+      action: "friend_request.sent",
+      summary: `${user.name} sent a friend request to ${target[0]?.name ?? targetId}`,
+      targetType: "friendship",
+      targetId: friendship.id,
+      metadata: { targetUserId: targetId },
+    });
+  }
+  return NextResponse.json({ friendship });
 }
 
 export async function PATCH(request: NextRequest) {
@@ -39,8 +56,18 @@ export async function PATCH(request: NextRequest) {
 
   if (action === "block") {
     const rows = await getSql()`UPDATE friendships SET status='blocked', updated_at=NOW()
-      WHERE id=${friendshipId} AND (requester_id=${user.id} OR addressee_id=${user.id}) RETURNING id`;
+      WHERE id=${friendshipId} AND (requester_id=${user.id} OR addressee_id=${user.id})
+      RETURNING id, (CASE WHEN requester_id=${user.id} THEN addressee_id ELSE requester_id END) AS "otherUserId"`;
     if (!rows.length) return NextResponse.json({ error: "Friend not found" }, { status: 404 });
+    const other = await getSql()`SELECT name FROM users WHERE id=${rows[0].otherUserId}`;
+    await logAudit({
+      actor: auditActor(user),
+      action: "friend.blocked",
+      summary: `${user.name} blocked ${other[0]?.name ?? rows[0].otherUserId}`,
+      targetType: "friendship",
+      targetId: friendshipId,
+      metadata: { otherUserId: rows[0].otherUserId },
+    });
     return NextResponse.json({ ok: true, status: "blocked" });
   }
 
@@ -51,12 +78,38 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ ok: true, status: "removed" });
   }
 
+  if (action === "unblock") {
+    const rows = await getSql()`DELETE FROM friendships
+      WHERE id=${friendshipId} AND (requester_id=${user.id} OR addressee_id=${user.id}) AND status='blocked'
+      RETURNING id, (CASE WHEN requester_id=${user.id} THEN addressee_id ELSE requester_id END) AS "otherUserId"`;
+    if (!rows.length) return NextResponse.json({ error: "Blocked user not found" }, { status: 404 });
+    const other = await getSql()`SELECT name FROM users WHERE id=${rows[0].otherUserId}`;
+    await logAudit({
+      actor: auditActor(user),
+      action: "friend.unblocked",
+      summary: `${user.name} unblocked ${other[0]?.name ?? rows[0].otherUserId}`,
+      targetType: "friendship",
+      targetId: friendshipId,
+      metadata: { otherUserId: rows[0].otherUserId },
+    });
+    return NextResponse.json({ ok: true, status: "removed" });
+  }
+
   const status = action === "accept" ? "accepted" : "declined";
   const rows = await getSql()`UPDATE friendships SET status=${status}::friendship_status, updated_at=NOW()
     WHERE id=${friendshipId} AND addressee_id=${user.id} AND status='pending' RETURNING requester_id AS "requesterId"`;
   if (!rows.length) return NextResponse.json({ error: "Friend request not found" }, { status: 404 });
   if (status === "accepted") {
     await Promise.all([addChallengeProgress(user.id, "add_friends", 1), addChallengeProgress(String(rows[0].requesterId), "add_friends", 1)]);
+    const requester = await getSql()`SELECT name FROM users WHERE id=${rows[0].requesterId}`;
+    await logAudit({
+      actor: auditActor(user),
+      action: "friend_request.accepted",
+      summary: `${user.name} accepted ${requester[0]?.name ?? rows[0].requesterId}'s friend request`,
+      targetType: "friendship",
+      targetId: friendshipId,
+      metadata: { requesterId: rows[0].requesterId },
+    });
   }
   return NextResponse.json({ ok: true, status });
 }

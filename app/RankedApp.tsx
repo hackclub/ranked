@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { CollaborativeEditor } from "./realtime/CollaborativeEditor";
 import { StreamVideo } from "./realtime/StreamVideo";
 import { useCodeRoom, useRealtimeRoom, type PeerVideoLost } from "./realtime/useRealtimeRoom";
@@ -184,22 +185,28 @@ function useEscapeKey(active: boolean, onEscape: () => void) {
 // clicks outside the card silently no-op instead of closing the popover.
 function useOutsideDismiss(
   active: boolean,
-  ref: React.RefObject<HTMLElement | null>,
+  refs:
+    | React.RefObject<HTMLElement | null>
+    | Array<React.RefObject<HTMLElement | null>>,
   onDismiss: () => void,
 ) {
   useEffect(() => {
     if (!active) return;
+    const list = Array.isArray(refs) ? refs : [refs];
     const onPointerDown = (event: PointerEvent) => {
-      if (ref.current && !ref.current.contains(event.target as Node)) {
-        onDismiss();
-      }
+      const target = event.target as Node;
+      const inside = list.some(
+        (ref) => ref.current && ref.current.contains(target),
+      );
+      if (!inside) onDismiss();
     };
     document.addEventListener("pointerdown", onPointerDown);
     return () => document.removeEventListener("pointerdown", onPointerDown);
-  }, [active, ref, onDismiss]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, onDismiss]);
 }
 
-const COLORS = ["#D891D9", "#497CBF", "#CCD96C", "#D99F6C", "#BF5A5A"];
+const COLORS = ["#D891D9", "#497CBF", "#D99F6C", "#BF5A5A"];
 
 async function clearBrowserSiteData() {
   window.localStorage.clear();
@@ -891,6 +898,15 @@ function Home({
   const [friendMenuConfirm, setFriendMenuConfirm] = useState<
     "block" | "unfriend" | null
   >(null);
+  const [blockedFriends, setBlockedFriends] = useState<
+    Array<{ id: string; name: string }>
+  >([]);
+  const [blockedMenuOpen, setBlockedMenuOpen] = useState(false);
+  const blockedMenuAnchorRef = useRef<HTMLDivElement>(null);
+  useOutsideDismiss(blockedMenuOpen, blockedMenuAnchorRef, () =>
+    setBlockedMenuOpen(false),
+  );
+  useEscapeKey(blockedMenuOpen, () => setBlockedMenuOpen(false));
   const slackQueryInputRef = useRef<HTMLInputElement>(null);
   const slackMatches = useMemo(() => {
     const q = slackQuery.replace(/^@/, "").trim().toLowerCase();
@@ -921,6 +937,27 @@ function Home({
     fetch("/api/dashboard")
       .then((response) => (response.ok ? response.json() : null))
       .then((data) => data && setDashboard(data))
+      .catch(() => undefined);
+  }, [auth.user]);
+
+  useEffect(() => {
+    if (!auth.user) return;
+    fetch("/api/friends")
+      .then((response) => (response.ok ? response.json() : null))
+      .then(
+        (data) =>
+          data &&
+          setBlockedFriends(
+            (data.friends ?? [])
+              .filter(
+                (friend: { status: string }) => friend.status === "blocked",
+              )
+              .map((friend: { id: string; name: string }) => ({
+                id: friend.id,
+                name: friend.name,
+              })),
+          ),
+      )
       .catch(() => undefined);
   }, [auth.user]);
 
@@ -1017,12 +1054,34 @@ function Home({
     setFriendMenuConfirm(null);
   };
   const friendMenuAnchorRef = useRef<HTMLDivElement>(null);
+  const friendMenuPopoverRef = useRef<HTMLDivElement>(null);
+  const [friendMenuPosition, setFriendMenuPosition] = useState<{
+    top: number;
+    right: number;
+  } | null>(null);
   useOutsideDismiss(
     Boolean(friendMenuOpen),
-    friendMenuAnchorRef,
+    [friendMenuAnchorRef, friendMenuPopoverRef],
     closeFriendMenu,
   );
   useEscapeKey(Boolean(friendMenuOpen), closeFriendMenu);
+  // The friends list scrolls internally (overflow-y: auto) and the whole card
+  // is rotated via `transform`, which makes `position: fixed` descendants of
+  // it track the card instead of the viewport — so the menu is portaled to
+  // <body> and positioned from the button's own rect instead of being an
+  // absolutely-positioned child of the (clipping) scroll container. Since the
+  // portaled menu no longer scrolls with the list, close it on scroll/resize
+  // rather than let it drift away from the button it belongs to.
+  useEffect(() => {
+    if (!friendMenuOpen) return;
+    const close = () => closeFriendMenu();
+    document.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      document.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [friendMenuOpen]);
   useEscapeKey(voteGateOpen, () => setVoteGateOpen(false));
   useEscapeKey(slackSuggestionsOpen, () => setSlackSuggestionsOpen(false));
 
@@ -1035,6 +1094,7 @@ function Home({
     });
     if (!response.ok) return toast("Could not block that friend");
     removeFriendFromDashboard(friendshipId);
+    setBlockedFriends((current) => [{ id: friendshipId, name }, ...current]);
     toast(`Blocked @${name}`);
   };
 
@@ -1048,6 +1108,19 @@ function Home({
     if (!response.ok) return toast("Could not remove that friend");
     removeFriendFromDashboard(friendshipId);
     toast(`Removed @${name} from friends`);
+  };
+
+  const unblockFriend = async (friendshipId: string, name: string) => {
+    const response = await fetch("/api/friends", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ friendshipId, action: "unblock" }),
+    });
+    if (!response.ok) return toast("Could not unblock that person");
+    setBlockedFriends((current) =>
+      current.filter((friend) => friend.id !== friendshipId),
+    );
+    toast(`Unblocked @${name}`);
   };
 
   return (
@@ -1064,6 +1137,40 @@ function Home({
               >
                 <Icon name="plus" size={13} />
               </button>
+              {blockedFriends.length > 0 && (
+                <span
+                  className="blocked-menu-anchor"
+                  ref={blockedMenuAnchorRef}
+                >
+                  <button
+                    aria-label="Manage blocked people"
+                    aria-expanded={blockedMenuOpen}
+                    onClick={() => setBlockedMenuOpen((open) => !open)}
+                  >
+                    <Icon name="lock" size={12} />
+                  </button>
+                  {blockedMenuOpen && (
+                    <div className="blocked-menu" role="menu">
+                      <strong>blocked</strong>
+                      <ul>
+                        {blockedFriends.map((friend) => (
+                          <li key={friend.id}>
+                            <span>{friend.name}</span>
+                            <button
+                              role="menuitem"
+                              onClick={() =>
+                                void unblockFriend(friend.id, friend.name)
+                              }
+                            >
+                              unblock
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </span>
+              )}
             </CardTitle>
             <ul className="people-list">
               {dashboard?.friends.length ? (
@@ -1103,8 +1210,14 @@ function Home({
                         >
                           <button
                             className="friend-menu-button"
-                            onClick={() => {
+                            onClick={(event) => {
                               if (menuOpen) return closeFriendMenu();
+                              const rect =
+                                event.currentTarget.getBoundingClientRect();
+                              setFriendMenuPosition({
+                                top: rect.bottom + 8,
+                                right: window.innerWidth - rect.right,
+                              });
                               setFriendMenuOpen(friend.friendshipId);
                               setFriendMenuConfirm(null);
                             }}
@@ -1113,52 +1226,63 @@ function Home({
                           >
                             <Icon name="settings" size={13} />
                           </button>
-                          {menuOpen && (
-                            <div className="friend-menu" role="menu">
-                              <button
-                                role="menuitem"
-                                className={
-                                  friendMenuConfirm === "unfriend"
-                                    ? "confirming"
-                                    : ""
-                                }
-                                onClick={() =>
-                                  friendMenuConfirm === "unfriend"
-                                    ? void unfriendFriend(
-                                        friend.friendshipId,
-                                        friend.name,
-                                      )
-                                    : setFriendMenuConfirm("unfriend")
-                                }
+                          {menuOpen &&
+                            friendMenuPosition &&
+                            createPortal(
+                              <div
+                                className="friend-menu"
+                                role="menu"
+                                ref={friendMenuPopoverRef}
+                                style={{
+                                  top: friendMenuPosition.top,
+                                  right: friendMenuPosition.right,
+                                }}
                               >
-                                <Icon name="minus" size={13} />
-                                {friendMenuConfirm === "unfriend"
-                                  ? "click again to remove"
-                                  : "unfriend"}
-                              </button>
-                              <button
-                                role="menuitem"
-                                className={
-                                  friendMenuConfirm === "block"
-                                    ? "confirming"
-                                    : "danger"
-                                }
-                                onClick={() =>
-                                  friendMenuConfirm === "block"
-                                    ? void blockFriend(
-                                        friend.friendshipId,
-                                        friend.name,
-                                      )
-                                    : setFriendMenuConfirm("block")
-                                }
-                              >
-                                <Icon name="flag" size={13} />
-                                {friendMenuConfirm === "block"
-                                  ? "click again to block"
-                                  : "block"}
-                              </button>
-                            </div>
-                          )}
+                                <button
+                                  role="menuitem"
+                                  className={
+                                    friendMenuConfirm === "unfriend"
+                                      ? "confirming"
+                                      : ""
+                                  }
+                                  onClick={() =>
+                                    friendMenuConfirm === "unfriend"
+                                      ? void unfriendFriend(
+                                          friend.friendshipId,
+                                          friend.name,
+                                        )
+                                      : setFriendMenuConfirm("unfriend")
+                                  }
+                                >
+                                  <Icon name="minus" size={13} />
+                                  {friendMenuConfirm === "unfriend"
+                                    ? "click again to remove"
+                                    : "unfriend"}
+                                </button>
+                                <button
+                                  role="menuitem"
+                                  className={
+                                    friendMenuConfirm === "block"
+                                      ? "confirming"
+                                      : "danger"
+                                  }
+                                  onClick={() =>
+                                    friendMenuConfirm === "block"
+                                      ? void blockFriend(
+                                          friend.friendshipId,
+                                          friend.name,
+                                        )
+                                      : setFriendMenuConfirm("block")
+                                  }
+                                >
+                                  <Icon name="flag" size={13} />
+                                  {friendMenuConfirm === "block"
+                                    ? "click again to block"
+                                    : "block"}
+                                </button>
+                              </div>,
+                              document.body,
+                            )}
                         </div>
                       ) : (
                         <i className="status offline" />
@@ -2846,6 +2970,23 @@ function Match({
   useEffect(() => {
     previewDocRef.current = previewDoc;
   }, [previewDoc]);
+  // The snapshot an opponent sees mid-match intentionally follows whatever
+  // page you're actively working on (a live peek at your progress). But once
+  // the match is over, that page is a coding-session accident, not the site
+  // — the opponent's final preview (and the results-screen comparison) should
+  // anchor to index.html regardless of what page either of you last had open.
+  const finalPreviewDoc = useMemo(
+    () => buildPage(files, fileOrder, "index.html", { preview: true }),
+    [files, fileOrder],
+  );
+  const finalPreviewDocRef = useRef(finalPreviewDoc);
+  useEffect(() => {
+    finalPreviewDocRef.current = finalPreviewDoc;
+  }, [finalPreviewDoc]);
+  const matchEndedRef = useRef(seconds === 0);
+  useEffect(() => {
+    if (seconds === 0) matchEndedRef.current = true;
+  }, [seconds]);
   const ownPreviewFrames = useRef<Set<Window>>(new Set());
   const registerOwnPreviewFrame = useCallback(
     (el: HTMLIFrameElement | null) => {
@@ -3332,7 +3473,11 @@ function Match({
       await fetch(`/api/matches/${match.id}/snapshot`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ html: previewDocRef.current }),
+        body: JSON.stringify({
+          html: matchEndedRef.current
+            ? finalPreviewDocRef.current
+            : previewDocRef.current,
+        }),
       });
       const response = await fetch(`/api/matches/${match.id}/snapshot`);
       if (response.ok) {
@@ -3349,6 +3494,28 @@ function Match({
       window.clearInterval(interval);
     };
   }, [match.id]);
+
+  // The periodic sync above can take up to 30s to catch up once the timer
+  // hits zero, which is long enough that the results screen (opened right
+  // after) would still show the last mid-match snapshot. Push the
+  // index.html-anchored one immediately instead of waiting for that tick.
+  const matchJustEnded = seconds === 0;
+  useEffect(() => {
+    if (!matchJustEnded) return;
+    void (async () => {
+      await fetch(`/api/matches/${match.id}/snapshot`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ html: finalPreviewDocRef.current }),
+      });
+      const response = await fetch(`/api/matches/${match.id}/snapshot`);
+      if (!response.ok) return;
+      const result = (await response.json()) as {
+        snapshot?: { html?: string } | null;
+      };
+      if (result.snapshot?.html) setOpponentSnapshot(result.snapshot.html);
+    })();
+  }, [matchJustEnded, match.id]);
 
   useEffect(() => {
     if (seconds === 0 && !outcome)
@@ -3410,7 +3577,7 @@ function Match({
                   compact
                   name={teammate?.name ?? "waiting…"}
                   team={teammate ? "teammate · live" : "waiting for teammate"}
-                  color={teammate?.color ?? COLORS[2]}
+                  color={teammate?.color ?? COLORS[0]}
                   avatar={teammate?.avatar}
                   stream={teammate?.video ? teammate.stream : null}
                   audioSource={teammate?.stream}
