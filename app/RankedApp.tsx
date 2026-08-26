@@ -434,6 +434,18 @@ function buildPage(
     .map((name) => files[name] ?? "")
     .join("\n");
   const navShim = buildNavShim(fileOrder, Boolean(opts.preview));
+  // Splicing these in as raw text (finding "</head>"/"</body>" and inserting
+  // strings around them) used to mean a player's own unclosed tag — e.g. a
+  // <div missing its closing `>` — could swallow the very tags being spliced
+  // in as bogus attribute soup, since the browser's HTML parser keeps
+  // consuming content looking for the `>` that ends the broken start tag.
+  // The player's own <script> got eaten this way too, dumping the nav shim's
+  // raw JS source onto the page as visible text instead of running it.
+  // Parsing through DOMParser first — the same recovery algorithm the real
+  // render applies — resolves any broken markup into a real element tree
+  // before anything of ours is added, so our tags are appended as actual DOM
+  // nodes that can never be un-parsed back into an earlier broken tag.
+  const doc = new DOMParser().parseFromString(base, "text/html");
   // Tailwind's Play CDN build needs no bundler, so it's the only way to give
   // players utility classes on a raw html/css/js page with no build step —
   // it injects its own <style> at load, ahead of styles.css in source order
@@ -441,19 +453,19 @@ function buildPage(
   // few KB fetched, nothing generated) for anyone who never types a
   // Tailwind class, and this same output is what gets committed on publish,
   // so the deployed GitHub Pages site renders identically to the preview.
-  const tailwindScript = `<script src="https://cdn.tailwindcss.com"><\/script>`;
-  const withStyles = base.includes("</head>")
-    ? base.replace(
-        "</head>",
-        `${tailwindScript}<style>${styles}</style></head>`,
-      )
-    : `${tailwindScript}<style>${styles}</style>${base}`;
-  return withStyles.includes("</body>")
-    ? withStyles.replace(
-        "</body>",
-        `<script>${navShim}<\/script><script>${scripts}<\/script></body>`,
-      )
-    : `${withStyles}<script>${navShim}<\/script><script>${scripts}<\/script>`;
+  const tailwindScript = doc.createElement("script");
+  tailwindScript.src = "https://cdn.tailwindcss.com";
+  doc.head.appendChild(tailwindScript);
+  const styleEl = doc.createElement("style");
+  styleEl.textContent = styles;
+  doc.head.appendChild(styleEl);
+  const navShimScript = doc.createElement("script");
+  navShimScript.textContent = navShim;
+  doc.body.appendChild(navShimScript);
+  const scriptsEl = doc.createElement("script");
+  scriptsEl.textContent = scripts;
+  doc.body.appendChild(scriptsEl);
+  return `<!doctype html>\n${doc.documentElement.outerHTML}`;
 }
 
 // GitHub Pages takes ~30-90s to build after the first push, so a pagesUrl
