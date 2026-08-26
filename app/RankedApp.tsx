@@ -5,8 +5,13 @@ import { createPortal } from "react-dom";
 import { CollaborativeEditor } from "./realtime/CollaborativeEditor";
 import { StreamVideo } from "./realtime/StreamVideo";
 import { useCodeRoom, useRealtimeRoom, type PeerVideoLost } from "./realtime/useRealtimeRoom";
+import {
+  supportedRecordingMimeType,
+  useMatchRecording,
+} from "./realtime/useMatchRecording";
 import { getYjsProviderForRoom } from "@liveblocks/yjs";
 import { isAdmin } from "./lib/admin";
+import { recordingConsentCopy } from "./lib/recording-policy";
 import { AvatarCustomizer, ScribbleAvatar } from "./components/GoofyGuyAvatar";
 import {
   DEFAULT_AVATAR,
@@ -317,6 +322,17 @@ h1 { font-size: 36px; transform: rotate(-4deg); }`,
 // on the voting page.
 const DESCRIPTION_MAX_LENGTH = 500;
 
+// Website previews execute player-authored JavaScript. Keep the frame's
+// feature policy explicit as defense in depth on top of the opaque-origin
+// sandbox: submitted sites never need access to the match camera or mic.
+const PREVIEW_IFRAME_ALLOW = [
+  "camera 'none'",
+  "microphone 'none'",
+  "geolocation 'none'",
+  "display-capture 'none'",
+].join("; ");
+const PREVIEW_MAX_HTML_LENGTH = 1_000_000;
+
 // GitHub Pages usually finishes its first build well within this window; it's
 // just the countdown estimate shown while we poll for the real thing.
 const PAGES_BUILD_ESTIMATE_SECONDS = 30;
@@ -385,7 +401,14 @@ document.addEventListener("click", function (e) {
 if (!window.__rankedLiveUpdateBound) {
   window.__rankedLiveUpdateBound = true;
   window.addEventListener("message", function (e) {
-    if (!e.data || e.data.source !== "ranked-preview" || e.data.type !== "update") return;
+    if (
+      e.source !== window.parent ||
+      !e.data ||
+      e.data.source !== "ranked-preview" ||
+      e.data.type !== "update" ||
+      typeof e.data.html !== "string" ||
+      e.data.html.length > ${PREVIEW_MAX_HTML_LENGTH}
+    ) return;
     var next = new DOMParser().parseFromString(e.data.html, "text/html");
     document.head.innerHTML = next.head.innerHTML;
     document.body.innerHTML = next.body.innerHTML;
@@ -461,7 +484,10 @@ function buildPage(
   doc.head.appendChild(styleEl);
   const navShimScript = doc.createElement("script");
   navShimScript.textContent = navShim;
-  doc.body.appendChild(navShimScript);
+  // Install the trusted bridge in the recovered head. Keeping it outside the
+  // player-authored body means malformed body markup cannot absorb it or make
+  // its source render as visible text.
+  doc.head.prepend(navShimScript);
   const scriptsEl = doc.createElement("script");
   scriptsEl.textContent = scripts;
   doc.body.appendChild(scriptsEl);
@@ -1848,6 +1874,7 @@ function Lobby({
   const [micDeviceId, setMicDeviceId] = useState("");
   const [videoDeviceId, setVideoDeviceId] = useState("");
   const [matching, setMatching] = useState(false);
+  const [recordingConsent, setRecordingConsent] = useState(false);
   const [matchingPhase, setMatchingPhase] = useState(
     "contacting matchmaking service…",
   );
@@ -1962,6 +1989,14 @@ function Lobby({
       toast("Respond to or cancel the pending duo invite first");
       return;
     }
+    if (!recordingConsent) {
+      toast("Please consent to the 10-day match recording policy first");
+      return;
+    }
+    if (!supportedRecordingMimeType()) {
+      toast("This browser cannot securely record match audio/video. Try a current Chrome, Edge, Firefox, or Safari.");
+      return;
+    }
     setMatching(true);
     setMatchingPhase("contacting matchmaking service…");
     try {
@@ -1989,6 +2024,7 @@ function Lobby({
           mode,
           durationMinutes: effectiveLength,
           experience,
+          recordingConsent: true,
         }),
       });
       if (result.code === "hackatime_required") {
@@ -2022,7 +2058,11 @@ function Lobby({
       }>("/api/matchmaking/test-match", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ durationMinutes: effectiveLength, mode }),
+        body: JSON.stringify({
+          durationMinutes: effectiveLength,
+          mode,
+          recordingConsent: true,
+        }),
       });
       if (result.code === "hackatime_required") {
         window.location.assign("/api/auth/hackatime/start");
@@ -2337,10 +2377,22 @@ function Lobby({
           <DailyChallenges challenges={challenges} resetsIn={resetsIn} />
 
           <div className="match-dock">
+            <label className={`recording-consent ${recordingConsent ? "accepted" : ""}`}>
+              <input
+                type="checkbox"
+                checked={recordingConsent}
+                onChange={(event) => setRecordingConsent(event.target.checked)}
+                disabled={matching}
+              />
+              <span>
+                <strong>audio/video recording required</strong>
+                <small>{recordingConsentCopy()}</small>
+              </span>
+            </label>
             <button
               className={`primary-button match-dock-button ${matching ? "matching" : ""}`}
               onClick={() => void ready()}
-              disabled={!matching && hasPendingDuoInvite}
+              disabled={!matching && (hasPendingDuoInvite || !recordingConsent)}
             >
               {matching ? (
                 <>
@@ -2361,6 +2413,7 @@ function Lobby({
               <button
                 className="test-lobby-button"
                 onClick={() => void testEmptyLobby()}
+                disabled={!recordingConsent}
               >
                 enter empty lobby (test)
               </button>
@@ -2935,6 +2988,10 @@ function Match({
     videoDeviceId || undefined,
     onPeerVideoLost,
   );
+  const {
+    status: recordingStatus,
+    error: recordingError,
+  } = useMatchRecording(match.id, localStream, seconds > 0 && !outcome);
   const room = useCodeRoom(`ranked:code:${match.id}:${team}`);
 
   useEffect(() => {
@@ -2978,6 +3035,10 @@ function Match({
       toast("Camera/mic blocked — check your browser permissions and rejoin");
     }
   }, [status, toast]);
+
+  useEffect(() => {
+    if (recordingError) toast(`Recording problem: ${recordingError}`);
+  }, [recordingError, toast]);
 
   useEffect(() => {
     if (!room) return;
@@ -3782,6 +3843,15 @@ function Match({
             </div>
           </div>
           <div className="match-actions">
+            <div
+              className={`match-recording-indicator ${recordingStatus}`}
+              role="status"
+              title="Audio and video are privately retained for 10 days"
+            >
+              <i />
+              <span>{recordingStatus === "error" || recordingStatus === "unsupported" ? "REC ERROR" : "REC"}</span>
+              <small>private · 10 days</small>
+            </div>
             <button
               className="settings-gear"
               onClick={() => setSettingsOpen(true)}
@@ -4374,6 +4444,7 @@ function Match({
             title="Your website live preview"
             srcDoc={iframeSrcDoc}
             sandbox="allow-scripts"
+            allow={PREVIEW_IFRAME_ALLOW}
             referrerPolicy="no-referrer"
           />
           <button
@@ -4393,6 +4464,7 @@ function Match({
                 title="Opponent website preview"
                 srcDoc={opponentSnapshot}
                 sandbox="allow-scripts"
+                allow={PREVIEW_IFRAME_ALLOW}
                 referrerPolicy="no-referrer"
               />
             ) : (
@@ -4519,6 +4591,7 @@ function Match({
               title="Expanded live preview"
               srcDoc={iframeSrcDoc}
               sandbox="allow-scripts"
+              allow={PREVIEW_IFRAME_ALLOW}
               referrerPolicy="no-referrer"
             />
           </div>
@@ -4539,6 +4612,7 @@ function Match({
                 title="Expanded opponent preview"
                 srcDoc={opponentSnapshot}
                 sandbox="allow-scripts"
+                allow={PREVIEW_IFRAME_ALLOW}
                 referrerPolicy="no-referrer"
               />
             ) : (
@@ -4611,6 +4685,7 @@ function Match({
                     title="Your site"
                     srcDoc={iframeSrcDoc}
                     sandbox="allow-scripts"
+                    allow={PREVIEW_IFRAME_ALLOW}
                     referrerPolicy="no-referrer"
                   />
                   <button
@@ -4633,6 +4708,7 @@ function Match({
                       title="Opponent's site"
                       srcDoc={opponentSnapshot}
                       sandbox="allow-scripts"
+                      allow={PREVIEW_IFRAME_ALLOW}
                       referrerPolicy="no-referrer"
                     />
                   ) : (
@@ -4683,6 +4759,7 @@ function Match({
               title="Automatic submission screenshot"
               srcDoc={previewDoc}
               sandbox="allow-same-origin"
+              allow={PREVIEW_IFRAME_ALLOW}
               tabIndex={-1}
               aria-hidden="true"
             />
@@ -5571,6 +5648,7 @@ function Voting({
                   title="Build A"
                   src={match.sites.blue.pagesUrl}
                   sandbox="allow-scripts allow-same-origin"
+                  allow={PREVIEW_IFRAME_ALLOW}
                   referrerPolicy="no-referrer"
                 />
               </div>
@@ -5611,6 +5689,7 @@ function Voting({
                   title="Build B"
                   src={match.sites.red.pagesUrl}
                   sandbox="allow-scripts allow-same-origin"
+                  allow={PREVIEW_IFRAME_ALLOW}
                   referrerPolicy="no-referrer"
                 />
               </div>

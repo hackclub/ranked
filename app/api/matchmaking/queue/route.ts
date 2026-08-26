@@ -3,6 +3,8 @@ import { currentUser } from "@/app/lib/current-user";
 import { activeMatch, generateMatchTheme } from "@/app/lib/match-lifecycle";
 import { getVoteGate } from "@/app/lib/vote-gate";
 import { logAudit } from "@/app/lib/audit";
+import { RECORDING_POLICY_VERSION } from "@/app/lib/recording-policy";
+import { recordingStorageConfigured } from "@/app/lib/r2";
 import { getSql } from "@/db";
 
 async function currentQueueState(userId: string) {
@@ -44,7 +46,25 @@ export async function POST(request: NextRequest) {
       { status: 403 },
     );
   }
+  if (!recordingStorageConfigured()) {
+    return NextResponse.json(
+      {
+        error: "Private match recording storage is not configured yet.",
+        code: "recording_unavailable",
+      },
+      { status: 503 },
+    );
+  }
   const body = await request.json();
+  if (body.recordingConsent !== true) {
+    return NextResponse.json(
+      {
+        error: "You must consent to the 10-day audio/video recording policy before joining a match.",
+        code: "recording_consent_required",
+      },
+      { status: 403 },
+    );
+  }
   const requestedMode = body.mode === "duo" ? "duo" : "solo";
   const requestedDuration = [10, 30, 60].includes(Number(body.durationMinutes)) ? Number(body.durationMinutes) : 10;
   const experience = ["beginner", "intermediate", "expert"].includes(body.experience) ? body.experience : user.experience;
@@ -111,6 +131,7 @@ export async function POST(request: NextRequest) {
         SELECT q.user_id
         FROM matchmaking_queue q JOIN users u ON u.id = q.user_id
         WHERE q.party_key IS NULL AND q.mode = 'duo'::match_mode AND q.duration_minutes = ${duration}
+          AND q.recording_consented_at IS NOT NULL
           AND q.user_id <> ${user.id}
           AND NOT EXISTS (
             SELECT 1 FROM duo_invites existing
@@ -153,10 +174,12 @@ export async function POST(request: NextRequest) {
   }
 
   await getSql()`UPDATE users SET experience = ${experience}::experience_level WHERE id = ${user.id}`;
-  await getSql()`INSERT INTO matchmaking_queue (user_id, mode, duration_minutes, experience, elo, party_key)
-    VALUES (${user.id}, ${mode}::match_mode, ${duration}, ${experience}::experience_level, ${user.elo}, ${partyKey})
+  await getSql()`INSERT INTO matchmaking_queue
+      (user_id, mode, duration_minutes, experience, elo, party_key, recording_consented_at)
+    VALUES (${user.id}, ${mode}::match_mode, ${duration}, ${experience}::experience_level, ${user.elo}, ${partyKey}, NOW())
     ON CONFLICT (user_id) DO UPDATE SET mode=EXCLUDED.mode, duration_minutes=EXCLUDED.duration_minutes,
-      experience=EXCLUDED.experience, elo=EXCLUDED.elo, party_key=EXCLUDED.party_key, joined_at=NOW()`;
+      experience=EXCLUDED.experience, elo=EXCLUDED.elo, party_key=EXCLUDED.party_key,
+      recording_consented_at=NOW(), joined_at=NOW()`;
 
   const matchId = crypto.randomUUID();
   const theme = generateMatchTheme();
@@ -173,6 +196,7 @@ export async function POST(request: NextRequest) {
         FROM matchmaking_queue q JOIN users u ON u.id=q.user_id
         WHERE q.user_id<>${user.id} AND q.mode='solo'::match_mode
           AND q.duration_minutes=${duration}
+          AND q.recording_consented_at IS NOT NULL
           AND NOT EXISTS (
             SELECT 1 FROM match_players mp JOIN matches m ON m.id=mp.match_id
             WHERE mp.user_id=q.user_id AND m.status='active' AND mp.finished_at IS NULL
@@ -189,7 +213,15 @@ export async function POST(request: NextRequest) {
         INSERT INTO matches (id,mode,duration_minutes,theme,ends_at)
         SELECT ${matchId},'solo'::match_mode,${duration},${theme},
           NOW()+(${duration}||' minutes')::interval
-        WHERE (SELECT COUNT(*) FROM selected)=2 RETURNING id
+        WHERE (SELECT COUNT(*) FROM selected)=2
+          AND (SELECT COUNT(*) FROM selected s JOIN matchmaking_queue q ON q.user_id=s.user_id
+            WHERE q.recording_consented_at IS NOT NULL)=2
+        RETURNING id
+      ), consents AS (
+        INSERT INTO match_recording_consents (match_id,user_id,policy_version,consented_at)
+        SELECT made.id,s.user_id,${RECORDING_POLICY_VERSION},q.recording_consented_at
+        FROM selected s JOIN matchmaking_queue q ON q.user_id=s.user_id CROSS JOIN made
+        RETURNING user_id
       ), players AS (
         INSERT INTO match_players (match_id,user_id,team,slot,pre_elo,last_heartbeat_at)
         SELECT made.id,s.user_id,
@@ -210,6 +242,7 @@ export async function POST(request: NextRequest) {
         FROM matchmaking_queue q JOIN users u ON u.id=q.user_id
         WHERE q.party_key IS NOT NULL AND q.party_key<>${partyKey}
           AND q.mode='duo'::match_mode AND q.duration_minutes=${duration}
+          AND q.recording_consented_at IS NOT NULL
           AND EXISTS (
             SELECT 1 FROM duo_invites di WHERE di.status='accepted'
               AND q.party_key=LEAST(di.from_user_id,di.to_user_id)||':'||GREATEST(di.from_user_id,di.to_user_id)
@@ -249,7 +282,14 @@ export async function POST(request: NextRequest) {
           NOW()+(${duration}||' minutes')::interval
         WHERE (SELECT COUNT(*) FROM own_teammate)=1
           AND (SELECT COUNT(*) FROM opponents)=2
+          AND (SELECT COUNT(*) FROM selected s JOIN matchmaking_queue q ON q.user_id=s.user_id
+            WHERE q.recording_consented_at IS NOT NULL)=4
         RETURNING id
+      ), consents AS (
+        INSERT INTO match_recording_consents (match_id,user_id,policy_version,consented_at)
+        SELECT made.id,s.user_id,${RECORDING_POLICY_VERSION},q.recording_consented_at
+        FROM selected s JOIN matchmaking_queue q ON q.user_id=s.user_id CROSS JOIN made
+        RETURNING user_id
       ), players AS (
         INSERT INTO match_players (match_id,user_id,team,slot,pre_elo,last_heartbeat_at)
         SELECT made.id,s.user_id,
