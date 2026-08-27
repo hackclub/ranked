@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { currentUser } from "@/app/lib/current-user";
 import { activeMatch } from "@/app/lib/match-lifecycle";
 import { logAudit } from "@/app/lib/audit";
+import { addChallengeProgress } from "@/app/lib/progression";
 import { getSql } from "@/db";
 
 type InvitePartner = {
@@ -125,6 +126,7 @@ export async function POST(request: NextRequest) {
       { status: 409 },
     );
   }
+  await addChallengeProgress(user.id, "duo_invite_sent", 1);
   await logAudit({
     actor: { id: user.id, name: user.name, email: user.email },
     action: "match_invite.sent",

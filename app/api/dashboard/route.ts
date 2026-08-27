@@ -23,7 +23,8 @@ export async function GET(request: NextRequest) {
       WHERE mine.user_id = ${user.id}
       GROUP BY m.id ORDER BY m.created_at DESC LIMIT 8`,
     sql`SELECT type, progress, target, reward_elo AS "rewardElo", reward_h_bucks AS "rewardHBucks", reward_claimed AS "rewardClaimed"
-      FROM daily_challenge_progress WHERE user_id = ${user.id} AND day = CURRENT_DATE ORDER BY type`,
+      FROM daily_challenge_progress WHERE user_id = ${user.id} AND day = CURRENT_DATE AND reward_claimed = FALSE
+      ORDER BY type LIMIT 3`,
     sql`SELECT (COUNT(*) FILTER (WHERE elo > ${user.elo} OR (elo = ${user.elo} AND matches_played > ${user.matchesPlayed})))::int + 1 AS rank FROM users`,
   ]);
   const voteGate = await getVoteGate(user.id, user.matchesPlayed);

@@ -34,6 +34,7 @@ export async function POST(request: NextRequest) {
   const inserted = await getSql()`INSERT INTO votes (id, match_id, voter_id, choice) VALUES (${crypto.randomUUID()},${matchId},${user.id},${choice}::match_team)
     ON CONFLICT (match_id,voter_id) DO NOTHING RETURNING id`;
   if (inserted.length) {
+    await addChallengeProgress(user.id, "cast_votes", 1);
     await logAudit({
       actor: { id: user.id, name: user.name, email: user.email },
       action: "vote.cast",
@@ -73,8 +74,12 @@ export async function POST(request: NextRequest) {
           WHERE e.match_id=${matchId} AND e.match_id=mp.match_id AND e.user_id=mp.user_id`,
         getSql()`UPDATE matches SET status='completed', players_counted=TRUE WHERE id=${matchId}`,
       ]);
-      const players = await getSql()`SELECT user_id FROM match_players WHERE match_id=${matchId}`;
-      await Promise.all(players.map(row => addChallengeProgress(String(row.user_id), "play_matches", 1)));
+      const players = await getSql()`SELECT user_id,team FROM match_players WHERE match_id=${matchId}`;
+      await Promise.all(players.flatMap(row => [
+        addChallengeProgress(String(row.user_id), "play_matches", 1),
+        ...(row.team === winner ? [addChallengeProgress(String(row.user_id), "win_matches", 1)] : []),
+        ...(claimed[0].mode === "duo" ? [addChallengeProgress(String(row.user_id), "duo_match", 1)] : []),
+      ]));
 
       const roster = await getSql()`SELECT u.name, mp.team FROM match_players mp JOIN users u ON u.id=mp.user_id WHERE mp.match_id=${matchId}`;
       const winners = roster.filter((row) => row.team === winner).map((row) => row.name).join(" & ");

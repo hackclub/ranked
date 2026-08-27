@@ -36,6 +36,7 @@ export async function POST(request: NextRequest) {
   if (targetId === user.id) return NextResponse.json({ error: "You are already your own teammate." }, { status: 400 });
   const friendship = await upsertFriendship(user.id, targetId);
   if (friendship?.status === "pending") {
+    await addChallengeProgress(user.id, "send_friend_request", 1);
     const target = await getSql()`SELECT name FROM users WHERE id=${targetId}`;
     await logAudit({
       actor: auditActor(user),

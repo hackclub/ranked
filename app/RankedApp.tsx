@@ -1917,6 +1917,19 @@ function Challenge({
   );
 }
 
+const CHALLENGE_LABELS: Record<string, string> = {
+  play_matches: "Play 2 matches",
+  code_seconds: "Code for 3 hours",
+  add_friends: "Add 2 friends",
+  win_matches: "Win a match",
+  cast_votes: "Vote on 3 community builds",
+  publish_project: "Publish your project",
+  duo_match: "Play a duo match",
+  duo_invite_sent: "Invite a friend to a duo match",
+  shop_purchase: "Buy something from the Shop",
+  send_friend_request: "Send 2 friend requests",
+};
+
 function DailyChallenges({
   challenges,
   resetsIn,
@@ -1931,14 +1944,8 @@ function DailyChallenges({
       {challenges.map((challenge) => (
         <Challenge
           key={challenge.type}
-          label={
-            challenge.type === "play_matches"
-              ? "Play 2 matches"
-              : challenge.type === "code_seconds"
-                ? "Code for 3 hours"
-                : "Add 2 friends"
-          }
-          value={`${Math.min(challenge.progress, challenge.target)} / ${challenge.target}`}
+          label={CHALLENGE_LABELS[challenge.type] ?? challenge.type}
+            value={`${Math.min(challenge.progress, challenge.target)} / ${challenge.target}`}
           progress={Math.min(
             100,
             (challenge.progress / challenge.target) * 100,

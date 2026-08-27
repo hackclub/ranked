@@ -222,11 +222,13 @@ export async function finalizeForfeit(
   const completed = rows[0] as Omit<MatchOutcome, "status" | "remainingSeconds"> | undefined;
   if (!completed) return null;
 
-  const players = await getSql()`SELECT user_id FROM match_players WHERE match_id=${matchId}`;
+  const players = await getSql()`SELECT user_id,team FROM match_players WHERE match_id=${matchId}`;
   await Promise.allSettled(
-    players.map(player =>
+    players.flatMap(player => [
       addChallengeProgress(String(player.user_id), "play_matches", 1),
-    ),
+      ...(player.team === completed.winningTeam ? [addChallengeProgress(String(player.user_id), "win_matches", 1)] : []),
+      ...(claimed[0].mode === "duo" ? [addChallengeProgress(String(player.user_id), "duo_match", 1)] : []),
+    ]),
   );
   return { status: "completed", remainingSeconds: 0, ...completed } satisfies MatchOutcome;
 }

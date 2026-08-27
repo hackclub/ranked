@@ -19,7 +19,18 @@ export const teamEnum = pgEnum("match_team", ["blue", "red"]);
 export const friendshipStatusEnum = pgEnum("friendship_status", ["pending", "accepted", "declined", "blocked"]);
 export const duoInviteStatusEnum = pgEnum("duo_invite_status", ["pending", "accepted", "declined", "missed"]);
 export const orderStatusEnum = pgEnum("order_status", ["pending", "approved", "shipped", "cancelled"]);
-export const challengeTypeEnum = pgEnum("challenge_type", ["play_matches", "code_seconds", "add_friends"]);
+export const challengeTypeEnum = pgEnum("challenge_type", [
+  "play_matches",
+  "code_seconds",
+  "add_friends",
+  "win_matches",
+  "cast_votes",
+  "publish_project",
+  "duo_match",
+  "duo_invite_sent",
+  "shop_purchase",
+  "send_friend_request",
+]);
 export const reportTypeEnum = pgEnum("report_type", ["misconduct", "ai"]);
 
 export const users = pgTable("users", {

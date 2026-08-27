@@ -7,6 +7,7 @@ import {
   completeSubmissionProfile,
   getHackClubProfile,
 } from "@/app/lib/hack-club-profile";
+import { addChallengeProgress } from "@/app/lib/progression";
 import { getSql } from "@/db";
 
 function validFileMap(value: unknown, maxEntries: number, maxLength: number) {
@@ -67,6 +68,7 @@ export async function POST(request: NextRequest) {
       ON CONFLICT (match_id,published_by) DO NOTHING`;
     await getSql()`UPDATE publications SET hca_address_id=${addressId}
       WHERE match_id=${matchId} AND published_by=${session.user.id}`;
+    await addChallengeProgress(session.user.id, "publish_project", 1);
     await getSql()`UPDATE match_players SET finished_at=NOW() WHERE match_id=${matchId} AND user_id=${session.user.id}`;
     const votingOpened = await getSql()`UPDATE matches SET status='voting',voting_ends_at=NOW()+INTERVAL '24 hours'
       WHERE id=${matchId} AND status='active'

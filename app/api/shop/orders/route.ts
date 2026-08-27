@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { currentUser } from "@/app/lib/current-user";
 import { logAudit } from "@/app/lib/audit";
 import { SHOP_CATALOG, shopItemById } from "@/app/lib/avatar";
+import { addChallengeProgress } from "@/app/lib/progression";
 import { getSql } from "@/db";
 
 export async function GET(request: NextRequest) {
@@ -38,6 +39,7 @@ export async function POST(request: NextRequest) {
       SELECT ${orderId},${user.id},${itemId},${item.name},${item.cost},${status}::order_status,${shippingJson}::jsonb FROM debit RETURNING id,status
     ) SELECT placed.id,placed.status,debit.h_bucks AS balance FROM placed CROSS JOIN debit`;
   if (!result.length) return NextResponse.json({ error: "Not enough H-Bucks." }, { status: 400 });
+  await addChallengeProgress(user.id, "shop_purchase", 1);
   await logAudit({
     actor: { id: user.id, name: user.name, email: user.email },
     action: item.kind === "avatar" ? "shop.avatar_item.unlocked" : "shop.order.created",
