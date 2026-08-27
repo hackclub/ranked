@@ -54,6 +54,8 @@ export default function RecordingReviewDashboard({
   const [error, setError] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [segmentCursor, setSegmentCursor] = useState(0);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -96,6 +98,46 @@ export default function RecordingReviewDashboard({
   const selectRecording = (recordingId: string) => {
     setSelectedId(recordingId);
     setSegmentCursor(0);
+    setDeleteError("");
+  };
+
+  const deleteSelectedRecording = async () => {
+    if (!selected || deletingId) return;
+    const confirmed = window.confirm(
+      `Permanently delete ${selected.participantName}'s recording? This removes every clip immediately and cannot be undone.`,
+    );
+    if (!confirmed) return;
+
+    setDeletingId(selected.recordingId);
+    setDeleteError("");
+    try {
+      const response = await fetch(
+        `/api/reviewer/recordings/${encodeURIComponent(selected.recordingId)}`,
+        { method: "DELETE" },
+      );
+      const result = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      };
+      if (!response.ok) {
+        throw new Error(result.error ?? "Could not delete this recording.");
+      }
+      const remaining = recordings.filter(
+        (recording) => recording.recordingId !== selected.recordingId,
+      );
+      const replacement =
+        remaining.find((recording) => recording.matchId === selected.matchId) ??
+        remaining[0] ??
+        null;
+      setRecordings(remaining);
+      setSelectedId(replacement?.recordingId ?? null);
+      setSegmentCursor(0);
+    } catch (reason) {
+      setDeleteError(
+        reason instanceof Error ? reason.message : "Could not delete this recording.",
+      );
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   return (
@@ -144,10 +186,9 @@ export default function RecordingReviewDashboard({
                         key={recording.recordingId}
                         className={recording.recordingId === selectedId ? styles.selected : ""}
                         onClick={() => selectRecording(recording.recordingId)}
-                        disabled={!recording.segments.length}
                       >
                         {recording.participantName}
-                        <small>{recording.segments.length} clips</small>
+                        <small>{recording.segments.length ? `${recording.segments.length} clips` : "no clips"}</small>
                       </button>
                     ))}
                   </div>
@@ -157,7 +198,7 @@ export default function RecordingReviewDashboard({
           </aside>
 
           <section className={styles.playerPanel}>
-            {selected && segment ? (
+            {selected ? (
               <>
                 <div className={styles.playerHeading}>
                   <div>
@@ -165,42 +206,60 @@ export default function RecordingReviewDashboard({
                     <h2>{selected.participantName}</h2>
                     <p>{selected.participantEmail}</p>
                   </div>
-                  <div>
+                  <div className={styles.playerMeta}>
                     <small>recorded</small>
                     <strong>{formatDate(selected.startedAt)}</strong>
                     <small>expires</small>
                     <strong>{formatDate(selected.expiresAt)}</strong>
+                    <button
+                      className={styles.deleteButton}
+                      onClick={() => void deleteSelectedRecording()}
+                      disabled={deletingId === selected.recordingId}
+                    >
+                      {deletingId === selected.recordingId
+                        ? "deleting…"
+                        : "delete recording"}
+                    </button>
                   </div>
                 </div>
-                <video
-                  key={`${selected.recordingId}-${segment.id}`}
-                  className={styles.video}
-                  src={`/api/reviewer/recordings/${selected.recordingId}/segments/${segment.id}`}
-                  controls
-                  controlsList="nodownload noremoteplayback"
-                  disablePictureInPicture
-                  playsInline
-                  onEnded={() => {
-                    if (segmentCursor + 1 < selected.segments.length) {
-                      setSegmentCursor((current) => current + 1);
-                    }
-                  }}
-                />
-                <div className={styles.segmentNav}>
-                  <button
-                    onClick={() => setSegmentCursor((current) => Math.max(0, current - 1))}
-                    disabled={segmentCursor === 0}
-                  >
-                    previous clip
-                  </button>
-                  <span>clip {segmentCursor + 1} of {selected.segments.length}</span>
-                  <button
-                    onClick={() => setSegmentCursor((current) => Math.min(selected.segments.length - 1, current + 1))}
-                    disabled={segmentCursor + 1 >= selected.segments.length}
-                  >
-                    next clip
-                  </button>
-                </div>
+                {deleteError && (
+                  <p className={styles.deleteError} role="alert">{deleteError}</p>
+                )}
+                {segment ? (
+                  <>
+                    <video
+                      key={`${selected.recordingId}-${segment.id}`}
+                      className={styles.video}
+                      src={`/api/reviewer/recordings/${selected.recordingId}/segments/${segment.id}`}
+                      controls
+                      controlsList="nodownload noremoteplayback"
+                      disablePictureInPicture
+                      playsInline
+                      onEnded={() => {
+                        if (segmentCursor + 1 < selected.segments.length) {
+                          setSegmentCursor((current) => current + 1);
+                        }
+                      }}
+                    />
+                    <div className={styles.segmentNav}>
+                      <button
+                        onClick={() => setSegmentCursor((current) => Math.max(0, current - 1))}
+                        disabled={segmentCursor === 0}
+                      >
+                        previous clip
+                      </button>
+                      <span>clip {segmentCursor + 1} of {selected.segments.length}</span>
+                      <button
+                        onClick={() => setSegmentCursor((current) => Math.min(selected.segments.length - 1, current + 1))}
+                        disabled={segmentCursor + 1 >= selected.segments.length}
+                      >
+                        next clip
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <div className={styles.state}>This recording has no uploaded clips.</div>
+                )}
                 <p className={styles.notice}>Every dashboard open and playback is recorded in the security audit log.</p>
               </>
             ) : (

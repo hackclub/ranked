@@ -27,7 +27,7 @@ export async function GET(request: NextRequest, context: Context) {
     FROM recording_segments s
     JOIN match_recordings r ON r.id=s.recording_id
     WHERE s.id=${segmentId} AND s.recording_id=${recordingId}
-      AND s.status='uploaded' AND r.expires_at>NOW()
+      AND s.status='uploaded' AND r.expires_at>NOW() AND r.status<>'deleting'
     LIMIT 1
   `;
   const segment = rows[0];
