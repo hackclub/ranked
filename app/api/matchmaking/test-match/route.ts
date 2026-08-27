@@ -3,6 +3,8 @@ import { currentUser } from "@/app/lib/current-user";
 import { activeMatch, generateMatchTheme } from "@/app/lib/match-lifecycle";
 import { isAdmin } from "@/app/lib/admin";
 import { logAudit } from "@/app/lib/audit";
+import { RECORDING_POLICY_VERSION } from "@/app/lib/recording-policy";
+import { recordingStorageConfigured } from "@/app/lib/r2";
 import { getSql } from "@/db";
 
 export async function POST(request: NextRequest) {
@@ -17,8 +19,20 @@ export async function POST(request: NextRequest) {
     );
   }
   if (!isAdmin(user.email)) return NextResponse.json({ error: "Not available for your account." }, { status: 403 });
+  if (!recordingStorageConfigured()) {
+    return NextResponse.json(
+      { error: "Private match recording storage is not configured yet.", code: "recording_unavailable" },
+      { status: 503 },
+    );
+  }
 
   const body = await request.json().catch(() => ({}));
+  if (body.recordingConsent !== true) {
+    return NextResponse.json(
+      { error: "Recording consent is required.", code: "recording_consent_required" },
+      { status: 403 },
+    );
+  }
   const duration = [10, 30, 60].includes(Number(body.durationMinutes)) ? Number(body.durationMinutes) : 10;
   const mode = body.mode === "duo" ? "duo" : "solo";
   const matchId = crypto.randomUUID();
@@ -28,6 +42,8 @@ export async function POST(request: NextRequest) {
     VALUES (${matchId}, ${mode}::match_mode, TRUE, ${duration}, ${theme}, NOW() + (${duration} || ' minutes')::interval)`;
   await getSql()`INSERT INTO match_players (match_id, user_id, team, slot, pre_elo, last_heartbeat_at)
     VALUES (${matchId}, ${user.id}, 'blue'::match_team, 0, ${user.elo}, NOW())`;
+  await getSql()`INSERT INTO match_recording_consents (match_id,user_id,policy_version,consented_at)
+    VALUES (${matchId},${user.id},${RECORDING_POLICY_VERSION},NOW())`;
   await logAudit({
     actor: { id: user.id, name: user.name, email: user.email },
     action: "admin.test_lobby.entered",
