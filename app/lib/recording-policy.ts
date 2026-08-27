@@ -16,7 +16,7 @@ export function isRecordingReviewer(email: string | null | undefined) {
 }
 
 export function recordingConsentCopy() {
-  return `I consent to my match audio and video being recorded for safety review and retained for ${RECORDING_RETENTION_DAYS} days. Only the two authorized reviewers may access it.`;
+  return `I consent to my match audio and video being recorded for safety and retained for ${RECORDING_RETENTION_DAYS} days. Recordings will ONLY ever be viewed if there is a conduct report.`;
 }
 
 const RECORDING_MIME_PATTERN = /^(?:video|audio)\/(?:webm|mp4)(?:;\s*codecs=[a-z0-9.,_-]+)?$/i;
