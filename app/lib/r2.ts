@@ -58,6 +58,22 @@ export async function signedRecordingUploadUrl(key: string, contentType: string)
   );
 }
 
+export async function putRecordingObject(
+  key: string,
+  contentType: string,
+  body: Uint8Array,
+) {
+  return recordingR2().send(
+    new PutObjectCommand({
+      Bucket: recordingBucketName(),
+      Key: key,
+      Body: body,
+      ContentType: contentType,
+      CacheControl: "private, no-store",
+    }),
+  );
+}
+
 export async function headRecordingObject(key: string) {
   return recordingR2().send(
     new HeadObjectCommand({ Bucket: recordingBucketName(), Key: key }),

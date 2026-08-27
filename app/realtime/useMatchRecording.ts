@@ -76,43 +76,26 @@ export function useMatchRecording(
     durationMs: number,
   ) => {
     if (blob.size <= 0) return;
+    const contentType = blob.type || mimeType;
+    if (!contentType) throw new Error("Recording format is unavailable.");
     if (blob.size > RECORDING_MAX_SEGMENT_BYTES) {
       throw new Error("A recording clip exceeded the secure upload limit.");
     }
     let lastError: unknown;
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        const prepared = await fetch(
-          `/api/recordings/${encodeURIComponent(recordingId)}/segments`,
+        const query = new URLSearchParams({
+          segmentIndex: String(segmentIndex),
+          durationMs: String(durationMs),
+        });
+        await fetch(
+          `/api/recordings/${encodeURIComponent(recordingId)}/segments?${query}`,
           {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ segmentIndex, mimeType: blob.type || mimeType }),
-          },
-        ).then((response) =>
-          responseJson<{
-            uploadUrl?: string;
-            alreadyUploaded?: boolean;
-            requiredHeaders?: Record<string, string>;
-          }>(response),
-        );
-        if (!prepared.alreadyUploaded) {
-          if (!prepared.uploadUrl) throw new Error("Recording upload URL was missing.");
-          const uploaded = await fetch(prepared.uploadUrl, {
             method: "PUT",
-            headers: prepared.requiredHeaders,
+            headers: { "Content-Type": contentType },
             body: blob,
-          });
-          if (!uploaded.ok) throw new Error("Private recording upload failed.");
-          await fetch(
-            `/api/recordings/${encodeURIComponent(recordingId)}/segments`,
-            {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ segmentIndex, durationMs }),
-            },
-          ).then((response) => responseJson<{ ok: boolean }>(response));
-        }
+          },
+        ).then((response) => responseJson<{ ok: boolean }>(response));
         return;
       } catch (reason) {
         lastError = reason;

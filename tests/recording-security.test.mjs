@@ -13,6 +13,14 @@ const playbackPath = new URL(
 const recordingsPath = new URL("../app/lib/recordings.ts", import.meta.url);
 const r2Path = new URL("../app/lib/r2.ts", import.meta.url);
 const appPath = new URL("../app/RankedApp.tsx", import.meta.url);
+const recordingHookPath = new URL(
+  "../app/realtime/useMatchRecording.ts",
+  import.meta.url,
+);
+const segmentRoutePath = new URL(
+  "../app/api/recordings/[recordingId]/segments/route.ts",
+  import.meta.url,
+);
 
 test("recording review authorization is a fixed two-email server allowlist", async () => {
   const policy = await readFile(policyPath, "utf8");
@@ -56,4 +64,17 @@ test("recordings expire after ten days and are served without caching", async ()
   assert.match(recordings, /"Cross-Origin-Resource-Policy": "same-origin"/);
   assert.match(r2, /recordingStorageConfigured/);
   assert.match(playback, /recording\.playback/);
+});
+
+test("recording clips use the authenticated same-origin upload proxy", async () => {
+  const hook = await readFile(recordingHookPath, "utf8");
+  const route = await readFile(segmentRoutePath, "utf8");
+
+  assert.match(hook, /method: "PUT"/);
+  assert.match(hook, /\/api\/recordings\/\$\{encodeURIComponent\(recordingId\)\}\/segments/);
+  assert.doesNotMatch(hook, /prepared\.uploadUrl/);
+  assert.match(route, /export async function PUT/);
+  assert.match(route, /isSameOriginMutation\(request\)/);
+  assert.match(route, /r\.user_id=\$\{user\.id\}/);
+  assert.match(route, /putRecordingObject/);
 });

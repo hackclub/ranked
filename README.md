@@ -70,8 +70,8 @@ Audio and video travel directly between peers. Google's public STUN servers are 
 
 Every participant must explicitly consent before matchmaking. During a match,
 their local camera and microphone stream is split into short, independently
-playable clips and uploaded directly to a **private** Cloudflare R2 bucket using
-short-lived, object-specific PUT URLs. R2 credentials never reach the browser.
+playable clips and uploaded through Ranked's authenticated server to a
+**private** Cloudflare R2 bucket. R2 credentials never reach the browser.
 Only `mihir@hackclub.com` and `meghana@hackclub.com` pass the independent,
 server-side reviewer allowlist. Reviewer playback is proxied through an
 authenticated, no-store API; the bucket must not have public access enabled.
@@ -83,25 +83,8 @@ Configure these environment values:
 - `R2_RECORDINGS_BUCKET`: the private bucket name.
 - `CRON_SECRET`: a random value of at least 32 characters for the retention job.
 
-The bucket CORS policy must allow `PUT` only from the exact production origin
-and local development origin, with `Content-Type` and `Cache-Control` request
-headers. Do not use `*` for origins. Example for the R2 dashboard (replace the
-production origin if needed):
-
-```json
-[
-  {
-    "AllowedOrigins": [
-      "https://ranked.hackclub.com",
-      "http://localhost:3000"
-    ],
-    "AllowedMethods": ["PUT"],
-    "AllowedHeaders": ["Content-Type", "Cache-Control"],
-    "ExposeHeaders": ["ETag"],
-    "MaxAgeSeconds": 3600
-  }
-]
-```
+No R2 CORS rule is required: browsers upload to Ranked's same-origin API, and
+only the authenticated server communicates with the private bucket.
 
 Add an R2 Object Lifecycle Rule for the `recordings/` prefix that expires
 objects after **10 days**. This is defense in depth alongside the authenticated
