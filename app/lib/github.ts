@@ -175,24 +175,43 @@ async function pathExists(token: string, login: string, path: string) {
   }
 }
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 async function configureRankedRepoForPages(token: string, login: string) {
   // .nojekyll itself is committed alongside the build's own files in
   // commitFiles (see publishWebsite) rather than PUT here on its own — that
   // used to cost every publish an extra standalone commit just to re-affirm
   // a file that, after the first publish, never actually changes. Only the
   // repo settings call (not a content commit) belongs here.
-  try {
-    await githubRequest(
-      token,
-      `https://api.github.com/repos/${login}/${RANKED_REPO}/pages`,
-      {
-        method: "POST",
-        body: JSON.stringify({ source: { branch: "main", path: "/" } }),
-      },
-    );
-  } catch (error) {
-    if (!(error instanceof Error) || !error.message.includes("409"))
+  //
+  // A brand-new repo's `main` branch (from auto_init) can take a moment to
+  // become visible to GitHub's Pages service specifically, even though the
+  // repo creation call itself already returned — enabling Pages right after
+  // can 404 on that race alone. Retrying a few times beats surfacing that as
+  // a publish failure when the repo (the actual hard part) already exists.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await githubRequest(
+        token,
+        `https://api.github.com/repos/${login}/${RANKED_REPO}/pages`,
+        {
+          method: "POST",
+          body: JSON.stringify({ source: { branch: "main", path: "/" } }),
+        },
+      );
+      return;
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("409")) return;
+      if (
+        error instanceof Error &&
+        error.message.includes("(404)") &&
+        attempt < 5
+      ) {
+        await sleep(attempt * 500);
+        continue;
+      }
       throw error;
+    }
   }
 }
 

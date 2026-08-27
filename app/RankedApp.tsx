@@ -1680,7 +1680,7 @@ function Home({
                   }}
                   onFocus={() => setSlackSuggestionsOpen(true)}
                   onBlur={() => setSlackSuggestionsOpen(false)}
-                  placeholder="@slack username"
+                  placeholder="Fiona Hacksworths"
                   autoComplete="off"
                   required
                 />
@@ -1698,7 +1698,6 @@ function Home({
                           }}
                         >
                           <strong>{member.name}</strong>
-                          <small>{member.email}</small>
                         </button>
                       </li>
                     ))}

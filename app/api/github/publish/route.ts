@@ -3,9 +3,9 @@ import { publishWebsite, PUBLISHABLE_FILE_NAME, type DirectoryBuild } from "@/ap
 import { decryptSession, SESSION_COOKIE } from "@/app/lib/session";
 import { logAudit } from "@/app/lib/audit";
 import {
-  completeSubmissionAddress,
   completeSubmissionProfile,
   getHackClubProfile,
+  resolvePrimaryAddress,
 } from "@/app/lib/hack-club-profile";
 import { addChallengeProgress } from "@/app/lib/progression";
 import { getSql } from "@/db";
@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
   if (!session?.user) return NextResponse.json({ error: "Sign in with Hack Club first." }, { status: 401 });
   if (!session.github) return NextResponse.json({ error: "Connect GitHub first." }, { status: 401 });
   try {
-    const { matchId, name, pages, files, description, addressId } = await request.json() as { matchId?: string; name?: string; pages?: Record<string, string>; files?: Record<string, string>; description?: string; addressId?: string };
+    const { matchId, name, pages, files, description } = await request.json() as { matchId?: string; name?: string; pages?: Record<string, string>; files?: Record<string, string>; description?: string };
     if (!validFileMap(pages, 50, 1_000_000) || !pages!["index.html"]) return NextResponse.json({ error: "A valid website is required." }, { status: 400 });
     if (!matchId) return NextResponse.json({ error: "A match is required." }, { status: 400 });
     if (!name || !/^[A-Za-z0-9._-]{1,100}$/.test(name) || name === "." || name === "..") return NextResponse.json({ error: "Choose a valid build name." }, { status: 400 });
@@ -37,10 +37,14 @@ export async function POST(request: NextRequest) {
         { status: 409 },
       );
     }
-    const selectedAddress = hcaProfile?.addresses.find((address) => address.id === addressId);
-    if (!addressId || !hcaProfile || !selectedAddress || !completeSubmissionAddress(hcaProfile, selectedAddress)) {
-      return NextResponse.json({ error: "Choose one of your Hack Club Auth addresses." }, { status: 400 });
+    const selectedAddress = resolvePrimaryAddress(hcaProfile);
+    if (!selectedAddress) {
+      return NextResponse.json(
+        { error: "Add a complete primary address at auth.hackclub.com." },
+        { status: 400 },
+      );
     }
+    const addressId = selectedAddress.id;
     const players = await getSql()`SELECT mp.team,m.theme,m.ends_at AS "endsAt" FROM match_players mp JOIN matches m ON m.id=mp.match_id
       WHERE mp.match_id=${matchId} AND mp.user_id=${session.user.id}`;
     const player = players[0] as { team: "blue" | "red"; theme: string; endsAt: string } | undefined;

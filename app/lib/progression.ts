@@ -43,34 +43,45 @@ function shuffled<T>(items: T[]): T[] {
   return result;
 }
 
+// Daily-challenge tracking is a side effect of real gameplay actions
+// (publishing, voting, friending, shopping, playing a match) — it must never
+// be able to fail the action it's riding along on. Every caller across the
+// codebase gets that guarantee for free from here, rather than each of them
+// remembering to wrap their own call (some did, via Promise.allSettled;
+// others didn't, and a hiccup here — a schema drift, a transient DB error —
+// used to surface as a 500 on an otherwise-successful publish/vote/etc.).
 export async function addChallengeProgress(userId: string, type: ChallengeType, amount: number) {
-  const config = challengeConfig[type];
-  const sql = getSql();
-  const [, claimResult] = await sql.transaction([
-    sql`INSERT INTO daily_challenge_progress
-        (user_id, day, type, progress, target, reward_elo, reward_h_bucks)
-      VALUES (${userId}, CURRENT_DATE, ${type}::challenge_type, ${amount}, ${config.target}, ${config.rewardElo}, ${config.rewardHBucks})
-      ON CONFLICT (user_id, day, type) DO UPDATE SET
-        progress = daily_challenge_progress.progress + EXCLUDED.progress, updated_at = NOW()`,
-    sql`WITH claim AS (
-      UPDATE daily_challenge_progress SET reward_claimed = TRUE, updated_at = NOW()
-      WHERE user_id = ${userId} AND day = CURRENT_DATE AND type = ${type}::challenge_type
-        AND progress >= target AND reward_claimed = FALSE
-      RETURNING reward_elo, reward_h_bucks
-    ), ledger AS (
-      INSERT INTO elo_transactions (id,user_id,match_id,source_key,before,delta,after,reason)
-      SELECT gen_random_uuid()::text,${userId},NULL,'daily:'||CURRENT_DATE||':'||${type},u.elo,claim.reward_elo,u.elo+claim.reward_elo,'daily_challenge'
-      FROM claim CROSS JOIN users u WHERE u.id=${userId} AND claim.reward_elo<>0
-      ON CONFLICT (user_id,source_key) DO NOTHING RETURNING after
-    )
-    UPDATE users SET
-      elo = COALESCE((SELECT after FROM ledger), elo),
-      h_bucks = h_bucks + COALESCE((SELECT reward_h_bucks FROM claim), 0), updated_at = NOW()
-    WHERE id = ${userId} AND EXISTS (SELECT 1 FROM claim)
-    RETURNING id
-    `,
-  ]);
-  if (claimResult.length) await refillDailyChallenges(userId);
+  try {
+    const config = challengeConfig[type];
+    const sql = getSql();
+    const [, claimResult] = await sql.transaction([
+      sql`INSERT INTO daily_challenge_progress
+          (user_id, day, type, progress, target, reward_elo, reward_h_bucks)
+        VALUES (${userId}, CURRENT_DATE, ${type}::challenge_type, ${amount}, ${config.target}, ${config.rewardElo}, ${config.rewardHBucks})
+        ON CONFLICT (user_id, day, type) DO UPDATE SET
+          progress = daily_challenge_progress.progress + EXCLUDED.progress, updated_at = NOW()`,
+      sql`WITH claim AS (
+        UPDATE daily_challenge_progress SET reward_claimed = TRUE, updated_at = NOW()
+        WHERE user_id = ${userId} AND day = CURRENT_DATE AND type = ${type}::challenge_type
+          AND progress >= target AND reward_claimed = FALSE
+        RETURNING reward_elo, reward_h_bucks
+      ), ledger AS (
+        INSERT INTO elo_transactions (id,user_id,match_id,source_key,before,delta,after,reason)
+        SELECT gen_random_uuid()::text,${userId},NULL,'daily:'||CURRENT_DATE||':'||${type},u.elo,claim.reward_elo,u.elo+claim.reward_elo,'daily_challenge'
+        FROM claim CROSS JOIN users u WHERE u.id=${userId} AND claim.reward_elo<>0
+        ON CONFLICT (user_id,source_key) DO NOTHING RETURNING after
+      )
+      UPDATE users SET
+        elo = COALESCE((SELECT after FROM ledger), elo),
+        h_bucks = h_bucks + COALESCE((SELECT reward_h_bucks FROM claim), 0), updated_at = NOW()
+      WHERE id = ${userId} AND EXISTS (SELECT 1 FROM claim)
+      RETURNING id
+      `,
+    ]);
+    if (claimResult.length) await refillDailyChallenges(userId);
+  } catch (error) {
+    console.error(`addChallengeProgress(${type}) failed for user ${userId}:`, error);
+  }
 }
 
 export async function ensureDailyChallenges(userId: string) {

@@ -128,12 +128,6 @@ export async function getHackClubProfile(userId: string) {
   }
 }
 
-export function publicAddressLabel(address: HackClubAddress) {
-  return [address.line_1, address.city, address.state, address.country]
-    .filter(Boolean)
-    .join(", ");
-}
-
 export function completeSubmissionAddress(
   profile: StoredHackClubProfile,
   address: HackClubAddress,
@@ -155,4 +149,18 @@ export function completeSubmissionProfile(profile: StoredHackClubProfile | null)
       profile.birthday &&
       profile.addresses.some((address) => completeSubmissionAddress(profile, address)),
   );
+}
+
+// The submission flow never lets a player choose between addresses — it
+// always ships to whichever one HCA has marked primary, falling back to the
+// first complete address on file if none is marked (rare, but an account
+// shouldn't be unable to submit just because HCA never got a primary flag).
+export function resolvePrimaryAddress(
+  profile: StoredHackClubProfile | null,
+): HackClubAddress | null {
+  if (!profile) return null;
+  const complete = profile.addresses.filter((address) =>
+    completeSubmissionAddress(profile, address),
+  );
+  return complete.find((address) => address.primary) ?? complete[0] ?? null;
 }
