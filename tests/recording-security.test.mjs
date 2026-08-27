@@ -21,6 +21,14 @@ const segmentRoutePath = new URL(
   "../app/api/recordings/[recordingId]/segments/route.ts",
   import.meta.url,
 );
+const deleteRoutePath = new URL(
+  "../app/api/reviewer/recordings/[recordingId]/route.ts",
+  import.meta.url,
+);
+const reviewDashboardPath = new URL(
+  "../app/reviewer/recordings/RecordingReviewDashboard.tsx",
+  import.meta.url,
+);
 
 test("recording review authorization is a fixed two-email server allowlist", async () => {
   const policy = await readFile(policyPath, "utf8");
@@ -77,4 +85,19 @@ test("recording clips use the authenticated same-origin upload proxy", async () 
   assert.match(route, /isSameOriginMutation\(request\)/);
   assert.match(route, /r\.user_id=\$\{user\.id\}/);
   assert.match(route, /putRecordingObject/);
+});
+
+test("only reviewers can permanently delete a recording and its private objects", async () => {
+  const route = await readFile(deleteRoutePath, "utf8");
+  const dashboard = await readFile(reviewDashboardPath, "utf8");
+
+  assert.match(route, /export async function DELETE/);
+  assert.match(route, /recordingReviewer\(request\)/);
+  assert.match(route, /isSameOriginMutation\(request\)/);
+  assert.match(route, /deleteRecordingObjects\(objectKeys\)/);
+  assert.match(route, /DELETE FROM match_recordings/);
+  assert.match(route, /action: "recording\.deleted"/);
+  assert.match(dashboard, /window\.confirm/);
+  assert.match(dashboard, /method: "DELETE"/);
+  assert.match(dashboard, /delete recording/);
 });

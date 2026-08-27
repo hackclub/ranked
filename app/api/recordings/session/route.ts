@@ -70,9 +70,16 @@ export async function POST(request: NextRequest) {
     )
     ON CONFLICT (match_id,user_id) DO UPDATE SET
       status='recording',mime_type=EXCLUDED.mime_type,updated_at=NOW()
+    WHERE match_recordings.status<>'deleting'
     RETURNING id,mime_type AS "mimeType",expires_at AS "expiresAt"
   `;
   const recording = rows[0];
+  if (!recording) {
+    return NextResponse.json(
+      { error: "This recording is being permanently deleted." },
+      { status: 409, headers: PRIVATE_RECORDING_HEADERS },
+    );
+  }
   const segmentRows = await getSql()`
     SELECT COALESCE(MAX(segment_index)+1,0)::int AS "nextIndex"
     FROM recording_segments WHERE recording_id=${recording.id}
@@ -120,7 +127,7 @@ export async function PATCH(request: NextRequest) {
         FROM matches m WHERE m.id=r.match_id
       ),
       updated_at=NOW()
-    WHERE r.id=${recordingId} AND r.user_id=${user.id}
+    WHERE r.id=${recordingId} AND r.user_id=${user.id} AND r.status<>'deleting'
     RETURNING id,expires_at AS "expiresAt"
   `;
   if (!rows.length) {

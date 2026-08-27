@@ -74,6 +74,7 @@ export async function PUT(request: NextRequest, context: Context) {
     JOIN matches m ON m.id=r.match_id
     JOIN match_recording_consents c ON c.match_id=r.match_id AND c.user_id=r.user_id
     WHERE r.id=${recordingId} AND r.user_id=${user.id} AND r.expires_at>NOW()
+      AND r.status<>'deleting'
       AND COALESCE(m.ended_at,m.ends_at)+INTERVAL '5 minutes'>NOW()
     LIMIT 1
   `;
@@ -186,6 +187,7 @@ export async function POST(request: NextRequest, context: Context) {
     JOIN matches m ON m.id=r.match_id
     JOIN match_recording_consents c ON c.match_id=r.match_id AND c.user_id=r.user_id
     WHERE r.id=${recordingId} AND r.user_id=${user.id} AND r.expires_at>NOW()
+      AND r.status<>'deleting'
       AND COALESCE(m.ended_at,m.ends_at)+INTERVAL '5 minutes'>NOW()
     LIMIT 1
   `;
@@ -284,7 +286,7 @@ export async function PATCH(request: NextRequest, context: Context) {
     FROM recording_segments s
     JOIN match_recordings r ON r.id=s.recording_id
     WHERE s.recording_id=${recordingId} AND s.segment_index=${segmentIndex}
-      AND r.user_id=${user.id} AND r.expires_at>NOW()
+      AND r.user_id=${user.id} AND r.expires_at>NOW() AND r.status<>'deleting'
     LIMIT 1
   `;
   const segment = rows[0];
