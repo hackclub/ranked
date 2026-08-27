@@ -7,6 +7,7 @@ import {
   completeSubmissionProfile,
   getHackClubProfile,
 } from "@/app/lib/hack-club-profile";
+import { addChallengeProgress } from "@/app/lib/progression";
 import { getSql } from "@/db";
 
 function githubUsername(repositoryUrl: string) {
@@ -135,6 +136,7 @@ export async function POST(request: NextRequest) {
     await getSql()`UPDATE publications SET airtable_status='submitted',
       airtable_record_id=${recordId}, airtable_error=NULL, airtable_submitted_at=NOW()
       WHERE id=${publication.id}`;
+    await addChallengeProgress(user.id, "play_matches", 1);
     await logAudit({
       actor: { id: user.id, name: user.name, email: user.email },
       action: "airtable.submission.upserted",

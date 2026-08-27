@@ -222,10 +222,12 @@ export async function finalizeForfeit(
   const completed = rows[0] as Omit<MatchOutcome, "status" | "remainingSeconds"> | undefined;
   if (!completed) return null;
 
+  // No play_matches credit here: finalizeForfeit only ever runs while the
+  // match is still 'active' (pre-publish), so nobody in it could have
+  // finished and submitted to Airtable — that's what play_matches requires.
   const players = await getSql()`SELECT user_id,team FROM match_players WHERE match_id=${matchId}`;
   await Promise.allSettled(
     players.flatMap(player => [
-      addChallengeProgress(String(player.user_id), "play_matches", 1),
       ...(player.team === completed.winningTeam ? [addChallengeProgress(String(player.user_id), "win_matches", 1)] : []),
       ...(claimed[0].mode === "duo" ? [addChallengeProgress(String(player.user_id), "duo_match", 1)] : []),
     ]),

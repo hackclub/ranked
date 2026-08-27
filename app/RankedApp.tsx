@@ -4167,11 +4167,10 @@ function Match({
             <div
               className={`match-recording-indicator ${recordingStatus}`}
               role="status"
-              title="Audio and video are privately retained for 10 days"
+              title="This match is currently being recorded"
             >
               <i />
               <span>{recordingStatus === "error" || recordingStatus === "unsupported" ? "REC ERROR" : "REC"}</span>
-              <small>private · 10 days</small>
             </div>
             <button
               className="settings-gear"

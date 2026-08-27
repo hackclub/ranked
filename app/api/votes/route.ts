@@ -74,9 +74,11 @@ export async function POST(request: NextRequest) {
           WHERE e.match_id=${matchId} AND e.match_id=mp.match_id AND e.user_id=mp.user_id`,
         getSql()`UPDATE matches SET status='completed', players_counted=TRUE WHERE id=${matchId}`,
       ]);
+      // No play_matches credit here: publishing to GitHub Pages (required to
+      // reach voting) isn't the same as submitting to Airtable, which is what
+      // play_matches requires — that's credited from the Airtable route instead.
       const players = await getSql()`SELECT user_id,team FROM match_players WHERE match_id=${matchId}`;
       await Promise.all(players.flatMap(row => [
-        addChallengeProgress(String(row.user_id), "play_matches", 1),
         ...(row.team === winner ? [addChallengeProgress(String(row.user_id), "win_matches", 1)] : []),
         ...(claimed[0].mode === "duo" ? [addChallengeProgress(String(row.user_id), "duo_match", 1)] : []),
       ]));
