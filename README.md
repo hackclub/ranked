@@ -66,6 +66,38 @@ Create a Liveblocks project and set `LIVEBLOCKS_SECRET_KEY`. Ranked verifies mat
 
 Audio and video travel directly between peers. Google's public STUN servers are included for local testing. For reliable production calls across restrictive networks, fill in the optional TURN variables in `.env.local`.
 
+### Private safety recordings
+
+Every participant must explicitly consent before matchmaking. During a match,
+their local camera and microphone stream is split into short, independently
+playable clips and uploaded through Ranked's authenticated server to a
+**private** Cloudflare R2 bucket. R2 credentials never reach the browser.
+Only `mihir@hackclub.com` and `meghana@hackclub.com` pass the independent,
+server-side reviewer allowlist. Reviewer playback is proxied through an
+authenticated, no-store API; the bucket must not have public access enabled.
+
+Configure these environment values:
+
+- `R2_ACCOUNT_ID`: Cloudflare account ID.
+- `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY`: an R2 token restricted to Object Read & Write on the recordings bucket only.
+- `R2_RECORDINGS_BUCKET`: the private bucket name.
+- `CRON_SECRET`: a random value of at least 32 characters for the retention job.
+
+No R2 CORS rule is required: browsers upload to Ranked's same-origin API, and
+only the authenticated server communicates with the private bucket.
+
+Add an R2 Object Lifecycle Rule for the `recordings/` prefix that expires
+objects after **10 days**. This is defense in depth alongside the authenticated
+daily Vercel retention job in `vercel.json`, which removes expired R2 objects
+and PostgreSQL metadata. The private dashboard is available at
+`/reviewer/recordings` after signing in through Hack Club Auth with one of the
+two allowlisted addresses. Dashboard opens and playback starts are written to
+the audit log.
+
+Because recording laws and requirements for minors differ by jurisdiction, the
+built-in affirmative consent gate is a technical safeguard, not a substitute
+for legal review of the final consent language and privacy policy before launch.
+
 For a local multiplayer test, sign in as separate Hack Club users in separate browser profiles, select the same mode and duration, and ready up. Ranked assigns teams transactionally once two solo or four duo players are queued.
 
 ## Other services

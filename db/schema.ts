@@ -116,8 +116,54 @@ export const matchmakingQueue = pgTable("matchmaking_queue", {
   experience: experienceEnum("experience").notNull(),
   elo: integer("elo").notNull(),
   partyKey: text("party_key"),
+  recordingConsentedAt: timestamp("recording_consented_at", { withTimezone: true }),
   joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
 }, table => [index("queue_match_idx").on(table.mode, table.durationMinutes, table.joinedAt)]);
+
+export const matchRecordingConsents = pgTable("match_recording_consents", {
+  matchId: text("match_id").notNull().references(() => matches.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  policyVersion: text("policy_version").notNull(),
+  consentedAt: timestamp("consented_at", { withTimezone: true }).notNull(),
+}, table => [
+  primaryKey({ columns: [table.matchId, table.userId] }),
+  index("match_recording_consents_user_idx").on(table.userId),
+]);
+
+export const matchRecordings = pgTable("match_recordings", {
+  id: text("id").primaryKey(),
+  matchId: text("match_id").notNull().references(() => matches.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  participantName: text("participant_name").notNull(),
+  participantEmail: text("participant_email").notNull(),
+  status: text("status").notNull().default("recording"),
+  mimeType: text("mime_type").notNull(),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, table => [
+  uniqueIndex("match_recordings_match_user_unique").on(table.matchId, table.userId),
+  index("match_recordings_match_idx").on(table.matchId),
+  index("match_recordings_expires_idx").on(table.expiresAt),
+]);
+
+export const recordingSegments = pgTable("recording_segments", {
+  id: text("id").primaryKey(),
+  recordingId: text("recording_id").notNull().references(() => matchRecordings.id, { onDelete: "cascade" }),
+  segmentIndex: integer("segment_index").notNull(),
+  objectKey: text("object_key").notNull().unique(),
+  status: text("status").notNull().default("pending"),
+  mimeType: text("mime_type").notNull(),
+  sizeBytes: integer("size_bytes"),
+  durationMs: integer("duration_ms"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  uploadedAt: timestamp("uploaded_at", { withTimezone: true }),
+}, table => [
+  uniqueIndex("recording_segments_recording_index_unique").on(table.recordingId, table.segmentIndex),
+  index("recording_segments_recording_idx").on(table.recordingId),
+]);
 
 export const duoInvites = pgTable("duo_invites", {
   id: text("id").primaryKey(),
