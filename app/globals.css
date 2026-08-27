@@ -4173,7 +4173,10 @@ button.avatar-swatch:active {
 }
 .yRemoteSelectionHead::after {
   position: absolute;
-  content: "collaborator";
+  /* This room is always scoped to one team (ranked:code:{matchId}:{team}),
+     so any cursor here can only ever belong to your duo teammate — never
+     an opponent — "teammate" is accurate, not just friendlier wording. */
+  content: "teammate";
   top: -1.25em;
   left: -2px;
   padding: 2px 5px;

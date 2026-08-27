@@ -1680,7 +1680,7 @@ function Home({
                   }}
                   onFocus={() => setSlackSuggestionsOpen(true)}
                   onBlur={() => setSlackSuggestionsOpen(false)}
-                  placeholder="Fiona Hacksworths"
+                  placeholder="ex. Fiona Hacksworth"
                   autoComplete="off"
                   required
                 />
@@ -3317,6 +3317,15 @@ function Match({
     error: recordingError,
   } = useMatchRecording(match.id, localStream, seconds > 0 && !outcome);
   const room = useCodeRoom(`ranked:code:${match.id}:${team}`);
+  // The call room is one shared room for the whole match (both teams, so
+  // opponents can join with "everyone" scope) — remotePeers includes them
+  // regardless of the call scope setting. The code room is a separate room
+  // scoped per-team, so it only ever contains your actual teammate. The
+  // "X editing" indicator (and its face-stack) describes who's really
+  // sharing this code, not who's in the call — filtering to teammates
+  // keeps it correct in duo (and correctly just "1 editing" in solo,
+  // instead of counting an opponent who can't see this code at all).
+  const codeCollaborators = remotePeers.filter((peer) => peer.team === team);
 
   useEffect(() => {
     if (!publishOpen && !publishState.repositoryUrl) return;
@@ -3390,7 +3399,11 @@ function Match({
     };
 
     const syncFileOrder = () => {
-      const names = fileList.toArray();
+      // Dedupes defensively: a duo room briefly had two peers race to seed
+      // before the leader-election below existed, and this keeps any match
+      // still carrying that leftover doubled file-list from ever rendering
+      // duplicate tabs, regardless of what's physically in the Yjs array.
+      const names = [...new Set(fileList.toArray())];
       const resolved = names.length ? names : Object.keys(starterFiles);
       setFileOrder(resolved);
       setOpenTabs((current) =>
@@ -3401,13 +3414,10 @@ function Match({
       for (const name of names) trackFile(name);
     };
 
-    const seedAll = (synced: boolean) => {
-      if (!synced) return;
-      if (fileList.length === 0) {
-        doc.transact(() => {
-          for (const name of Object.keys(starterFiles)) fileList.push([name]);
-        });
-      }
+    const writeSeed = () => {
+      doc.transact(() => {
+        for (const name of Object.keys(starterFiles)) fileList.push([name]);
+      });
       syncFileOrder();
       tabsSeeded = true;
       doc.transact(() => {
@@ -3420,16 +3430,66 @@ function Match({
       for (const { sync } of tracked.values()) sync();
     };
 
+    // Solo matches never contend for this: only one player is ever in a
+    // given team's code room, so there's no one to race against — seed the
+    // moment Yjs is synced, same as before.
+    //
+    // Duo matches share one code room between both teammates, who both
+    // land here within moments of each other. Yjs doesn't dedupe concurrent
+    // writes from different clients — if both independently found the file
+    // list empty and both seeded, the list gets every filename twice and
+    // each file's text gets its starter content inserted twice. Electing a
+    // single seeder (the connection with the lowest connectionId — the same
+    // ordering already used for WebRTC's "polite peer" role in
+    // useRealtimeRoom) makes this deterministic instead of racy: only that
+    // one client ever writes the seed, the other just waits for it to sync.
+    // The 1.2s delay gives Liveblocks presence time to actually report the
+    // teammate before either side commits to a decision — deciding on an
+    // empty `getOthers()` too early would have both sides concluding
+    // they're alone and seeding anyway.
+    let seedTimer: number | undefined;
+    let retryTimer: number | undefined;
+
+    const attemptSeed = () => {
+      if (tabsSeeded || fileList.length > 0) {
+        syncFileOrder();
+        tabsSeeded = true;
+        return;
+      }
+      const self = room.getSelf();
+      if (!self) {
+        retryTimer = window.setTimeout(attemptSeed, 300);
+        return;
+      }
+      const iAmSeeder = room
+        .getOthers()
+        .every((other) => other.connectionId > self.connectionId);
+      if (iAmSeeder) writeSeed();
+      else {
+        syncFileOrder();
+        tabsSeeded = true;
+      }
+    };
+
+    const seedAll = (synced: boolean) => {
+      if (!synced || tabsSeeded) return;
+      window.clearTimeout(seedTimer);
+      if (match.mode === "duo") seedTimer = window.setTimeout(attemptSeed, 1200);
+      else attemptSeed();
+    };
+
     fileList.observe(syncFileOrder);
     syncFileOrder();
     provider.on("sync", seedAll);
     seedAll(provider.synced);
     return () => {
+      window.clearTimeout(seedTimer);
+      window.clearTimeout(retryTimer);
       fileList.unobserve(syncFileOrder);
       provider.off("sync", seedAll);
       for (const { text, sync } of tracked.values()) text.unobserve(sync);
     };
-  }, [room]);
+  }, [room, match.mode]);
 
   const addFile = useCallback(
     (rawName: string) => {
@@ -4445,11 +4505,11 @@ function Match({
             <div className="collab-state">
               <div className="face-stack">
                 <i>{auth.user?.name?.[0] ?? "Y"}</i>
-                {remotePeers.slice(0, 2).map((peer) => (
+                {codeCollaborators.slice(0, 2).map((peer) => (
                   <i key={peer.connectionId}>{peer.name[0]}</i>
                 ))}
               </div>
-              <span>{remotePeers.length + 1} editing</span>
+              <span>{codeCollaborators.length + 1} editing</span>
               <b>{status === "connected" ? "synced" : status}</b>
             </div>
           </div>
