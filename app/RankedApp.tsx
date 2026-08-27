@@ -3218,9 +3218,7 @@ function Match({
   });
   const [mic, setMic] = useState(media.mic);
   const [video, setVideo] = useState(media.video);
-  const [scope, setScope] = useState<"team" | "everyone">(
-    match.mode === "duo" ? "team" : "everyone",
-  );
+  const [scope, setScope] = useState<"team" | "everyone">("everyone");
   const [micDeviceId, setMicDeviceId] = useState(media.micDeviceId ?? "");
   const [videoDeviceId, setVideoDeviceId] = useState(media.videoDeviceId ?? "");
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
