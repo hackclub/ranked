@@ -16,7 +16,8 @@
     "db:push": "drizzle-kit push",
     "db:migrate:hackatime": "npm run db:migrate",
     "db:wipe-users": "node scripts/wipe-users.mjs",
-    "db:clear-matches": "node scripts/clear-matches.mjs"
+    "db:clear-matches": "node scripts/clear-matches.mjs",
+    "db:seed-vote-matches": "node scripts/seed-vote-matches.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1118.0",

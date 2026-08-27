@@ -1363,7 +1363,7 @@ function Home({
         setSelectedFriend(null);
         return toast("Friend request sent");
       } catch {
-        return toast("Could not send that friend request — check your connection");
+        return toast("Could not send that friend request, check your connection");
       }
     }
     const handle = slackQuery.replace(/^@/, "").trim();
@@ -1371,7 +1371,7 @@ function Home({
     const message = `${auth.user?.name ?? "Someone"} has invited you to match-up on Hack Club Ranked! Join the match: <https://ranked.hackclub.com?utm_source=game_invite|ranked.hackclub.com>`;
     void navigator.clipboard.writeText(message);
     setSlackQuery("");
-    toast(`@${handle} hasn't joined Ranked yet — copied invite to clipboard`);
+    toast(`@${handle} hasn't joined Ranked yet. Copied invite to clipboard!`);
   };
 
   const acceptFriend = async (friendshipId: string) => {
@@ -5699,7 +5699,7 @@ function Shop({
     setRedeemingId(item.id);
     try {
       if (await redeemItem(item.id)) {
-        toast(`Unlocked "${item.name}" — equip it in the Wardrobe`);
+        toast(`Unlocked "${item.name}", equip it in the wardrobe`);
         onAvatarPurchased();
       }
     } finally {
@@ -5850,7 +5850,6 @@ function Wardrobe({
       </button>
       <div className="subpage-head">
         <h1>Wardrobe</h1>
-        <p>Swap in any look you&apos;ve bought from the Shop.</p>
       </div>
       <AvatarCustomizer value={draft} onChange={setDraft} ownedPremiumIds={avatarInventory} />
       <div className="wardrobe-actions">
@@ -6062,10 +6061,6 @@ function Voting({
           {voted && (
             <div className="vote-thanks">
               <strong>nice pick.</strong>
-              <span>
-                Results reveal when the vote closes. Both builds will be
-                open-sourced on GitHub.
-              </span>
               <button onClick={continueVoting}>
                 {pendingNext?.match ? (
                   <>

@@ -2,6 +2,7 @@
 
 /* The avatar is a stack of tiny transparent PNG layers; native images preserve their exact alpha bounds. */
 /* eslint-disable @next/next/no-img-element */
+import { useState } from "react";
 import {
   AVATAR_COUNTS,
   PREMIUM_AVATAR_ITEMS,
@@ -12,14 +13,25 @@ import {
 } from "@/app/lib/avatar";
 
 const LABELS = {
-  shape: "shape",
+  shape: "color",
   limbs: "limbs",
   eye: "eyes",
   hair: "hair",
   mouth: "mouth",
 } as const;
 
+// Plurals for the "you have unlocked X/Y ___" stage readout — LABELS itself
+// stays singular/category-style since tabs still read "color", "hair", etc.
+const PLURAL_LABELS = {
+  shape: "colors",
+  limbs: "limbs",
+  eye: "eyes",
+  hair: "hairstyles",
+  mouth: "mouths",
+} as const;
+
 type AvatarPart = keyof typeof LABELS;
+const PART_ORDER = Object.keys(LABELS) as AvatarPart[];
 
 const AVATAR_REFERENCE = { width: 510, height: 530, bodyCenterY: 43 };
 
@@ -208,15 +220,14 @@ function LockGlyph() {
   return (
     <svg
       aria-hidden="true"
-      width="10"
-      height="10"
+      width="9"
+      height="9"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth={2.5}
+      strokeWidth={3}
       strokeLinecap="round"
       strokeLinejoin="round"
-      className="avatar-lock-glyph"
     >
       <rect x="5" y="11" width="14" height="9" rx="2" />
       <path d="M8 11V8a4 4 0 0 1 8 0v3" />
@@ -224,80 +235,80 @@ function LockGlyph() {
   );
 }
 
-function PartPicker({
+function CheckGlyph() {
+  return (
+    <svg
+      aria-hidden="true"
+      width="10"
+      height="10"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={3.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M5 12.5 9.5 17 19 7.5" />
+    </svg>
+  );
+}
+
+type SwatchEntry =
+  | { kind: "owned"; value: number }
+  | { kind: "locked"; item: PremiumAvatarItem };
+
+function Swatch({
   part,
-  value,
-  allowedValues,
-  onChange,
-  lockedItems = [],
+  entry,
+  selected,
+  optionNumber,
+  optionCount,
+  onSelect,
 }: {
   part: AvatarPart;
-  value: number;
-  allowedValues: number[];
-  onChange: (value: number) => void;
-  lockedItems?: PremiumAvatarItem[];
+  entry: SwatchEntry;
+  selected: boolean;
+  optionNumber: number;
+  optionCount: number;
+  onSelect: (value: number) => void;
 }) {
-  const currentIndex = Math.max(0, allowedValues.indexOf(value));
-  const changeBy = (direction: -1 | 1) => {
-    const nextIndex =
-      (currentIndex + direction + allowedValues.length) % allowedValues.length;
-    onChange(allowedValues[nextIndex]);
-  };
-
-  return (
-    <fieldset
-      className="avatar-part-picker"
-      onKeyDown={(event) => {
-        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-        event.preventDefault();
-        changeBy(event.key === "ArrowLeft" ? -1 : 1);
-      }}
-    >
-      <legend>{LABELS[part]}</legend>
-      <div className="avatar-part-controls">
-        <button
-          type="button"
-          onClick={() => changeBy(-1)}
-          aria-label={`Previous ${LABELS[part]}`}
-        >
-          <span aria-hidden="true">←</span>
-        </button>
-        <div className="avatar-current-part" aria-live="polite">
-          <img src={assetPath(part, value)} alt="" draggable={false} />
-          <span>
-            {currentIndex + 1} / {allowedValues.length}
-          </span>
-        </div>
-        <button
-          type="button"
-          onClick={() => changeBy(1)}
-          aria-label={`Next ${LABELS[part]}`}
-        >
-          <span aria-hidden="true">→</span>
-        </button>
+  if (entry.kind === "locked") {
+    const item = entry.item;
+    return (
+      <div
+        className="avatar-swatch locked"
+        title={`${item.name} — unlock in the Shop for ${item.cost} Ħ`}
+      >
+        <img
+          src={assetPath(part, item.value)}
+          alt=""
+          draggable={false}
+          onError={(event) => {
+            event.currentTarget.style.visibility = "hidden";
+          }}
+        />
+        <span className="avatar-swatch-lock" aria-hidden="true">
+          <LockGlyph />
+        </span>
+        <small className="avatar-swatch-price">{item.cost} Ħ</small>
       </div>
-      {lockedItems.length > 0 && (
-        <div className="avatar-part-locked">
-          {lockedItems.map((item) => (
-            <span
-              key={item.id}
-              className="avatar-locked-chip"
-              title={`${item.name} — unlock in the Shop for ${item.cost} Ħ`}
-            >
-              <img
-                src={assetPath(part, item.value)}
-                alt=""
-                draggable={false}
-                onError={(event) => {
-                  event.currentTarget.style.visibility = "hidden";
-                }}
-              />
-              <LockGlyph />
-            </span>
-          ))}
-        </div>
+    );
+  }
+  return (
+    <button
+      type="button"
+      className={`avatar-swatch${selected ? " selected" : ""}`}
+      aria-pressed={selected}
+      aria-label={`${LABELS[part]} ${optionNumber} of ${optionCount}`}
+      onClick={() => onSelect(entry.value)}
+    >
+      <img src={assetPath(part, entry.value)} alt="" draggable={false} />
+      {selected && (
+        <span className="avatar-swatch-check" aria-hidden="true">
+          <CheckGlyph />
+        </span>
       )}
-    </fieldset>
+    </button>
   );
 }
 
@@ -314,6 +325,7 @@ export function AvatarCustomizer({
   ownedPremiumIds?: Set<string>;
 }) {
   const avatar = normalizeAvatar(value);
+  const [activePart, setActivePart] = useState<AvatarPart>("shape");
   const setPart = (part: AvatarPart, next: number) =>
     onChange({ ...avatar, [part]: next });
 
@@ -339,40 +351,113 @@ export function AvatarCustomizer({
     return options[Math.floor(Math.random() * options.length)];
   };
 
+  const cycleTab = (direction: -1 | 1) => {
+    const currentTabIndex = PART_ORDER.indexOf(activePart);
+    const nextTabIndex =
+      (currentTabIndex + direction + PART_ORDER.length) % PART_ORDER.length;
+    setActivePart(PART_ORDER[nextTabIndex]);
+  };
+
+  const activeOptions = allowedValuesByPart[activePart];
+  const activeLocked = PREMIUM_AVATAR_ITEMS.filter(
+    (item) => item.part === activePart && !ownedPremiumIds?.has(item.id),
+  );
+  const unlockedCount = activeOptions.length;
+  const totalCount = activeOptions.length + activeLocked.length;
+
+  // One reading-order list — owned/selectable options first, locked ones
+  // after — split down the middle so it can flank the stage left/right
+  // instead of trailing it in a tall block of empty-feeling space below.
+  const swatchEntries: SwatchEntry[] = [
+    ...activeOptions.map((value): SwatchEntry => ({ kind: "owned", value })),
+    ...activeLocked.map((item): SwatchEntry => ({ kind: "locked", item })),
+  ];
+  const splitAt = Math.ceil(swatchEntries.length / 2);
+  const leftSwatches = swatchEntries.slice(0, splitAt);
+  const rightSwatches = swatchEntries.slice(splitAt);
+
+  const renderSwatch = (entry: SwatchEntry) => (
+    <Swatch
+      key={entry.kind === "owned" ? entry.value : entry.item.id}
+      part={activePart}
+      entry={entry}
+      selected={entry.kind === "owned" && entry.value === avatar[activePart]}
+      optionNumber={
+        entry.kind === "owned" ? activeOptions.indexOf(entry.value) + 1 : 0
+      }
+      optionCount={activeOptions.length}
+      onSelect={(value) => setPart(activePart, value)}
+    />
+  );
+
   return (
     <div className="avatar-customizer">
-      <div className="avatar-stage">
-        <ScribbleAvatar avatar={avatar} label="Your customized Scrib" />
-      </div>
-      <div className="avatar-pickers">
-        {(Object.keys(LABELS) as AvatarPart[]).map((part) => (
-          <PartPicker
+      <div
+        className="avatar-tabs"
+        onKeyDown={(event) => {
+          if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+          event.preventDefault();
+          cycleTab(event.key === "ArrowLeft" ? -1 : 1);
+        }}
+      >
+        {PART_ORDER.map((part) => (
+          <button
             key={part}
-            part={part}
-            value={avatar[part]}
-            allowedValues={allowedValuesByPart[part]}
-            onChange={(next) => setPart(part, next)}
-            lockedItems={PREMIUM_AVATAR_ITEMS.filter(
-              (item) => item.part === part && !ownedPremiumIds?.has(item.id),
-            )}
-          />
+            type="button"
+            data-part={part}
+            className={`avatar-tab${part === activePart ? " active" : ""}`}
+            aria-pressed={part === activePart}
+            onClick={() => setActivePart(part)}
+          >
+            <img src={assetPath(part, 1)} alt="" draggable={false} />
+            <span>{LABELS[part]}</span>
+          </button>
         ))}
       </div>
-      <button
-        type="button"
-        className="shuffle-button"
-        onClick={() =>
-          onChange({
-            shape: randomPick("shape"),
-            limbs: randomPick("limbs"),
-            eye: randomPick("eye"),
-            hair: randomPick("hair"),
-            mouth: randomPick("mouth"),
-          })
-        }
-      >
-        ↝ shuffle me
-      </button>
+
+      <div className="avatar-shop-layout">
+        <div
+          className="avatar-grid avatar-grid-side avatar-grid-left"
+          role="group"
+          aria-label={`${LABELS[activePart]} options, first half`}
+        >
+          {leftSwatches.map(renderSwatch)}
+        </div>
+
+        <div className="avatar-shop-center">
+          <div className="avatar-stage">
+            <ScribbleAvatar avatar={avatar} label="Your customized Scrib" />
+          </div>
+          <div className="avatar-stage-meta">
+            <span className="avatar-stage-pill" aria-live="polite">
+              you have unlocked {unlockedCount}/{totalCount} {PLURAL_LABELS[activePart]}
+            </span>
+            <button
+              type="button"
+              className="shuffle-button"
+              onClick={() =>
+                onChange({
+                  shape: randomPick("shape"),
+                  limbs: randomPick("limbs"),
+                  eye: randomPick("eye"),
+                  hair: randomPick("hair"),
+                  mouth: randomPick("mouth"),
+                })
+              }
+            >
+              ↝ shuffle me
+            </button>
+          </div>
+        </div>
+
+        <div
+          className="avatar-grid avatar-grid-side avatar-grid-right"
+          role="group"
+          aria-label={`${LABELS[activePart]} options, second half`}
+        >
+          {rightSwatches.map(renderSwatch)}
+        </div>
+      </div>
     </div>
   );
 }
