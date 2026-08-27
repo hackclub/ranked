@@ -37,13 +37,29 @@ export async function POST(request: NextRequest) {
   const mode = body.mode === "duo" ? "duo" : "solo";
   const matchId = crypto.randomUUID();
   const theme = generateMatchTheme();
-  await getSql()`DELETE FROM matchmaking_queue WHERE user_id = ${user.id}`;
-  await getSql()`INSERT INTO matches (id, mode, is_test, duration_minutes, theme, ends_at)
-    VALUES (${matchId}, ${mode}::match_mode, TRUE, ${duration}, ${theme}, NOW() + (${duration} || ' minutes')::interval)`;
-  await getSql()`INSERT INTO match_players (match_id, user_id, team, slot, pre_elo, last_heartbeat_at)
-    VALUES (${matchId}, ${user.id}, 'blue'::match_team, 0, ${user.elo}, NOW())`;
-  await getSql()`INSERT INTO match_recording_consents (match_id,user_id,policy_version,consented_at)
-    VALUES (${matchId},${user.id},${RECORDING_POLICY_VERSION},NOW())`;
+  try {
+    const sql = getSql();
+    // These four writes used to run as separate round-trips. A transient
+    // failure on any but the first left the match half-created (e.g. the
+    // match + player rows committed but the consent row didn't) — the
+    // request as a whole still errored out to the client, but the next
+    // attempt's activeMatch() check below would find that half-made match
+    // and report success immediately, which is exactly "fails, then
+    // clicking again works" from the outside. One transaction makes the
+    // whole thing all-or-nothing instead.
+    await sql.transaction([
+      sql`DELETE FROM matchmaking_queue WHERE user_id = ${user.id}`,
+      sql`INSERT INTO matches (id, mode, is_test, duration_minutes, theme, ends_at)
+        VALUES (${matchId}, ${mode}::match_mode, TRUE, ${duration}, ${theme}, NOW() + (${duration} || ' minutes')::interval)`,
+      sql`INSERT INTO match_players (match_id, user_id, team, slot, pre_elo, last_heartbeat_at)
+        VALUES (${matchId}, ${user.id}, 'blue'::match_team, 0, ${user.elo}, NOW())`,
+      sql`INSERT INTO match_recording_consents (match_id,user_id,policy_version,consented_at)
+        VALUES (${matchId},${user.id},${RECORDING_POLICY_VERSION},NOW())`,
+    ]);
+  } catch (error) {
+    console.error("Failed to create test lobby", error);
+    return NextResponse.json({ error: "Could not start a test lobby — try again." }, { status: 500 });
+  }
   await logAudit({
     actor: { id: user.id, name: user.name, email: user.email },
     action: "admin.test_lobby.entered",

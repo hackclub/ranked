@@ -2639,8 +2639,28 @@ button.avatar-swatch:active {
   width: clamp(140px, 15vw, 200px);
   height: var(--hud-cluster-height);
 }
+/* Camera-off is the common case here (most players keep video off while
+   livecoding), so the avatar carries all the "who is this" identification —
+   it was shrunk down to a barely-legible ~36px doodle by a flat 0.62 scale
+   of the already-small "sm" size.
+   Sized by HEIGHT only, with width derived from aspect-ratio, deliberately —
+   this tile is short and wide (~2:1), nothing like the artwork's own ~0.96:1
+   portrait proportions. Setting width and height as independent percentages
+   of the tile (the previous attempt) stretched the container to the tile's
+   own 2:1 shape, and every part inside is positioned as a percentage of
+   that same box — so the limbs, positioned correctly for a roughly-square
+   frame, ended up pushed way out horizontally. Fixing the aspect ratio to
+   the artwork's real one and scaling from height keeps every part's
+   relative position correct at any size. */
 .video-tile.compact .scribble-avatar {
-  transform: scale(0.62);
+  height: 92%;
+  width: auto;
+  aspect-ratio: 510 / 530;
+  /* .video-tile .scribble-avatar (the non-compact base rule, still matched
+     here since "compact" is just an added class) sets transform: scale(0.8)
+     — with no override here that silently re-shrinks this by another 20%
+     on top of the sizing above, which is exactly what happened previously. */
+  transform: none;
 }
 .video-tile.compact .video-label {
   bottom: 5px;

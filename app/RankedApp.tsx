@@ -26,6 +26,7 @@ import {
   SHOP_CATALOG,
   avatarAccent,
   normalizeAvatar,
+  randomStarterAvatar,
   type AvatarConfig,
   type AvatarShopItem,
   type ResolvedAvatarConfig,
@@ -6266,9 +6267,13 @@ export default function RankedApp() {
   const [preAuthStep, setPreAuthStep] = useState<"avatar" | "hackclub">(
     "avatar",
   );
-  const [avatarDraft, setAvatarDraft] = useState<AvatarDraft>({
-    ...DEFAULT_AVATAR,
-  });
+  // Randomized per visit (not persisted until they actually save) so a new
+  // visitor's very first look at the avatar picker isn't the same scribble
+  // every single time — matches the random starter avatar new accounts get
+  // server-side (see the Hack Club OAuth callback) if they skip customizing.
+  const [avatarDraft, setAvatarDraft] = useState<AvatarDraft>(() =>
+    randomStarterAvatar(),
+  );
   const [mediaPrefs, setMediaPrefs] = useState<MediaPrefs>({
     mic: true,
     video: true,

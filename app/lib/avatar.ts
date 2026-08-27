@@ -77,6 +77,20 @@ export const DEFAULT_AVATAR: ResolvedAvatarConfig = {
   mouth: 2,
 };
 
+// Used once, at account creation, so brand-new players don't all land on
+// the exact same look — picks only from each part's free starter range
+// (AVATAR_COUNTS), since a new account hasn't unlocked any premium items yet.
+export function randomStarterAvatar(): ResolvedAvatarConfig {
+  const pick = (count: number) => Math.floor(Math.random() * count) + 1;
+  return {
+    shape: pick(AVATAR_COUNTS.shape),
+    limbs: pick(AVATAR_COUNTS.limbs),
+    eye: pick(AVATAR_COUNTS.eye),
+    hair: pick(AVATAR_COUNTS.hair),
+    mouth: pick(AVATAR_COUNTS.mouth),
+  };
+}
+
 const LEGACY_COLORS = ["#D891D9", "#497CBF", "#CCD96C", "#D99F6C", "#BF5A5A"];
 const SHAPE_ACCENTS = [
   "#BF5A5A",

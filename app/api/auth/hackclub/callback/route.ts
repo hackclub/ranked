@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { exchangeHackClubCode } from "@/app/lib/hackclub";
+import { randomStarterAvatar } from "@/app/lib/avatar";
 import {
   encryptHackClubProfile,
   profileFromIdentity,
@@ -24,9 +25,14 @@ export async function GET(request: NextRequest) {
     const encryptedProfile = await encryptHackClubProfile(
       profileFromIdentity(identity, email),
     );
+    // A random starter avatar is only ever meaningful for a brand-new row —
+    // it's in the VALUES tuple but deliberately left out of DO UPDATE SET,
+    // so an existing player's already-chosen look is never touched on
+    // subsequent logins (same reasoning as avatar_url's COALESCE below).
+    const newAccountAvatar = JSON.stringify(randomStarterAvatar());
     await getSql()`
-      INSERT INTO users (id, email, name, slack_id, verification_status, avatar_url, last_seen_at)
-      VALUES (${userId}, ${email}, ${name}, ${identity.slack_id ?? null}, ${identity.verification_status ?? null}, ${identity.picture ?? null}, NOW())
+      INSERT INTO users (id, email, name, slack_id, verification_status, avatar_url, avatar, last_seen_at)
+      VALUES (${userId}, ${email}, ${name}, ${identity.slack_id ?? null}, ${identity.verification_status ?? null}, ${identity.picture ?? null}, ${newAccountAvatar}::jsonb, NOW())
       ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, name = EXCLUDED.name,
         slack_id = EXCLUDED.slack_id, verification_status = EXCLUDED.verification_status,
         avatar_url = COALESCE(EXCLUDED.avatar_url, users.avatar_url), last_seen_at = NOW(), updated_at = NOW()
