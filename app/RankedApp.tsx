@@ -2133,17 +2133,18 @@ function OnboardingModal({
             <h2 id="onboarding-title">Connect GitHub</h2>
             <p>
               Every finished match gets published as a folder inside a{" "}
-              <strong>hackclubranked</strong> repo on your own account,
-              deployed with GitHub Pages.{" "}
-              <a
-                href="https://github.com/hackclub/hackclubranked/generate"
-                target="_blank"
-                rel="noreferrer"
-              >
-                Create that repo from our template
-              </a>{" "}
-              first, then install the Ranked GitHub App below — it only ever
-              gets access to that one repo, not everything you own.
+              <strong>hackclubranked</strong> repo on your own account, deployed
+              with GitHub Pages.{" "}
+              <li>
+                <a
+                  href="https://github.com/hackclub/hackclubranked/generate"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Create that repo from our template
+                </a>
+              </li>
+              <li>Install the Hack Club Ranked GitHub app below</li>
             </p>
             <a className="primary-button" href="/api/auth/github/start">
               <Icon name="github" size={16} /> connect GitHub
@@ -2924,7 +2925,9 @@ function Lobby({
                                       avatar={friend.avatar}
                                     />
                                   </span>
-                                  <strong title={friend.name}>{friend.name}</strong>
+                                  <strong title={friend.name}>
+                                    {friend.name}
+                                  </strong>
                                   <button
                                     disabled={inviteBusy}
                                     onClick={() => {
@@ -3856,7 +3859,8 @@ function Match({
     if (!submissionProfile.ready) {
       setPublishState({
         loading: false,
-        error: "Reconnect Hack Club Auth so Ranked can find your shipping address.",
+        error:
+          "Reconnect Hack Club Auth so Ranked can find your shipping address.",
       });
       return;
     }
@@ -5278,7 +5282,9 @@ function Match({
                   that collects all your Ranked builds.
                 </p>
                 <label className="repo-name-field">
-                  <span title={`${auth.github?.login ?? "you"}/hackclubranked/`}>
+                  <span
+                    title={`${auth.github?.login ?? "you"}/hackclubranked/`}
+                  >
                     {auth.github?.login ?? "you"}/hackclubranked/
                   </span>
                   <input
@@ -5296,9 +5302,7 @@ function Match({
                   />
                 </label>
                 {submissionProfile.loading ? (
-                  <p className="hca-address-note">
-                    loading your HCA profile…
-                  </p>
+                  <p className="hca-address-note">loading your HCA profile…</p>
                 ) : submissionProfile.ready ? (
                   <p className="hca-address-note">
                     Ships to your primary address on{" "}
@@ -6284,7 +6288,7 @@ function Voting({
                   </>
                 ) : (
                   <>
-                    All done with voting! Play another match {" "}
+                    All done with voting! Play another match{" "}
                     <svg
                       xmlns="http://www.w3.org/2000/svg"
                       width="10"
