@@ -81,6 +81,9 @@ const FEATURE_LAYOUTS = {
     { width: 192, height: 80, offsetX: -15.5, offsetY: -144, shape: 5 },
     { width: 158, height: 47, offsetX: 18, offsetY: -100.5, shape: 7 },
     { width: 174, height: 46, offsetX: 1, offsetY: -110, shape: 8 },
+    { width: 198, height: 183, offsetX: 0, offsetY: -158, shape: 2 },
+    { width: 144, height: 93, offsetX: 0, offsetY: -125, shape: 2 },
+    { width: 80, height: 128, offsetX: -42, offsetY: -145, shape: 2 },
   ],
   mouth: [
     { width: 29, height: 52, offsetX: 5.5, offsetY: 51, shape: 1 },
@@ -89,6 +92,7 @@ const FEATURE_LAYOUTS = {
     { width: 89, height: 46, offsetX: 3, offsetY: 46, shape: 5 },
     { width: 93, height: 58, offsetX: -13.5, offsetY: 54, shape: 8 },
     { width: 144, height: 60, offsetX: 11.5, offsetY: 14, shape: 4 },
+    { width: 288, height: 82, offsetX: 0, offsetY: 48, shape: 3 },
   ],
 } as const;
 
@@ -257,6 +261,14 @@ type SwatchEntry =
   | { kind: "owned"; value: number }
   | { kind: "locked"; item: PremiumAvatarItem };
 
+function randomPick(
+  optionsByPart: Record<AvatarPart, number[]>,
+  part: AvatarPart,
+) {
+  const options = optionsByPart[part];
+  return options[Math.floor(Math.random() * options.length)];
+}
+
 function Swatch({
   part,
   entry,
@@ -346,11 +358,6 @@ export function AvatarCustomizer({
     {} as Record<AvatarPart, number[]>,
   );
 
-  const randomPick = (part: AvatarPart) => {
-    const options = allowedValuesByPart[part];
-    return options[Math.floor(Math.random() * options.length)];
-  };
-
   const cycleTab = (direction: -1 | 1) => {
     const currentTabIndex = PART_ORDER.indexOf(activePart);
     const nextTabIndex =
@@ -437,11 +444,11 @@ export function AvatarCustomizer({
               className="shuffle-button"
               onClick={() =>
                 onChange({
-                  shape: randomPick("shape"),
-                  limbs: randomPick("limbs"),
-                  eye: randomPick("eye"),
-                  hair: randomPick("hair"),
-                  mouth: randomPick("mouth"),
+                  shape: randomPick(allowedValuesByPart, "shape"),
+                  limbs: randomPick(allowedValuesByPart, "limbs"),
+                  eye: randomPick(allowedValuesByPart, "eye"),
+                  hair: randomPick(allowedValuesByPart, "hair"),
+                  mouth: randomPick(allowedValuesByPart, "mouth"),
                 })
               }
             >

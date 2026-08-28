@@ -25,8 +25,12 @@ export const PREMIUM_AVATAR_ITEMS: PremiumAvatarItem[] = [
   { id: "avatar_shape_comet", part: "shape", value: AVATAR_COUNTS.shape + 1, name: "Comet Body", cost: 300 },
   { id: "avatar_limbs_noodle", part: "limbs", value: AVATAR_COUNTS.limbs + 1, name: "Noodle Limbs", cost: 300 },
   { id: "avatar_eye_starstruck", part: "eye", value: AVATAR_COUNTS.eye + 1, name: "Starstruck Eyes", cost: 250 },
-  { id: "avatar_hair_neon", part: "hair", value: AVATAR_COUNTS.hair + 1, name: "Neon Mohawk", cost: 250 },
-  { id: "avatar_mouth_grin", part: "mouth", value: AVATAR_COUNTS.mouth + 1, name: "Mega Grin", cost: 250 },
+  // Keep the original ids stable for anyone who already bought the placeholder
+  // items; the finished art now occupies those same stored avatar values.
+  { id: "avatar_hair_neon", part: "hair", value: 6, name: "Top Hat", cost: 250 },
+  { id: "avatar_hair_cat_ears", part: "hair", value: 7, name: "Cat Ears", cost: 250 },
+  { id: "avatar_hair_party_hat", part: "hair", value: 8, name: "Party Hat", cost: 250 },
+  { id: "avatar_mouth_grin", part: "mouth", value: 7, name: "Fancy Mustache", cost: 250 },
 ];
 
 export function maxAvatarValue(part: AvatarPartName): number {
@@ -177,4 +181,3 @@ export const SHOP_CATALOG: ShopItem[] = [
 export function shopItemById(id: string) {
   return SHOP_CATALOG.find((item) => item.id === id);
 }
-

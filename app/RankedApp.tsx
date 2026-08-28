@@ -2154,7 +2154,8 @@ function OnboardingModal({
             <p>
               Every finished match gets published as a folder inside a{" "}
               <strong>hackclubranked</strong> repo on your own account,
-              deployed with GitHub Pages. Create the repo now from this GitHub template. <strong>Your repo must be called "hackclubranked"</strong>
+              deployed with GitHub Pages. Create the repo now from this GitHub
+              template. <strong>Your repo must be called &quot;hackclubranked&quot;</strong>
             </p>
             <a
               className="primary-button"
@@ -5972,8 +5973,6 @@ function Shop({
   useEffect(() => {
     if (!selected || selected.kind !== "physical") return;
     let cancelled = false;
-    setAddressState({ loading: true, ready: false, addresses: [] });
-    setShippingAddressId("");
     fetch("/api/shop/addresses")
       .then((r) => r.json())
       .then((data) => {
@@ -6083,7 +6082,15 @@ function Shop({
                           `Keep building, you need more H-Bucks for ${item.name}`,
                         );
                       if (item.kind === "avatar") void redeemAvatarItem(item);
-                      else setSelected(item);
+                      else {
+                        setAddressState({
+                          loading: true,
+                          ready: false,
+                          addresses: [],
+                        });
+                        setShippingAddressId("");
+                        setSelected(item);
+                      }
                     }}
                   >
                     {item.kind === "avatar" && redeemingId === item.id
