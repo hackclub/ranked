@@ -12,7 +12,11 @@ import {
 import { createPortal } from "react-dom";
 import { CollaborativeEditor } from "./realtime/CollaborativeEditor";
 import { StreamVideo } from "./realtime/StreamVideo";
-import { useCodeRoom, useRealtimeRoom, type PeerVideoLost } from "./realtime/useRealtimeRoom";
+import {
+  useCodeRoom,
+  useRealtimeRoom,
+  type PeerVideoLost,
+} from "./realtime/useRealtimeRoom";
 import {
   supportedRecordingMimeType,
   useMatchRecording,
@@ -33,7 +37,15 @@ import {
   type ShopItem,
 } from "./lib/avatar";
 
-type Screen = "home" | "lobby" | "match" | "vote" | "leaderboard" | "shop" | "wardrobe" | "admin";
+type Screen =
+  | "home"
+  | "lobby"
+  | "match"
+  | "vote"
+  | "leaderboard"
+  | "shop"
+  | "wardrobe"
+  | "admin";
 type Mode = "solo" | "duo";
 type Experience = "beginner" | "intermediate" | "expert";
 type AuthState = {
@@ -883,7 +895,9 @@ function SiteHeader({
           onClick={() =>
             wardrobeUnlocked
               ? navigate("wardrobe")
-              : toast("Buy your first avatar item in the Shop to unlock the Wardrobe")
+              : toast(
+                  "Buy your first avatar item in the Shop to unlock the Wardrobe",
+                )
           }
         >
           wardrobe
@@ -1002,10 +1016,7 @@ function useProfileHoverCard() {
   }, []);
   const scheduleClose = useCallback(() => {
     cancelClose();
-    closeTimer.current = window.setTimeout(
-      () => setOpenProfileId(null),
-      150,
-    );
+    closeTimer.current = window.setTimeout(() => setOpenProfileId(null), 150);
   }, [cancelClose]);
   useEffect(() => () => window.clearTimeout(closeTimer.current), []);
 
@@ -1209,7 +1220,11 @@ function PlayerProfileCard({
                 </a>
               )}
               {profile.githubRepoUrl && (
-                <a href={profile.githubRepoUrl} target="_blank" rel="noreferrer">
+                <a
+                  href={profile.githubRepoUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                >
                   <Icon name="github" size={13} /> repo
                 </a>
               )}
@@ -1364,7 +1379,9 @@ function Home({
         setSelectedFriend(null);
         return toast("Friend request sent");
       } catch {
-        return toast("Could not send that friend request, check your connection");
+        return toast(
+          "Could not send that friend request, check your connection",
+        );
       }
     }
     const handle = slackQuery.replace(/^@/, "").trim();
@@ -1967,22 +1984,24 @@ function DailyChallenges({
     <div className="paper-card daily-card">
       <CardTitle>daily challenges</CardTitle>
 
-      {challenges.map((challenge) => (
-        <Challenge
-          key={challenge.type}
-          label={CHALLENGE_LABELS[challenge.type] ?? challenge.type}
+      <div className="challenge-list">
+        {challenges.map((challenge) => (
+          <Challenge
+            key={challenge.type}
+            label={CHALLENGE_LABELS[challenge.type] ?? challenge.type}
             value={`${Math.min(challenge.progress, challenge.target)} / ${challenge.target}`}
-          progress={Math.min(
-            100,
-            (challenge.progress / challenge.target) * 100,
-          )}
-          reward={
-            challenge.rewardElo
-              ? `+${challenge.rewardElo} ELO`
-              : `+${challenge.rewardHBucks} Ħ`
-          }
-        />
-      ))}
+            progress={Math.min(
+              100,
+              (challenge.progress / challenge.target) * 100,
+            )}
+            reward={
+              challenge.rewardElo
+                ? `+${challenge.rewardElo} ELO`
+                : `+${challenge.rewardHBucks} Ħ`
+            }
+          />
+        ))}
+      </div>
       <small className="resets">resets in {resetsIn}</small>
     </div>
   );
@@ -2234,13 +2253,16 @@ function Lobby({
   const resetsIn = useCountdownToUtcMidnight();
 
   const acceptQueueResult = useCallback(
-    (result: {
-      status?: string;
-      phase?: string;
-      match?: ActiveMatch;
-      error?: string;
-      code?: string;
-    }, fromPoll = false) => {
+    (
+      result: {
+        status?: string;
+        phase?: string;
+        match?: ActiveMatch;
+        error?: string;
+        code?: string;
+      },
+      fromPoll = false,
+    ) => {
       if (result.match) {
         onMatched(result.match, {
           mic,
@@ -2321,7 +2343,9 @@ function Lobby({
       return;
     }
     if (!supportedRecordingMimeType()) {
-      toast("This browser cannot securely record match audio/video. Try a current Chrome, Edge, Firefox, or Safari.");
+      toast(
+        "This browser cannot securely record match audio/video. Try a current Chrome, Edge, Firefox, or Safari.",
+      );
       return;
     }
     setMatching(true);
@@ -2400,9 +2424,7 @@ function Lobby({
       acceptQueueResult(result);
     } catch (error) {
       toast(
-        error instanceof Error
-          ? error.message
-          : "Could not start a test lobby",
+        error instanceof Error ? error.message : "Could not start a test lobby",
       );
     }
   };
@@ -2457,7 +2479,8 @@ function Lobby({
   }, [matching]);
   useEffect(() => {
     return () => {
-      if (matchingRef.current) void fetch("/api/matchmaking/queue", { method: "DELETE" });
+      if (matchingRef.current)
+        void fetch("/api/matchmaking/queue", { method: "DELETE" });
     };
   }, []);
   // The unmount cleanup above only fires on in-app navigation — a closed
@@ -2468,7 +2491,10 @@ function Lobby({
   useEffect(() => {
     const leaveQueueOnPageHide = () => {
       if (matchingRef.current) {
-        void fetch("/api/matchmaking/queue", { method: "DELETE", keepalive: true });
+        void fetch("/api/matchmaking/queue", {
+          method: "DELETE",
+          keepalive: true,
+        });
       }
     };
     window.addEventListener("pagehide", leaveQueueOnPageHide);
@@ -2586,7 +2612,8 @@ function Lobby({
       const { response, data } = await fetchJsonWithTimeout<
         DuoInviteState & { error?: string }
       >("/api/duo-invites", {}, 8000);
-      if (!response.ok) throw new Error(data.error ?? "Could not load your duo");
+      if (!response.ok)
+        throw new Error(data.error ?? "Could not load your duo");
       setDuoState(data);
     } catch {
       // The next bounded poll retries. Avoid replacing a known partner with an
@@ -2646,14 +2673,19 @@ function Lobby({
     void fetchJsonWithTimeout<{ error?: string }>("/api/duo-invites", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ inviteId: partnerInviteId, durationMinutes: length }),
-    }).then(({ response, data }) => {
-      if (!cancelled && !response.ok) {
-        toast(data.error ?? "Could not sync the match length");
-      }
-    }).catch(() => {
-      if (!cancelled) toast("Could not sync the match length");
-    });
+      body: JSON.stringify({
+        inviteId: partnerInviteId,
+        durationMinutes: length,
+      }),
+    })
+      .then(({ response, data }) => {
+        if (!cancelled && !response.ok) {
+          toast(data.error ?? "Could not sync the match length");
+        }
+      })
+      .catch(() => {
+        if (!cancelled) toast("Could not sync the match length");
+      });
     return () => {
       cancelled = true;
     };
@@ -2665,7 +2697,8 @@ function Lobby({
         "/api/duo-invites",
         { method: "DELETE" },
       );
-      if (!response.ok) throw new Error(data.error ?? "Could not leave the duo");
+      if (!response.ok)
+        throw new Error(data.error ?? "Could not leave the duo");
       setMatching(false);
       setMatchingPhase("contacting matchmaking service…");
       setDuoState({ partner: null, outgoing: null, incoming: [] });
@@ -2704,7 +2737,9 @@ function Lobby({
           <DailyChallenges challenges={challenges} resetsIn={resetsIn} />
 
           <div className="match-dock">
-            <label className={`recording-consent ${recordingConsent ? "accepted" : ""}`}>
+            <label
+              className={`recording-consent ${recordingConsent ? "accepted" : ""}`}
+            >
               <input
                 type="checkbox"
                 checked={recordingConsent}
@@ -2752,7 +2787,6 @@ function Lobby({
           <div className="pedestal-row">
             <div className={`pedestal ${matching ? "ready" : ""}`}>
               <div className="pedestal-ring" />
-              <div className="pedestal-beam" />
               <div className="pedestal-avatar">
                 <ScribbleAvatar
                   avatar={user.avatar}
@@ -3036,7 +3070,8 @@ function Lobby({
       <div className="lobby-footer">
         <small className="lobby-fineprint text-[10px] mb-2">
           By joining, you agree to abide by the{" "}
-          <a target="_blank"
+          <a
+            target="_blank"
             href="https://hackclub.com/conduct"
             className="black bold underline"
           >
@@ -3072,7 +3107,10 @@ const SPEAKING_MIN_LEVEL = 0.02;
 const SPEAKING_FLOOR_MULTIPLIER = 2.5;
 const SPEAKING_HOLD_MS = 350;
 
-function useIsSpeaking(stream: MediaStream | null | undefined, enabled: boolean) {
+function useIsSpeaking(
+  stream: MediaStream | null | undefined,
+  enabled: boolean,
+) {
   const [speaking, setSpeaking] = useState(false);
   useEffect(() => {
     if (!enabled || !stream || !stream.getAudioTracks().length) return;
@@ -3313,10 +3351,11 @@ function Match({
     videoDeviceId || undefined,
     onPeerVideoLost,
   );
-  const {
-    status: recordingStatus,
-    error: recordingError,
-  } = useMatchRecording(match.id, localStream, seconds > 0 && !outcome);
+  const { status: recordingStatus, error: recordingError } = useMatchRecording(
+    match.id,
+    localStream,
+    seconds > 0 && !outcome,
+  );
   const room = useCodeRoom(`ranked:code:${match.id}:${team}`);
   // The call room is one shared room for the whole match (both teams, so
   // opponents can join with "everyone" scope) — remotePeers includes them
@@ -3351,7 +3390,8 @@ function Match({
         setSubmissionAddressId((current) =>
           addresses.some((address) => address.id === current)
             ? current
-            : (addresses.find((address) => address.primary) ?? addresses[0])?.id ?? "",
+            : ((addresses.find((address) => address.primary) ?? addresses[0])
+                ?.id ?? ""),
         );
       })
       .catch(() => {
@@ -3475,7 +3515,8 @@ function Match({
     const seedAll = (synced: boolean) => {
       if (!synced || tabsSeeded) return;
       window.clearTimeout(seedTimer);
-      if (match.mode === "duo") seedTimer = window.setTimeout(attemptSeed, 1200);
+      if (match.mode === "duo")
+        seedTimer = window.setTimeout(attemptSeed, 1200);
       else attemptSeed();
     };
 
@@ -3642,7 +3683,11 @@ function Match({
       // actually registered before this arrives.
       el.addEventListener("load", () => {
         el.contentWindow?.postMessage(
-          { source: "ranked-preview", type: "update", html: previewDocRef.current },
+          {
+            source: "ranked-preview",
+            type: "update",
+            html: previewDocRef.current,
+          },
           "*",
         );
       });
@@ -3679,7 +3724,10 @@ function Match({
     if (latest === lastPushedPreviewRef.current) return;
     lastPushedPreviewRef.current = latest;
     for (const win of ownPreviewFrames.current) {
-      win.postMessage({ source: "ranked-preview", type: "update", html: latest }, "*");
+      win.postMessage(
+        { source: "ranked-preview", type: "update", html: latest },
+        "*",
+      );
     }
   }, []);
   // Pushes shortly after typing actually pauses, rather than on a fixed
@@ -3902,7 +3950,9 @@ function Match({
       skipFonts: true,
     }).catch(() => null);
     if (!screenshot) return;
-    const file = new File([screenshot], "ranked-build.png", { type: "image/png" });
+    const file = new File([screenshot], "ranked-build.png", {
+      type: "image/png",
+    });
     for (let attempt = 0; attempt < 20; attempt++) {
       try {
         const body = new FormData();
@@ -4109,26 +4159,31 @@ function Match({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [previewOpen, opponentPreviewOpen]);
 
-  const postSnapshot = useCallback(async (html: string) => {
-    // The opponent's snapshot rides back on the same response as the write
-    // (see snapshot/route.ts), so one request covers a full sync tick
-    // instead of a POST followed by a separate GET.
-    const response = await fetch(`/api/matches/${match.id}/snapshot`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ html }),
-    });
-    if (!response.ok) return;
-    const result = (await response.json()) as {
-      snapshot?: { html?: string } | null;
-    };
-    if (result.snapshot?.html) setOpponentSnapshot(result.snapshot.html);
-  }, [match.id]);
+  const postSnapshot = useCallback(
+    async (html: string) => {
+      // The opponent's snapshot rides back on the same response as the write
+      // (see snapshot/route.ts), so one request covers a full sync tick
+      // instead of a POST followed by a separate GET.
+      const response = await fetch(`/api/matches/${match.id}/snapshot`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ html }),
+      });
+      if (!response.ok) return;
+      const result = (await response.json()) as {
+        snapshot?: { html?: string } | null;
+      };
+      if (result.snapshot?.html) setOpponentSnapshot(result.snapshot.html);
+    },
+    [match.id],
+  );
 
   useEffect(() => {
     const sync = () =>
       postSnapshot(
-        matchEndedRef.current ? finalPreviewDocRef.current : previewDocRef.current,
+        matchEndedRef.current
+          ? finalPreviewDocRef.current
+          : previewDocRef.current,
       );
     const initial = window.setTimeout(() => void sync(), 1000);
     // Fast enough that the opponent panel reads as close to live; 3s already
@@ -4228,7 +4283,12 @@ function Match({
               title="This match is currently being recorded"
             >
               <i />
-              <span>{recordingStatus === "error" || recordingStatus === "unsupported" ? "REC ERROR" : "REC"}</span>
+              <span>
+                {recordingStatus === "error" ||
+                recordingStatus === "unsupported"
+                  ? "REC ERROR"
+                  : "REC"}
+              </span>
             </div>
             <button
               className="settings-gear"
@@ -4359,7 +4419,8 @@ function Match({
             </button>
             <h2>
               Who are you reporting for{" "}
-              {reportType === "misconduct" ? "misconduct" : "AI-generated code"}?
+              {reportType === "misconduct" ? "misconduct" : "AI-generated code"}
+              ?
             </h2>
             {reportRosterLoading ? (
               <p>Loading match roster…</p>
@@ -4895,7 +4956,11 @@ function Match({
                 <span>settings</span>
               </button>
               {avSettingsOpen && (
-                <div className="av-settings-menu" role="dialog" aria-label="Audio and video settings">
+                <div
+                  className="av-settings-menu"
+                  role="dialog"
+                  aria-label="Audio and video settings"
+                >
                   <div className="device-row-group">
                     <label className="device-row">
                       <span>microphone input</span>
@@ -4908,7 +4973,10 @@ function Match({
                         {devices
                           .filter((device) => device.kind === "audioinput")
                           .map((device, index) => (
-                            <option key={device.deviceId} value={device.deviceId}>
+                            <option
+                              key={device.deviceId}
+                              value={device.deviceId}
+                            >
                               {device.label || `Microphone ${index + 1}`}
                             </option>
                           ))}
@@ -4919,13 +4987,18 @@ function Match({
                       <select
                         aria-label="Camera"
                         value={videoDeviceId}
-                        onChange={(event) => setVideoDeviceId(event.target.value)}
+                        onChange={(event) =>
+                          setVideoDeviceId(event.target.value)
+                        }
                       >
                         <option value="">Default</option>
                         {devices
                           .filter((device) => device.kind === "videoinput")
                           .map((device, index) => (
-                            <option key={device.deviceId} value={device.deviceId}>
+                            <option
+                              key={device.deviceId}
+                              value={device.deviceId}
+                            >
                               {device.label || `Camera ${index + 1}`}
                             </option>
                           ))}
@@ -5017,7 +5090,8 @@ function Match({
           <section className="modal publish-modal">
             <h2 id="description-title">describe your site!</h2>
             <p>
-              two sentences about what your website is, what it does, and how it works!
+              two sentences about what your website is, what it does, and how it
+              works!
             </p>
             <label className="description-field">
               <textarea
@@ -5176,7 +5250,10 @@ function Match({
                     </span>
                   )}
                 </div>
-                <button className="primary-button" onClick={() => navigate("home")}>
+                <button
+                  className="primary-button"
+                  onClick={() => navigate("home")}
+                >
                   return home
                 </button>
               </>
@@ -5209,26 +5286,25 @@ function Match({
                   />
                 </label>
                 {submissionProfile.loading ? (
-                  <p className="hca-address-note">loading your HCA addresses…</p>
+                  <p className="hca-address-note">
+                    loading your HCA addresses…
+                  </p>
                 ) : submissionProfile.ready ? (
                   <label className="hca-address-field">
-                    <span>shipping address from Hack Club Auth</span>
                     <select
+                      aria-label="Shipping address"
                       value={submissionAddressId}
-                      onChange={(event) => setSubmissionAddressId(event.target.value)}
+                      onChange={(event) =>
+                        setSubmissionAddressId(event.target.value)
+                      }
                     >
                       {submissionProfile.addresses.map((address) => (
                         <option key={address.id} value={address.id}>
-                          {address.label}{address.primary ? " · primary" : ""}
+                          {address.label}
+                          {address.primary ? " · primary" : ""}
                         </option>
                       ))}
                     </select>
-                    <small>
-                      Manage addresses at{" "}
-                      <a href="https://auth.hackclub.com" target="_blank" rel="noreferrer">
-                        auth.hackclub.com
-                      </a>.
-                    </small>
                   </label>
                 ) : (
                   <div className="hca-address-missing">
@@ -5236,7 +5312,10 @@ function Match({
                       Reconnect Hack Club Auth to share your verified birthday
                       and choose an address for the automatic submission.
                     </p>
-                    <a className="github-connect" href="/api/auth/hackclub/start">
+                    <a
+                      className="github-connect"
+                      href="/api/auth/hackclub/start"
+                    >
                       reconnect Hack Club Auth
                     </a>
                   </div>
@@ -5404,9 +5483,7 @@ function Leaderboard({
       .catch(() => setData(null));
   }, [board, requestedPage]);
 
-  const onYourPage = Boolean(
-    data?.yourPage && data.yourPage === data.page,
-  );
+  const onYourPage = Boolean(data?.yourPage && data.yourPage === data.page);
 
   return (
     <main className="subpage screen-pad">
@@ -5652,7 +5729,9 @@ function AdminAuditLog({ navigate }: { navigate: (s: Screen) => void }) {
       <section className="audit-card">
         {data && data.entries.length === 0 && (
           <p className="audit-empty">
-            {hasFilters ? "No events match those filters." : "Nothing logged yet."}
+            {hasFilters
+              ? "No events match those filters."
+              : "Nothing logged yet."}
           </p>
         )}
         {data?.entries.map((entry) => {
@@ -5726,7 +5805,10 @@ function Shop({
         .catch(() => undefined);
   }, [auth.user]);
 
-  const redeemItem = async (itemId: string, shipping?: Record<string, string>) => {
+  const redeemItem = async (
+    itemId: string,
+    shipping?: Record<string, string>,
+  ) => {
     const response = await fetch("/api/shop/orders", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -5745,7 +5827,10 @@ function Shop({
     event.preventDefault();
     if (!selected) return;
     const form = new FormData(event.currentTarget);
-    const shipping = Object.fromEntries(form.entries()) as Record<string, string>;
+    const shipping = Object.fromEntries(form.entries()) as Record<
+      string,
+      string
+    >;
     if (await redeemItem(selected.id, shipping)) {
       setSelected(null);
       toast("Redemption submitted for approval");
@@ -5807,7 +5892,9 @@ function Shop({
                     disabled={item.kind === "avatar" && redeemingId === item.id}
                     onClick={() => {
                       if (item.cost > balance)
-                        return toast(`Keep building, you need more H-Bucks for ${item.name}`);
+                        return toast(
+                          `Keep building, you need more H-Bucks for ${item.name}`,
+                        );
                       if (item.kind === "avatar") void redeemAvatarItem(item);
                       else setSelected(item);
                     }}
@@ -5886,7 +5973,8 @@ function Wardrobe({
         user?: { avatar: AvatarConfig };
         error?: string;
       };
-      if (!response.ok) throw new Error(result.error ?? "Could not save your Scrib.");
+      if (!response.ok)
+        throw new Error(result.error ?? "Could not save your Scrib.");
       onAvatarUpdated(normalizeAvatar(result.user!.avatar));
       toast("Wardrobe updated");
     } catch (saveError) {
@@ -5909,12 +5997,24 @@ function Wardrobe({
       <div className="subpage-head">
         <h1>Wardrobe</h1>
       </div>
-      <AvatarCustomizer value={draft} onChange={setDraft} ownedPremiumIds={avatarInventory} />
+      <AvatarCustomizer
+        value={draft}
+        onChange={setDraft}
+        ownedPremiumIds={avatarInventory}
+      />
       <div className="wardrobe-actions">
-        <button className="primary-button" onClick={() => void save()} disabled={saving}>
+        <button
+          className="primary-button"
+          onClick={() => void save()}
+          disabled={saving}
+        >
           {saving ? "saving…" : "save Scrib"}
         </button>
-        <button type="button" className="wardrobe-shop-link" onClick={() => navigate("shop")}>
+        <button
+          type="button"
+          className="wardrobe-shop-link"
+          onClick={() => navigate("shop")}
+        >
           browse more looks in the shop <Icon name="external" size={11} />
         </button>
       </div>
@@ -6122,11 +6222,33 @@ function Voting({
               <button onClick={continueVoting}>
                 {pendingNext?.match ? (
                   <>
-                    vote on next matchup <Icon name="external" size={11} />
+                    next matchup{" "}
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="10"
+                      height="10"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        fill="currentColor"
+                        d="M16.175 13H5q-.425 0-.712-.288T4 12t.288-.712T5 11h11.175l-4.9-4.9q-.3-.3-.288-.7t.313-.7q.3-.275.7-.288t.7.288l6.6 6.6q.15.15.213.325t.062.375t-.062.375t-.213.325l-6.6 6.6q-.275.275-.687.275T11.3 19.3q-.3-.3-.3-.712t.3-.713z"
+                      />
+                    </svg>
                   </>
                 ) : (
                   <>
-                    play another <Icon name="external" size={11} />
+                    All done with voting! Play another match {" "}
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="10"
+                      height="10"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        fill="currentColor"
+                        d="M16.175 13H5q-.425 0-.712-.288T4 12t.288-.712T5 11h11.175l-4.9-4.9q-.3-.3-.288-.7t.313-.7q.3-.275.7-.288t.7.288l6.6 6.6q.15.15.213.325t.062.375t-.062.375t-.213.325l-6.6 6.6q-.275.275-.687.275T11.3 19.3q-.3-.3-.3-.712t.3-.713z"
+                      />
+                    </svg>
                   </>
                 )}
               </button>
@@ -6190,7 +6312,10 @@ function ProfileModal({
               onClick={() => {
                 close();
                 if (wardrobeUnlocked) navigate("wardrobe");
-                else toast("Buy your first avatar item in the Shop to unlock the Wardrobe");
+                else
+                  toast(
+                    "Buy your first avatar item in the Shop to unlock the Wardrobe",
+                  );
               }}
             >
               visit wardrobe
@@ -6242,7 +6367,9 @@ function ProfileModal({
         {auth.user && (
           <div className="logout-form">
             <button type="button" onClick={logout} disabled={logoutLoading}>
-              {logoutLoading ? "clearing site data…" : "log out & clear site data"}
+              {logoutLoading
+                ? "clearing site data…"
+                : "log out & clear site data"}
             </button>
           </div>
         )}
@@ -6255,7 +6382,9 @@ export default function RankedApp() {
   const [screen, setScreen] = useState<Screen>("home");
   const [toastMessage, setToastMessage] = useState("");
   const [profileOpen, setProfileOpen] = useState(false);
-  const [avatarInventory, setAvatarInventory] = useState<Set<string>>(new Set());
+  const [avatarInventory, setAvatarInventory] = useState<Set<string>>(
+    new Set(),
+  );
   const [auth, setAuth] = useState<AuthState>({
     user: null,
     github: null,
@@ -6290,10 +6419,16 @@ export default function RankedApp() {
       .then((response) => response.json())
       .then((data: { orders?: Array<{ itemId: string }> }) => {
         const avatarItemIds = new Set(
-          SHOP_CATALOG.filter((item) => item.kind === "avatar").map((item) => item.id),
+          SHOP_CATALOG.filter((item) => item.kind === "avatar").map(
+            (item) => item.id,
+          ),
         );
         setAvatarInventory(
-          new Set((data.orders ?? []).map((order) => order.itemId).filter((id) => avatarItemIds.has(id))),
+          new Set(
+            (data.orders ?? [])
+              .map((order) => order.itemId)
+              .filter((id) => avatarItemIds.has(id)),
+          ),
         );
       })
       .catch(() => undefined);
@@ -6387,7 +6522,9 @@ export default function RankedApp() {
 
   const handleAvatarUpdated = useCallback((avatar: ResolvedAvatarConfig) => {
     setAuth((current) =>
-      current.user ? { ...current, user: { ...current.user, avatar } } : current,
+      current.user
+        ? { ...current, user: { ...current.user, avatar } }
+        : current,
     );
   }, []);
 
@@ -6456,16 +6593,34 @@ export default function RankedApp() {
   const pollDuoInvites = useCallback(() => {
     if (globalInvitePollInFlight.current) return;
     globalInvitePollInFlight.current = true;
-    fetchJsonWithTimeout<{
-      incoming?: Array<{ id: string; partnerName: string; partnerAvatar: AvatarConfig }>;
-      missed?: Array<{ id: string; partnerName: string; partnerAvatar: AvatarConfig }>;
-    } & { error?: string }>("/api/duo-invites", {}, 8000)
+    fetchJsonWithTimeout<
+      {
+        incoming?: Array<{
+          id: string;
+          partnerName: string;
+          partnerAvatar: AvatarConfig;
+        }>;
+        missed?: Array<{
+          id: string;
+          partnerName: string;
+          partnerAvatar: AvatarConfig;
+        }>;
+      } & { error?: string }
+    >("/api/duo-invites", {}, 8000)
       .then(({ response, data }) => (response.ok ? data : null))
       .then(
         (
           data: {
-            incoming?: Array<{ id: string; partnerName: string; partnerAvatar: AvatarConfig }>;
-            missed?: Array<{ id: string; partnerName: string; partnerAvatar: AvatarConfig }>;
+            incoming?: Array<{
+              id: string;
+              partnerName: string;
+              partnerAvatar: AvatarConfig;
+            }>;
+            missed?: Array<{
+              id: string;
+              partnerName: string;
+              partnerAvatar: AvatarConfig;
+            }>;
           } | null,
         ) => {
           if (!data) return;
@@ -6480,7 +6635,10 @@ export default function RankedApp() {
             void fetch("/api/duo-invites", {
               method: "PATCH",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ inviteId: missedInvite.id, action: "acknowledge" }),
+              body: JSON.stringify({
+                inviteId: missedInvite.id,
+                action: "acknowledge",
+              }),
             });
           }
         },
@@ -6501,14 +6659,13 @@ export default function RankedApp() {
   const respondToInvite = useCallback(
     async (inviteId: string, action: "accept" | "decline") => {
       try {
-        const { response, data } = await fetchJsonWithTimeout<{ error?: string }>(
-          "/api/duo-invites",
-          {
+        const { response, data } = await fetchJsonWithTimeout<{
+          error?: string;
+        }>("/api/duo-invites", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ inviteId, action }),
-          },
-        );
+        });
         if (!response.ok) {
           toast(data.error ?? "Could not respond to that invite");
           return;
@@ -6558,7 +6715,10 @@ export default function RankedApp() {
               return;
             }
             if (avatarInventory.size > 0) navigate("wardrobe");
-            else toast("Buy your first avatar item in the Shop to unlock the Wardrobe");
+            else
+              toast(
+                "Buy your first avatar item in the Shop to unlock the Wardrobe",
+              );
           }}
         />
       )}
@@ -6604,7 +6764,10 @@ export default function RankedApp() {
               return;
             }
             if (avatarInventory.size > 0) navigate("wardrobe");
-            else toast("Buy your first avatar item in the Shop to unlock the Wardrobe");
+            else
+              toast(
+                "Buy your first avatar item in the Shop to unlock the Wardrobe",
+              );
           }}
         />
       )}

@@ -54,8 +54,15 @@ export async function POST(request: NextRequest) {
       airtable_status AS "airtableStatus" FROM publications
       WHERE match_id=${matchId} AND published_by=${session.user.id}`;
     if (prior[0]) {
-      await getSql()`UPDATE publications SET hca_address_id=COALESCE(hca_address_id,${addressId})
-        WHERE match_id=${matchId} AND published_by=${session.user.id}`;
+      // A publication existing doesn't guarantee finished_at got set too — see
+      // the comment below on the write transaction. Re-applying it here is
+      // what lets a stuck match self-heal the moment the player is back.
+      await getSql().transaction([
+        getSql()`UPDATE publications SET hca_address_id=COALESCE(hca_address_id,${addressId})
+          WHERE match_id=${matchId} AND published_by=${session.user.id}`,
+        getSql()`UPDATE match_players SET finished_at=COALESCE(finished_at,NOW())
+          WHERE match_id=${matchId} AND user_id=${session.user.id}`,
+      ]);
       return NextResponse.json(prior[0]);
     }
     if (files !== undefined && !validFileMap(files, 50, 500_000)) return NextResponse.json({ error: "Invalid source files." }, { status: 400 });
@@ -67,18 +74,27 @@ export async function POST(request: NextRequest) {
       WHERE p.published_by=${session.user.id} ORDER BY p.created_at DESC`;
     const result = await publishWebsite(session.github.accessToken, session.github.login, name, player.theme, pages!, files, trimmedDescription, existingBuilds as DirectoryBuild[]);
     const publicationId = crypto.randomUUID();
-    await getSql()`INSERT INTO publications (id,match_id,team,repository_url,pages_url,github_repo,published_by,description)
-      VALUES (${publicationId},${matchId},${player.team}::match_team,${result.repositoryUrl},${result.pagesUrl},${result.folderName},${session.user.id},${trimmedDescription})
-      ON CONFLICT (match_id,published_by) DO NOTHING`;
-    await getSql()`UPDATE publications SET hca_address_id=${addressId}
-      WHERE match_id=${matchId} AND published_by=${session.user.id}`;
+    // These used to run as separate round-trips. If the client disconnected
+    // (tab closed right after publishing) between the publications insert and
+    // the finished_at update, the build stayed published on GitHub but the
+    // player kept getting handed back the same "finished" match on their next
+    // visit — describe/publish and all — forever, since activeMatch() only
+    // treats a match as done for a player once finished_at is set. One
+    // transaction makes the whole thing all-or-nothing.
+    const [, , , votingOpened] = await getSql().transaction([
+      getSql()`INSERT INTO publications (id,match_id,team,repository_url,pages_url,github_repo,published_by,description)
+        VALUES (${publicationId},${matchId},${player.team}::match_team,${result.repositoryUrl},${result.pagesUrl},${result.folderName},${session.user.id},${trimmedDescription})
+        ON CONFLICT (match_id,published_by) DO NOTHING`,
+      getSql()`UPDATE publications SET hca_address_id=${addressId}
+        WHERE match_id=${matchId} AND published_by=${session.user.id}`,
+      getSql()`UPDATE match_players SET finished_at=NOW() WHERE match_id=${matchId} AND user_id=${session.user.id}`,
+      getSql()`UPDATE matches SET status='voting',voting_ends_at=NOW()+INTERVAL '24 hours'
+        WHERE id=${matchId} AND status='active'
+          AND (SELECT COUNT(*) FROM publications WHERE match_id=${matchId})=(SELECT COUNT(*) FROM match_players WHERE match_id=${matchId})
+          AND (SELECT COUNT(DISTINCT team) FROM publications WHERE match_id=${matchId})=2
+        RETURNING id`,
+    ]);
     await addChallengeProgress(session.user.id, "publish_project", 1);
-    await getSql()`UPDATE match_players SET finished_at=NOW() WHERE match_id=${matchId} AND user_id=${session.user.id}`;
-    const votingOpened = await getSql()`UPDATE matches SET status='voting',voting_ends_at=NOW()+INTERVAL '24 hours'
-      WHERE id=${matchId} AND status='active'
-        AND (SELECT COUNT(*) FROM publications WHERE match_id=${matchId})=(SELECT COUNT(*) FROM match_players WHERE match_id=${matchId})
-        AND (SELECT COUNT(DISTINCT team) FROM publications WHERE match_id=${matchId})=2
-      RETURNING id`;
     if (votingOpened.length) {
       await logAudit({
         actor: null,

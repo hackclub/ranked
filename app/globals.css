@@ -284,17 +284,20 @@ select:focus-visible {
 .home-right {
   display: flex;
   flex-direction: column;
-  gap: clamp(10px, 1.4vh, min(22px, 10vh));
+  gap: clamp(10px, 4vh, min(22px, 10vh));
 }
 .home-left > .paper-card,
 .home-right > .paper-card {
-  /* Grow to soak up leftover column height, but never shrink below what the
-     card's own content needs — shrinking (the old `flex: 1` shorthand,
-     which implies flex-basis: 0% and needs min-height: 0 to work) let a
-     card get forced shorter than its title + list + form, so the content
-     spilled out past the card's border instead of the card just sizing to
-     it. */
-  flex: 1 0 auto;
+  /* The list-driven cards (friends, interactions, challenges) hold a fixed
+     share of the viewport regardless of how much they have to show — a
+     two-challenge day and a ten-challenge day read as the same shape.
+     `flex: none` pins that instead of letting flex-grow stretch a sparse
+     card to fill leftover column height (which is how this used to work);
+     content that overflows scrolls internally instead of pushing the card
+     taller. .vote-nudge opts back out to `height: fit-content` since it's
+     never a list — see its own rule. */
+  flex: none;
+  height: 30dvh;
 }
 .paper-card {
   border: 2px solid var(--line);
@@ -312,16 +315,11 @@ select:focus-visible {
      (same stacking level otherwise) would paint over the dropdown. */
   position: relative;
   z-index: 2;
-  /* The card itself stretches to match its taller sibling column (see
-     `.home-left > .paper-card { flex: 1 0 auto }`), but the friend list's
-     own max-height was a fixed viewport-relative clamp independent of that —
-     leaving dead space below a short list, or clipping the list at a
-     boundary that didn't line up with the card's actual edge. Making the
-     card a column flexbox lets the list itself flex to fill whatever height
-     the card ends up with, so it either fills the card exactly or scrolls
-     flush against the real bottom edge instead of an arbitrary one floating
-     partway up.
-  */
+  /* The card itself is a fixed height (see `.home-left > .paper-card`), so
+     the friend list needs to flex to whatever's left under the title and
+     search form rather than carry its own fixed max-height — otherwise it
+     either leaves dead space the card can't use or clips flush against a
+     boundary that doesn't line up with the card's real edge. */
   display: flex;
   flex-direction: column;
 }
@@ -339,12 +337,31 @@ select:focus-visible {
 .interactions-card {
   background: #ead0b2;
   transform: rotate(0.45deg);
+  /* Same fixed-height-card / flexing-list split as .friends-card above. */
+  display: flex;
+  flex-direction: column;
+}
+.interactions-card > .card-title {
+  flex-shrink: 0;
+}
+.interactions-card > .interaction-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
 }
 .daily-card {
   background: #f3a4ed;
   transform: rotate(0.5deg);
   padding: clamp(12px, 2vh, 19px) 20px;
-  height: min-content;
+}
+.home-right > .daily-card {
+  /* Unlike friends/interactions, the challenge count is fixed (today's
+     three, never more), so there's nothing to scroll — sizing to content
+     instead of the shared fixed 30dvh avoids trailing empty space below
+     the last challenge. Matches `.home-right > .paper-card`'s specificity
+     so it wins the cascade instead of relying on source order. */
+  flex: none;
+  height: fit-content;
 }
 .card-title {
   margin: 0 0 clamp(5px, 1vh, 15px);
@@ -851,6 +868,15 @@ select:focus-visible {
   grid-template-columns: 33px 1fr;
   gap: 10px;
   transform: rotate(-1deg);
+}
+.home-right > .vote-nudge {
+  /* Unlike its three siblings, this card is always a single short status
+     line, never a list that can grow or need scrolling — holding it to the
+     same fixed 30dvh as them just wastes space underneath it. Matches the
+     `.home-right > .paper-card` specificity it's overriding, so it has to
+     win on the cascade rather than by source order alone. */
+  flex: none;
+  height: fit-content;
 }
 .vote-icon {
   border: 1px solid white;
@@ -1777,8 +1803,6 @@ button.avatar-swatch:active {
   height: clamp(140px, 34vh, 265px);
 }
 .pedestal > strong {
-  display: block;
-  margin-top: 1rem;
   max-width: 100%;
   padding: 4px 12px;
   border: 1.5px solid var(--ink);
@@ -1795,6 +1819,7 @@ button.avatar-swatch:active {
   background: transparent;
   color: var(--muted);
   font-weight: 600;
+  margin-top:1rem;
 }
 .pedestal.ready .pedestal-ring {
   background: var(--green);
@@ -1840,7 +1865,6 @@ button.avatar-swatch:active {
   display: grid;
   place-items: center;
   opacity: 0.8;
-  box-shadow: 0 0 16px 2px #497cbf40;
   animation: float-plus 2.6s ease-in-out infinite;
   transition:
     background 0.15s,
@@ -4421,19 +4445,11 @@ button.avatar-swatch:active {
   text-align: left;
 }
 
-.hca-address-field > span {
-  font: 700 13px var(--font-geist-mono);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.hca-address-field small,
 .hca-address-note,
 .hca-address-missing p {
   font: 500 14px/1.5 var(--font-geist-mono);
 }
 
-.hca-address-field a,
 .airtable-status button {
   color: #315f9b;
   text-decoration: underline;
