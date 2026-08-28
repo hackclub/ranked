@@ -194,7 +194,7 @@ select:focus-visible {
 }
 
 .rank-wrap {
-  width: min(415px, 32vw);
+  width: min(560px, 30vw);
   flex-shrink: 0;
   margin: clamp(4px, 1vh, 18px) auto clamp(8px, 1.8vh, 28px);
 }
@@ -205,11 +205,11 @@ select:focus-visible {
   margin-bottom: 10px;
 }
 .rank-labels strong {
-  font: 800 21px var(--font-geist-mono);
+  font: 800 clamp(21px, 1.5vw, 34px) var(--font-geist-mono);
   letter-spacing: -0.02em;
 }
 .rank-labels strong small {
-  font-size: 10px;
+  font-size: clamp(10px, 0.7vw, 16px);
   font-weight: 650;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -217,7 +217,7 @@ select:focus-visible {
   margin-left: 3px;
 }
 .rank-tier {
-  font: 700 9px var(--font-geist-mono);
+  font: 700 clamp(9px, 0.65vw, 15px) var(--font-geist-mono);
   text-transform: uppercase;
   letter-spacing: 0.08em;
   padding: 4px 10px;
@@ -262,19 +262,24 @@ select:focus-visible {
 .rank-meta {
   text-align: right;
   color: var(--muted);
-  font: 600 9px var(--font-geist-mono);
+  font: 600 clamp(9px, 0.6vw, 14px) var(--font-geist-mono);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   margin-top: 7px;
 }
 
 .home-grid {
-  max-width: 1300px;
-  margin: auto;
   width: 100%;
   display: grid;
-  grid-template-columns: 245px minmax(360px, 1fr) 300px;
-  gap: clamp(20px, 4vw, 70px);
+  /* The side columns absorb whatever width the viewport has to give — on a
+     wide monitor that used to mean two narrow card columns floating in a
+     sea of empty margin (the grid itself was capped at 1300px, and even
+     inside that cap the side columns were pinned to a fixed px width while
+     only the hero column could grow). The hero column stays bounded instead
+     since it's just a centered avatar and button, not something that
+     benefits from stretching edge to edge. */
+  grid-template-columns: minmax(260px, 1fr) minmax(380px, 680px) minmax(300px, 1fr);
+  gap: clamp(20px, 3vw, 90px);
   align-items: stretch;
   align-content: stretch;
   flex: 1;
@@ -365,7 +370,7 @@ select:focus-visible {
 }
 .card-title {
   margin: 0 0 clamp(5px, 1vh, 15px);
-  font: 500 20px var(--font-geist-mono);
+  font: 500 clamp(20px, 1.4vw, 32px) var(--font-geist-mono);
   border-bottom: 2px solid var(--line);
   padding-bottom: clamp(3px, 0.7vh, 9px);
   display: flex;
@@ -418,14 +423,14 @@ select:focus-visible {
 }
 .people-list strong,
 .interaction-list strong {
-  font: 600 13px var(--font-geist-mono);
+  font: 600 clamp(13px, 0.9vw, 20px) var(--font-geist-mono);
   display: block;
 }
 .people-list li > button:not(.person-face-button) {
   border: 1px solid var(--ink);
   background: var(--green);
   padding: 4px;
-  font: 600 7px var(--font-geist-mono);
+  font: 600 clamp(7px, 0.5vw, 12px) var(--font-geist-mono);
   border-radius: var(--blob);
 }
 .friend-search {
@@ -439,7 +444,7 @@ select:focus-visible {
   border: 1px solid var(--ink);
   border-left: 0;
   background: var(--green);
-  font: 700 8px var(--font-geist-mono);
+  font: 700 clamp(8px, 0.55vw, 13px) var(--font-geist-mono);
   border-radius: var(--blob);
   width:fit-content;
   padding: 5px;
@@ -460,7 +465,7 @@ select:focus-visible {
   border: 1px solid var(--ink);
   background: #fff9dc;
   padding: 7px;
-  font: 500 8px var(--font-geist-mono);
+  font: 500 clamp(8px, 0.55vw, 13px) var(--font-geist-mono);
   border-radius: var(--blob);
 }
 .slack-suggestions {
@@ -500,7 +505,7 @@ select:focus-visible {
 .interaction-list small {
   display: block;
   color: #5b554d;
-  font: 500 8px var(--font-geist-mono);
+  font: 500 clamp(8px, 0.55vw, 13px) var(--font-geist-mono);
   margin-top: 2px;
 }
 .people-list small.last-seen {
@@ -721,7 +726,7 @@ select:focus-visible {
   border-radius: var(--blob);
   background: var(--paper);
   box-shadow: 2px 2px 0 var(--ink);
-  font: 650 8px var(--font-geist-mono);
+  font: 650 clamp(8px, 0.55vw, 13px) var(--font-geist-mono);
   letter-spacing: 0.04em;
 }
 .hero-avatar-button > span i {
@@ -744,7 +749,7 @@ select:focus-visible {
   background: var(--orange);
   border: 2px solid var(--ink);
   padding: 7px 11px;
-  font: 800 15px var(--font-geist-mono);
+  font: 800 clamp(15px, 1.05vw, 23px) var(--font-geist-mono);
   transform: rotate(5deg);
   box-shadow: 3px 3px 0 var(--ink);
   z-index: 3;
@@ -752,7 +757,7 @@ select:focus-visible {
 }
 .elo-sticker span {
   display: block;
-  font-size: 7px;
+  font-size: clamp(7px, 0.5vw, 11px);
   text-transform: uppercase;
   letter-spacing: 0.12em;
 }
@@ -789,14 +794,26 @@ select:focus-visible {
   opacity: 0.6;
 }
 .start-button {
-  min-width: 265px;
+  /* This is the single call to action on the whole dashboard — it should
+     read as the biggest thing on screen on a wide monitor, not the same
+     fixed size as every other .primary-button in the app. Scoped to this
+     class specifically so publish/continue/etc. buttons elsewhere are
+     untouched. */
+  min-width: clamp(265px, 20vw, 460px);
+  min-height: clamp(60px, 6vw, 112px);
+  padding: 0 clamp(27px, 2.4vw, 52px);
+  font-size: clamp(21px, 1.7vw, 36px);
   display: inline-flex;
   justify-content: center;
   align-items: center;
-  gap: 28px;
+  gap: clamp(20px, 1.8vw, 36px);
+}
+.start-button svg.icon {
+  width: clamp(18px, 1.4vw, 30px);
+  height: clamp(18px, 1.4vw, 30px);
 }
 .queue-note {
-  font: 500 9px var(--font-geist-mono);
+  font: 500 clamp(9px, 0.6vw, 14px) var(--font-geist-mono);
   margin-top: 14px;
   color: var(--muted);
 }
@@ -831,10 +848,10 @@ select:focus-visible {
 .challenge > div:first-child {
   display: flex;
   justify-content: space-between;
-  font: 500 11px var(--font-geist-mono);
+  font: 500 clamp(11px, 0.75vw, 17px) var(--font-geist-mono);
 }
 .challenge > div span {
-  font-size: 9px;
+  font-size: clamp(9px, 0.6vw, 14px);
 }
 .challenge-track {
   height: 6px;
@@ -849,7 +866,7 @@ select:focus-visible {
   border-right: 1px solid var(--ink);
 }
 .challenge > small {
-  font: 700 8px var(--font-geist-mono);
+  font: 700 clamp(8px, 0.55vw, 13px) var(--font-geist-mono);
   background: #f4ff00;
   padding: 2px 4px;
   position: absolute;
@@ -858,14 +875,14 @@ select:focus-visible {
   transform: rotate(-2deg);
 }
 .resets {
-  font: 500 8px var(--font-geist-mono);
+  font: 500 clamp(8px, 0.55vw, 13px) var(--font-geist-mono);
   color: #5e4e5f;
 }
 .vote-nudge {
   background: var(--blue-strong);
   color: white;
   display: grid;
-  grid-template-columns: 33px 1fr;
+  grid-template-columns: clamp(32px, 2.2vw, 48px) 1fr;
   gap: 10px;
   transform: rotate(-1deg);
 }
@@ -880,19 +897,24 @@ select:focus-visible {
 }
 .vote-icon {
   border: 1px solid white;
-  width: 32px;
-  height: 32px;
+  width: clamp(32px, 2.2vw, 48px);
+  height: clamp(32px, 2.2vw, 48px);
   display: grid;
   place-items: center;
   border-radius: 50%;
+  flex-shrink: 0;
+}
+.vote-icon svg.icon {
+  width: clamp(16px, 1.1vw, 24px);
+  height: clamp(16px, 1.1vw, 24px);
 }
 .vote-nudge strong,
 .vote-nudge span {
   display: block;
-  font: 600 11px var(--font-geist-mono);
+  font: 600 clamp(11px, 0.75vw, 17px) var(--font-geist-mono);
 }
 .vote-nudge span {
-  font-size: 8px;
+  font-size: clamp(8px, 0.55vw, 13px);
   opacity: 0.8;
   margin-top: 3px;
 }
@@ -904,7 +926,7 @@ select:focus-visible {
   border-bottom: 1px solid white;
   color: white;
   padding: 0;
-  font: 600 9px var(--font-geist-mono);
+  font: 600 clamp(9px, 0.6vw, 14px) var(--font-geist-mono);
 }
 
 .scribble-avatar {
