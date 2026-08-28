@@ -2103,11 +2103,7 @@ function OnboardingModal({
               <Icon name="flag" size={30} />
             </div>
             <h2 id="onboarding-title">Connect Hack Club.</h2>
-            <p>
-              Ranked runs on Hack Club identity. Connecting links your ELO,
-              matches, and H-Bucks to your actual Hack Club account, no separate
-              password to lose.
-            </p>
+            <p>so we can save all your progress and ship you cool stuff!</p>
             <div className="avatar-preview-note">
               <ScribbleAvatar
                 size="sm"
@@ -2135,16 +2131,16 @@ function OnboardingModal({
               Every finished match gets published as a folder inside a{" "}
               <strong>hackclubranked</strong> repo on your own account, deployed
               with GitHub Pages.{" "}
-              <li>
-                <a
-                  href="https://github.com/hackclub/hackclubranked/generate"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Create that repo from our template
-                </a>
-              </li>
-              <li>Install the Hack Club Ranked GitHub app below</li>
+              <br></br>
+              <a
+                href="https://github.com/hackclub/hackclubranked/generate"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Create that repo from our template
+              </a>
+              <br></br>
+              Install the Hack Club Ranked GitHub app below
             </p>
             <a className="primary-button" href="/api/auth/github/start">
               <Icon name="github" size={16} /> connect GitHub
