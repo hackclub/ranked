@@ -3,6 +3,10 @@ import { currentUser } from "@/app/lib/current-user";
 import { logAudit } from "@/app/lib/audit";
 import { SHOP_CATALOG, shopItemById } from "@/app/lib/avatar";
 import { addChallengeProgress } from "@/app/lib/progression";
+import {
+  completeSubmissionAddresses,
+  getHackClubProfile,
+} from "@/app/lib/hack-club-profile";
 import { getSql } from "@/db";
 
 export async function GET(request: NextRequest) {
@@ -16,22 +20,48 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const user = await currentUser(request);
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const { itemId, shipping } = await request.json();
+  const { itemId, addressId } = await request.json();
   const item = shopItemById(itemId);
   if (!item) return NextResponse.json({ error: "Unknown item" }, { status: 400 });
 
+  // Shipping now always resolves from the player's own Hack Club Auth
+  // addresses, keyed by the id they picked in the dropdown, rather than
+  // trusting whatever free-text a form submitted — same reasoning as the
+  // match-publish flow's move to a server-resolved HCA address.
+  let shipping: Record<string, string | null> | null = null;
   if (item.kind === "avatar") {
     const owned = await getSql()`SELECT 1 FROM shop_orders WHERE user_id=${user.id} AND item_id=${itemId} LIMIT 1`;
     if (owned.length) return NextResponse.json({ error: "You already own this." }, { status: 400 });
-  } else if (!shipping?.name || !shipping?.address1 || !shipping?.city || !shipping?.postalCode || !shipping?.country) {
-    return NextResponse.json({ error: "Complete the shipping address." }, { status: 400 });
+  } else {
+    const profile = await getHackClubProfile(user.id);
+    const selected = completeSubmissionAddresses(profile).find(
+      (address) => address.id === addressId,
+    );
+    if (!profile || !selected) {
+      return NextResponse.json(
+        { error: "Choose a shipping address from your Hack Club Auth account.", code: "hca_address_required" },
+        { status: 400 },
+      );
+    }
+    shipping = {
+      name: [selected.first_name || profile.firstName, selected.last_name || profile.lastName]
+        .filter(Boolean)
+        .join(" "),
+      address1: selected.line_1 ?? null,
+      address2: selected.line_2 ?? null,
+      city: selected.city ?? null,
+      region: selected.state ?? null,
+      postalCode: selected.postal_code ?? null,
+      country: selected.country ?? null,
+      hcaAddressId: selected.id,
+    };
   }
 
   const orderId = crypto.randomUUID();
   // Digital avatar unlocks have nothing to ship, so they auto-approve instead of
   // sitting in the manual shipping-approval queue physical prizes go through.
   const status = item.kind === "avatar" ? "approved" : "pending";
-  const shippingJson = item.kind === "avatar" ? null : JSON.stringify(shipping);
+  const shippingJson = shipping ? JSON.stringify(shipping) : null;
   const result = await getSql()`WITH debit AS (
       UPDATE users SET h_bucks=h_bucks-${item.cost},updated_at=NOW() WHERE id=${user.id} AND h_bucks>=${item.cost} RETURNING h_bucks
     ), placed AS (

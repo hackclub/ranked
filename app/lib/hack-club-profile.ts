@@ -164,3 +164,27 @@ export function resolvePrimaryAddress(
   );
   return complete.find((address) => address.primary) ?? complete[0] ?? null;
 }
+
+// Unlike the match-submission flow, the shop DOES let a player choose which
+// address a physical prize ships to — H-Bucks purchases are a deliberate,
+// one-off decision (dorm vs. home, etc.), not an automatic per-match action.
+// Only complete addresses are ever offered; an incomplete one can't actually
+// be shipped to, so surfacing it as a pickable option would just be a dead end.
+export function completeSubmissionAddresses(
+  profile: StoredHackClubProfile | null,
+): HackClubAddress[] {
+  if (!profile) return [];
+  return profile.addresses.filter((address) =>
+    completeSubmissionAddress(profile, address),
+  );
+}
+
+// HCA addresses have no human-readable label of their own — build one from
+// whatever's on file so a dropdown option reads as an actual place ("123
+// Main St, Springfield") instead of an opaque id.
+export function addressLabel(address: HackClubAddress): string {
+  const parts = [address.line_1, address.city, address.state].filter(
+    (part): part is string => Boolean(part),
+  );
+  return parts.length ? parts.join(", ") : "Address on file";
+}

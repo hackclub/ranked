@@ -3396,6 +3396,54 @@ button.avatar-swatch:active {
   transform: translate(-1px, -1px);
   box-shadow: 3px 4px 0 var(--ink);
 }
+.preview-label {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 2;
+  border: 1.5px solid var(--ink);
+  background: var(--paper);
+  color: var(--ink);
+  padding: 4px 10px;
+  font: 700 9px var(--font-geist-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-radius: var(--blob);
+  box-shadow: 2px 2px 0 var(--ink);
+}
+/* Wraps the refresh + expand buttons together on .preview-panel (the
+   opponent panel only ever has the one expand button, still positioned by
+   .preview-expand-button's own absolute rule above). */
+.preview-controls {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 2;
+  display: flex;
+  gap: 8px;
+}
+.preview-controls > .preview-expand-button,
+.preview-refresh-button {
+  position: static;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 2px solid var(--ink);
+  background: var(--paper);
+  color: var(--ink);
+  border-radius: var(--blob);
+  box-shadow: 2px 3px 0 var(--ink);
+  transition:
+    transform 0.15s,
+    box-shadow 0.15s;
+}
+.preview-controls > .preview-expand-button:hover,
+.preview-refresh-button:hover {
+  background: var(--green);
+  transform: translate(-1px, -1px);
+  box-shadow: 3px 4px 0 var(--ink);
+}
 .opponent-panel {
   flex: 0 1 320px;
   height: clamp(84px, 20vh, 300px);
@@ -3464,6 +3512,29 @@ button.avatar-swatch:active {
   border: 2px solid var(--ink);
   font-size: 20px;
   border-radius: var(--blob);
+}
+.expanded-preview .preview-refresh-button {
+  position: absolute;
+  z-index: 2;
+  left: 8px;
+  top: 8px;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  background: var(--paper);
+  color: var(--ink);
+  border: 2px solid var(--ink);
+  border-radius: var(--blob);
+  box-shadow: 2px 3px 0 var(--ink);
+  transition:
+    transform 0.15s,
+    box-shadow 0.15s;
+}
+.expanded-preview .preview-refresh-button:hover {
+  background: var(--green);
+  transform: translate(-1px, -1px);
+  box-shadow: 3px 4px 0 var(--ink);
 }
 
 .subpage {
@@ -4495,6 +4566,33 @@ button.avatar-swatch:active {
 .hca-address-missing p {
   font: 500 14px/1.5 var(--font-geist-mono);
 }
+.hca-address-field {
+  display: grid;
+  gap: 7px;
+  margin-top: 14px;
+  text-align: left;
+}
+.hca-address-field > span {
+  font: 700 13px var(--font-geist-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.hca-address-field select {
+  min-height: 48px;
+  border: 1.5px solid var(--ink);
+  background: #fffdf1;
+  padding: 9px 11px;
+  font: 500 13px var(--font-geist-mono);
+  border-radius: var(--blob);
+}
+.hca-address-field small {
+  font: 500 11px/1.5 var(--font-geist-mono);
+  color: var(--muted);
+}
+.hca-address-field a {
+  color: #315f9b;
+  text-decoration: underline;
+}
 
 .airtable-status button {
   color: #315f9b;
@@ -4573,26 +4671,12 @@ button.avatar-swatch:active {
   color: var(--blue);
 }
 .shipping-modal {
-  width: min(560px, 92vw);
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
+  width: min(420px, 92vw);
+  text-align: center;
 }
-.shipping-modal h2,
 .shipping-modal .primary-button {
-  grid-column: 1 / -1;
-}
-.shipping-modal input {
-  min-height: 48px;
-  border: 1.5px solid var(--ink);
-  background: #fffdf1;
-  padding: 9px 11px;
-  font: 500 13px var(--font-geist-mono);
-  border-radius: var(--blob);
-}
-.shipping-modal input[name="address1"],
-.shipping-modal input[name="address2"] {
-  grid-column: 1 / -1;
+  width: 100%;
+  margin-top: 18px;
 }
 .opponent-panel > iframe {
   width: 100%;

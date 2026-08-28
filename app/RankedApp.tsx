@@ -595,6 +595,7 @@ type IconName =
   | "plus"
   | "minus"
   | "shuffle"
+  | "refresh"
   | "search"
   | "branch"
   | "settings"
@@ -645,6 +646,14 @@ const ICON_PATHS: Record<IconName, React.ReactNode> = {
       <path d="m15.5 4 3 3-3 3" />
       <path d="m15.5 14 3 3-3 3" />
       <path d="M11.5 13l2.5 4h4.5" />
+    </>
+  ),
+  refresh: (
+    <>
+      <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+      <path d="M3 3v5h5" />
+      <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+      <path d="M16 16h5v5" />
     </>
   ),
   search: (
@@ -2018,6 +2027,7 @@ function DailyChallenges({
 type OnboardingStep =
   | "avatar"
   | "hackclub"
+  | "github-template"
   | "github"
   | "hackatime"
   | "placement";
@@ -2031,6 +2041,7 @@ function OnboardingModal({
   onAvatarContinue,
   onConnectHackClub,
   onBackToAvatar,
+  onContinueGithubTemplate,
   onSelectExperience,
   close,
 }: {
@@ -2040,6 +2051,7 @@ function OnboardingModal({
   onAvatarContinue?: () => void;
   onConnectHackClub?: () => void;
   onBackToAvatar?: () => void;
+  onContinueGithubTemplate?: () => void;
   onSelectExperience?: (e: Experience) => void;
   close: () => void;
 }) {
@@ -2084,8 +2096,7 @@ function OnboardingModal({
           <>
             <h2 id="onboarding-title">Draw your scribble.</h2>
             <p>
-              This is you on the ladder, in calls, and on the leaderboard. Make
-              it weird—you can remix it later from your profile.
+              This is you in matches and on the leaderboard. You can equip new accessories in the Wardrobe.
             </p>
             <AvatarCustomizer value={avatar} onChange={setAvatar} />
             <button
@@ -2103,7 +2114,7 @@ function OnboardingModal({
               <Icon name="flag" size={30} />
             </div>
             <h2 id="onboarding-title">Connect Hack Club.</h2>
-            <p>so we can save all your progress and ship you cool stuff!</p>
+            <p>So we can save all your progress and ship you cool stuff!</p>
             <div className="avatar-preview-note">
               <ScribbleAvatar
                 size="sm"
@@ -2121,6 +2132,35 @@ function OnboardingModal({
           </div>
         )}
 
+        {step === "github-template" && (
+          <div className="connect-step github">
+            <div className="connect-badge">
+              <Icon name="github" size={30} />
+            </div>
+            <h2 id="onboarding-title">Create your repo</h2>
+            <p>
+              Every finished match gets published as a folder inside a{" "}
+              <strong>hackclubranked</strong> repo on your own account,
+              deployed with GitHub Pages. Create the repo now from this GitHub template.
+            </p>
+            <a
+              className="primary-button"
+              href="https://github.com/hackclub/hackclubranked/generate"
+              target="_blank"
+              rel="noreferrer"
+            >
+              <Icon name="github" size={16} /> create hackclubranked from the
+              template
+            </a>
+            <button
+              className="onboarding-back"
+              onClick={onContinueGithubTemplate}
+            >
+              I made the repo, continue →
+            </button>
+          </div>
+        )}
+
         {step === "github" && (
           <div className="connect-step github">
             <div className="connect-badge">
@@ -2128,19 +2168,9 @@ function OnboardingModal({
             </div>
             <h2 id="onboarding-title">Connect GitHub</h2>
             <p>
-              Every finished match gets published as a folder inside a{" "}
-              <strong>hackclubranked</strong> repo on your own account, deployed
-              with GitHub Pages.{" "}
-              <br></br>
-              <a
-                href="https://github.com/hackclub/hackclubranked/generate"
-                target="_blank"
-                rel="noreferrer"
-              >
-                Create that repo from our template
-              </a>
-              <br></br>
-              Install the Hack Club Ranked GitHub app below
+              Install the Ranked GitHub App and grant it access to the{" "}
+              <strong>hackclubranked</strong> repo you just made — it only
+              ever gets access to that one repo, not everything you own.
             </p>
             <a className="primary-button" href="/api/auth/github/start">
               <Icon name="github" size={16} /> connect GitHub
@@ -2155,9 +2185,7 @@ function OnboardingModal({
             </div>
             <h2 id="onboarding-title">Connect Hackatime</h2>
             <p>
-              Hackatime verifies your coding identity and keeps Ranked ready to
-              credit real coding activity. It is required before you can queue
-              for a round.
+              Tracks your time spent coding so you can get awesome stuff!
             </p>
             <a className="primary-button" href="/api/auth/hackatime/start">
               <Icon name="clock" size={18} /> connect Hackatime
@@ -2167,11 +2195,7 @@ function OnboardingModal({
 
         {step === "placement" && (
           <>
-            <h2 id="onboarding-title">How much have you built?</h2>
-            <p>
-              This gives you fair first matches. After a few games, your ELO
-              takes over.
-            </p>
+            <h2 id="onboarding-title">How much do you know?</h2>
             <div className="level-grid">
               {levels.map((level) => (
                 <button
@@ -3707,6 +3731,17 @@ function Match({
     setLastPreviewFile(activeHtmlFile);
     setIframeSrcDoc(previewDoc);
   }
+  // A manual escape hatch for when the live-patch above isn't enough — stuck
+  // JS state, a runtime error mid-script, a fresh Math.random() run, etc.
+  // Bumping this remounts the iframe (a real full reload), which re-fires
+  // registerOwnPreviewFrame's own "load" catch-up with whatever's actually
+  // in previewDocRef right now, so it doesn't matter whether the visible
+  // srcDoc string already matches — the reload always lands on the true
+  // latest content.
+  const [previewRefreshNonce, setPreviewRefreshNonce] = useState(0);
+  const refreshPreview = useCallback(() => {
+    setPreviewRefreshNonce((n) => n + 1);
+  }, []);
   // Tracks what the iframe's document last actually reflects — reset
   // whenever iframeSrcDoc itself changes (a real navigation already carried
   // the latest content), so the debounced push below only fires for content
@@ -4886,7 +4921,11 @@ function Match({
           </footer>
         </div>
         <aside className="preview-panel">
+          <span className="preview-label">
+            {match.mode === "duo" ? "your team's website" : "your website"}
+          </span>
           <iframe
+            key={previewRefreshNonce}
             ref={registerOwnPreviewFrame}
             title="Your website live preview"
             srcDoc={iframeSrcDoc}
@@ -4894,18 +4933,32 @@ function Match({
             allow={PREVIEW_IFRAME_ALLOW}
             referrerPolicy="no-referrer"
           />
-          <button
-            className="preview-expand-button"
-            onClick={() => setPreviewOpen(!previewOpen)}
-            aria-label={
-              previewOpen ? "Hide expanded preview" : "Expand preview"
-            }
-          >
-            <Icon name="external" size={13} />
-          </button>
+          <div className="preview-controls">
+            <button
+              className="preview-refresh-button"
+              onClick={refreshPreview}
+              aria-label="Refresh your website preview"
+            >
+              <Icon name="refresh" size={13} />
+            </button>
+            <button
+              className="preview-expand-button"
+              onClick={() => setPreviewOpen(!previewOpen)}
+              aria-label={
+                previewOpen ? "Hide expanded preview" : "Expand preview"
+              }
+            >
+              <Icon name="external" size={13} />
+            </button>
+          </div>
         </aside>
         <div className="match-bottom-row">
           <div className="opponent-panel">
+            <span className="preview-label">
+              {match.mode === "duo"
+                ? "your opponents' website"
+                : "your opponent's website"}
+            </span>
             {opponentSnapshot ? (
               <iframe
                 title="Opponent website preview"
@@ -5045,7 +5098,15 @@ function Match({
             onClick={(e) => e.stopPropagation()}
           >
             <button onClick={() => setPreviewOpen(false)}>×</button>
+            <button
+              className="preview-refresh-button"
+              onClick={refreshPreview}
+              aria-label="Refresh your website preview"
+            >
+              <Icon name="refresh" size={15} />
+            </button>
             <iframe
+              key={previewRefreshNonce}
               ref={registerOwnPreviewFrame}
               title="Expanded live preview"
               srcDoc={iframeSrcDoc}
@@ -5815,6 +5876,13 @@ function Shop({
   useEscapeKey(Boolean(selected), () => setSelected(null));
   const [balance, setBalance] = useState(auth.user?.hBucks ?? 0);
   const [redeemingId, setRedeemingId] = useState<string | null>(null);
+  const [addressState, setAddressState] = useState<{
+    loading: boolean;
+    ready: boolean;
+    addresses: Array<{ id: string; label: string; primary: boolean }>;
+  }>({ loading: true, ready: false, addresses: [] });
+  const [shippingAddressId, setShippingAddressId] = useState("");
+  const [redeeming, setRedeeming] = useState(false);
   useEffect(() => {
     if (auth.user)
       fetch("/api/shop/orders")
@@ -5823,14 +5891,41 @@ function Shop({
         .catch(() => undefined);
   }, [auth.user]);
 
-  const redeemItem = async (
-    itemId: string,
-    shipping?: Record<string, string>,
-  ) => {
+  // Only fetched once a physical item is actually opened — no need to hit
+  // Hack Club Auth on every shop visit when most of it is avatar cosmetics.
+  useEffect(() => {
+    if (!selected || selected.kind !== "physical") return;
+    let cancelled = false;
+    setAddressState({ loading: true, ready: false, addresses: [] });
+    setShippingAddressId("");
+    fetch("/api/shop/addresses")
+      .then((r) => r.json())
+      .then((data) => {
+        if (cancelled) return;
+        const addresses = data.addresses ?? [];
+        setAddressState({
+          loading: false,
+          ready: data.ready === true,
+          addresses,
+        });
+        setShippingAddressId(
+          (addresses.find((address: { primary: boolean }) => address.primary) ?? addresses[0])
+            ?.id ?? "",
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setAddressState({ loading: false, ready: false, addresses: [] });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selected]);
+
+  const redeemItem = async (itemId: string, addressId?: string) => {
     const response = await fetch("/api/shop/orders", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ itemId, shipping }),
+      body: JSON.stringify({ itemId, addressId }),
     });
     const result = await response.json();
     if (!response.ok) {
@@ -5841,17 +5936,16 @@ function Shop({
     return true;
   };
 
-  const redeemPhysical = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!selected) return;
-    const form = new FormData(event.currentTarget);
-    const shipping = Object.fromEntries(form.entries()) as Record<
-      string,
-      string
-    >;
-    if (await redeemItem(selected.id, shipping)) {
-      setSelected(null);
-      toast("Redemption submitted for approval");
+  const redeemPhysical = async () => {
+    if (!selected || redeeming || !shippingAddressId) return;
+    setRedeeming(true);
+    try {
+      if (await redeemItem(selected.id, shippingAddressId)) {
+        setSelected(null);
+        toast("Redemption submitted for approval");
+      }
+    } finally {
+      setRedeeming(false);
     }
   };
 
@@ -5928,10 +6022,7 @@ function Shop({
       </section>
       {selected && selected.kind === "physical" && (
         <div className="modal-backdrop">
-          <form
-            className="modal shipping-modal"
-            onSubmit={(event) => void redeemPhysical(event)}
-          >
+          <section className="modal shipping-modal">
             <button
               type="button"
               className="close-button"
@@ -5940,17 +6031,60 @@ function Shop({
               ×
             </button>
             <h2>Ship your {selected.name}</h2>
-            <input name="name" placeholder="Full name" required />
-            <input name="address1" placeholder="Address" required />
-            <input name="address2" placeholder="Apartment / suite" />
-            <input name="city" placeholder="City" required />
-            <input name="region" placeholder="State / region" required />
-            <input name="postalCode" placeholder="Postal code" required />
-            <input name="country" placeholder="Country" required />
-            <button className="primary-button" type="submit">
-              redeem {selected.cost.toLocaleString()} Ħ
+            {addressState.loading ? (
+              <p className="hca-address-note">loading your HCA addresses…</p>
+            ) : addressState.ready ? (
+              <label className="hca-address-field">
+                <span>shipping address</span>
+                <select
+                  value={shippingAddressId}
+                  onChange={(event) => setShippingAddressId(event.target.value)}
+                >
+                  {addressState.addresses.map((address) => (
+                    <option key={address.id} value={address.id}>
+                      {address.label}
+                      {address.primary ? " · primary" : ""}
+                    </option>
+                  ))}
+                </select>
+                <small>
+                  Manage addresses at{" "}
+                  <a
+                    href="https://auth.hackclub.com"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    auth.hackclub.com
+                  </a>
+                  .
+                </small>
+              </label>
+            ) : (
+              <div className="hca-address-missing">
+                <p>
+                  Reconnect Hack Club Auth to share a complete shipping
+                  address before redeeming a physical prize.
+                </p>
+                <a className="github-connect" href="/api/auth/hackclub/start">
+                  reconnect Hack Club Auth
+                </a>
+              </div>
+            )}
+            <button
+              className="primary-button"
+              onClick={() => void redeemPhysical()}
+              disabled={
+                redeeming ||
+                addressState.loading ||
+                !addressState.ready ||
+                !shippingAddressId
+              }
+            >
+              {redeeming
+                ? "redeeming…"
+                : `redeem ${selected.cost.toLocaleString()} Ħ`}
             </button>
-          </form>
+          </section>
         </div>
       )}
     </main>
@@ -6439,6 +6573,11 @@ export default function RankedApp() {
   });
   const [activeMatch, setActiveMatch] = useState<ActiveMatch | null>(null);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
+  // Nothing server-side confirms "made the repo yet" — creating it from the
+  // template is a one-way trip to GitHub with no callback to us — so this is
+  // just a local acknowledgement gating the "connect GitHub" step behind the
+  // "create the repo" step once per visit, not a persisted account fact.
+  const [githubTemplateStepDone, setGithubTemplateStepDone] = useState(false);
   const [preAuthOpen, setPreAuthOpen] = useState(false);
   const [preAuthStep, setPreAuthStep] = useState<"avatar" | "hackclub">(
     "avatar",
@@ -6868,12 +7007,15 @@ export default function RankedApp() {
       {onboardingOpen && auth.user && (
         <OnboardingModal
           step={
-            !auth.github
-              ? "github"
-              : !auth.hackatime
-                ? "hackatime"
-                : "placement"
+            !auth.github && !githubTemplateStepDone
+              ? "github-template"
+              : !auth.github
+                ? "github"
+                : !auth.hackatime
+                  ? "hackatime"
+                  : "placement"
           }
+          onContinueGithubTemplate={() => setGithubTemplateStepDone(true)}
           onSelectExperience={(experience) => void saveExperience(experience)}
           close={() => setOnboardingOpen(false)}
         />
