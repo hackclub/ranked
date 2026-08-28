@@ -4484,13 +4484,9 @@ button.avatar-swatch:active {
   font: 500 11px/1.5 var(--font-geist-mono);
 }
 
-.hca-address-field {
-  display: grid;
-  gap: 7px;
+.hca-address-note {
   margin-top: 14px;
-  text-align: left;
 }
-
 .hca-address-note,
 .hca-address-missing p {
   font: 500 14px/1.5 var(--font-geist-mono);

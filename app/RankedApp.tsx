@@ -3328,9 +3328,7 @@ function Match({
   const [submissionProfile, setSubmissionProfile] = useState<{
     loading: boolean;
     ready: boolean;
-    addresses: Array<{ id: string; label: string; primary: boolean }>;
-  }>({ loading: true, ready: false, addresses: [] });
-  const [submissionAddressId, setSubmissionAddressId] = useState("");
+  }>({ loading: true, ready: false });
   const submissionCaptureRef = useRef<HTMLIFrameElement>(null);
   const airtableAttemptedRef = useRef<string | null>(null);
   const {
@@ -3380,31 +3378,17 @@ function Match({
     let cancelled = false;
     fetch("/api/airtable/profile")
       .then(async (response) => {
-        const result = (await response.json()) as {
-          ready?: boolean;
-          addresses?: Array<{ id: string; label: string; primary: boolean }>;
-        };
-        if (!response.ok) throw new Error("Could not load HCA addresses");
+        const result = (await response.json()) as { ready?: boolean };
+        if (!response.ok) throw new Error("Could not load HCA profile");
         return result;
       })
       .then((result) => {
         if (cancelled) return;
-        const addresses = result.addresses ?? [];
-        setSubmissionProfile({
-          loading: false,
-          ready: result.ready === true,
-          addresses,
-        });
-        setSubmissionAddressId((current) =>
-          addresses.some((address) => address.id === current)
-            ? current
-            : ((addresses.find((address) => address.primary) ?? addresses[0])
-                ?.id ?? ""),
-        );
+        setSubmissionProfile({ loading: false, ready: result.ready === true });
       })
       .catch(() => {
         if (!cancelled) {
-          setSubmissionProfile({ loading: false, ready: false, addresses: [] });
+          setSubmissionProfile({ loading: false, ready: false });
         }
       });
     return () => {
@@ -3858,10 +3842,10 @@ function Match({
       window.location.assign("/api/auth/github/start");
       return;
     }
-    if (!submissionProfile.ready || !submissionAddressId) {
+    if (!submissionProfile.ready) {
       setPublishState({
         loading: false,
-        error: "Reconnect Hack Club Auth and choose a shipping address.",
+        error: "Reconnect Hack Club Auth so Ranked can find your shipping address.",
       });
       return;
     }
@@ -3881,7 +3865,6 @@ function Match({
           pages,
           files,
           description,
-          addressId: submissionAddressId,
         }),
       });
       const result = (await response.json()) as {
@@ -3921,7 +3904,6 @@ function Match({
     publishState.repositoryUrl,
     buildName,
     description,
-    submissionAddressId,
     submissionProfile.ready,
     toast,
   ]);
@@ -3987,7 +3969,6 @@ function Match({
       !publicationId ||
       !pagesReady ||
       !submissionProfile.ready ||
-      !submissionAddressId ||
       airtableAttemptedRef.current === publicationId
     )
       return;
@@ -3997,7 +3978,6 @@ function Match({
     publishState.publicationId,
     pagesReady,
     submissionProfile.ready,
-    submissionAddressId,
     submitToAirtable,
   ]);
 
@@ -5298,25 +5278,20 @@ function Match({
                 </label>
                 {submissionProfile.loading ? (
                   <p className="hca-address-note">
-                    loading your HCA addresses…
+                    loading your HCA profile…
                   </p>
                 ) : submissionProfile.ready ? (
-                  <label className="hca-address-field">
-                    <select
-                      aria-label="Shipping address"
-                      value={submissionAddressId}
-                      onChange={(event) =>
-                        setSubmissionAddressId(event.target.value)
-                      }
+                  <p className="hca-address-note">
+                    Ships to your primary address on{" "}
+                    <a
+                      href="https://auth.hackclub.com"
+                      target="_blank"
+                      rel="noreferrer"
                     >
-                      {submissionProfile.addresses.map((address) => (
-                        <option key={address.id} value={address.id}>
-                          {address.label}
-                          {address.primary ? " · primary" : ""}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                      auth.hackclub.com
+                    </a>
+                    .
+                  </p>
                 ) : (
                   <div className="hca-address-missing">
                     <p>
@@ -5342,8 +5317,7 @@ function Match({
                       publishState.loading ||
                       !buildName ||
                       submissionProfile.loading ||
-                      !submissionProfile.ready ||
-                      !submissionAddressId
+                      !submissionProfile.ready
                     }
                   >
                     {publishState.loading ? (
