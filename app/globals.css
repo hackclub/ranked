@@ -3871,8 +3871,11 @@ button.avatar-swatch:active {
   justify-content: center;
 }
 
-.build-description {
+.build-description-wrap {
   margin: 10px 2px 0;
+}
+.build-description {
+  margin: 0;
   padding: 10px 12px;
   background: #fffdf1;
   border: 2px solid var(--ink);
@@ -3883,6 +3886,24 @@ button.avatar-swatch:active {
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+.build-description.expanded {
+  display: block;
+  -webkit-line-clamp: unset;
+  overflow: visible;
+}
+.build-description-toggle {
+  display: block;
+  margin: 4px 4px 0 auto;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: 700 9px var(--font-geist-mono);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.build-description-toggle:hover {
+  color: var(--ink);
 }
 .vote-grid article footer {
   display: flex;
@@ -4357,6 +4378,9 @@ button.avatar-swatch:active {
 .repo-name-field span {
   padding: 0 0 0 12px;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
   color: var(--muted);
   font: 550 13px var(--font-geist-mono);
 }

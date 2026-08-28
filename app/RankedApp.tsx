@@ -54,6 +54,7 @@ type AuthState = {
     name: string;
     email: string;
     slackId: string | null;
+    slackUsername: string | null;
     verificationStatus: string | null;
     experience: Experience | null;
     elo: number;
@@ -572,9 +573,17 @@ function usePagesReady(url: string | undefined) {
 function highlightMatch(text: string, query: string) {
   const at = text.toLowerCase().indexOf(query.toLowerCase());
   if (at === -1) return text;
+  // .search-match is a fixed-width, single-line row that ellipsizes overflow
+  // from the end — a line-start snippet let a match anywhere past the first
+  // dozen or so characters get truncated away before it was ever visible.
+  // Anchoring the window a few characters before the match instead guarantees
+  // the highlighted term itself is always the first thing on screen.
+  const CONTEXT_BEFORE = 8;
+  const start = Math.max(0, at - CONTEXT_BEFORE);
   return (
     <>
-      {text.slice(0, at)}
+      {start > 0 ? "…" : ""}
+      {text.slice(start, at)}
       <mark>{text.slice(at, at + query.length)}</mark>
       {text.slice(at + query.length)}
     </>
@@ -1257,13 +1266,12 @@ function Home({
   const profileCard = useProfileHoverCard();
   const [friendRequests, setFriendRequests] = useState<string[]>([]);
   const [friendDirectory, setFriendDirectory] = useState<
-    Array<{ id: string; name: string; email: string }>
+    Array<{ id: string; slackUsername: string }>
   >([]);
   const [slackQuery, setSlackQuery] = useState("");
   const [selectedFriend, setSelectedFriend] = useState<{
     id: string;
-    name: string;
-    email: string;
+    slackUsername: string;
   } | null>(null);
   const [slackSuggestionsOpen, setSlackSuggestionsOpen] = useState(false);
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
@@ -1287,11 +1295,7 @@ function Home({
     const q = slackQuery.replace(/^@/, "").trim().toLowerCase();
     if (!q || selectedFriend) return [];
     return friendDirectory
-      .filter(
-        (member) =>
-          member.name.toLowerCase().includes(q) ||
-          member.email.toLowerCase().includes(q),
-      )
+      .filter((member) => member.slackUsername.toLowerCase().includes(q))
       .slice(0, 6);
   }, [friendDirectory, slackQuery, selectedFriend]);
   const resetsIn = useCountdownToUtcMidnight();
@@ -1532,7 +1536,7 @@ function Home({
                       <ul>
                         {blockedFriends.map((friend) => (
                           <li key={friend.id}>
-                            <span>{friend.name}</span>
+                            <span title={friend.name}>{friend.name}</span>
                             <button
                               role="menuitem"
                               onClick={() =>
@@ -1698,7 +1702,7 @@ function Home({
                   }}
                   onFocus={() => setSlackSuggestionsOpen(true)}
                   onBlur={() => setSlackSuggestionsOpen(false)}
-                  placeholder="ex. Fiona Hacksworth"
+                  placeholder="ex. fionahacksworth"
                   autoComplete="off"
                   required
                 />
@@ -1711,11 +1715,11 @@ function Home({
                           onMouseDown={(event) => event.preventDefault()}
                           onClick={() => {
                             setSelectedFriend(member);
-                            setSlackQuery(member.name);
+                            setSlackQuery(member.slackUsername);
                             setSlackSuggestionsOpen(false);
                           }}
                         >
-                          <strong>{member.name}</strong>
+                          <strong>@{member.slackUsername}</strong>
                         </button>
                       </li>
                     ))}
@@ -2010,6 +2014,7 @@ function DailyChallenges({
 type OnboardingStep =
   | "avatar"
   | "hackclub"
+  | "username"
   | "github"
   | "hackatime"
   | "placement";
@@ -2023,6 +2028,7 @@ function OnboardingModal({
   onAvatarContinue,
   onConnectHackClub,
   onBackToAvatar,
+  onSubmitUsername,
   onSelectExperience,
   close,
 }: {
@@ -2032,9 +2038,22 @@ function OnboardingModal({
   onAvatarContinue?: () => void;
   onConnectHackClub?: () => void;
   onBackToAvatar?: () => void;
+  onSubmitUsername?: (username: string) => Promise<string | null>;
   onSelectExperience?: (e: Experience) => void;
   close: () => void;
 }) {
+  const [usernameDraft, setUsernameDraft] = useState("");
+  const [usernameError, setUsernameError] = useState<string | null>(null);
+  const [usernameSaving, setUsernameSaving] = useState(false);
+  const submitUsername = async () => {
+    if (!onSubmitUsername) return;
+    const trimmed = usernameDraft.trim().replace(/^@/, "");
+    if (!trimmed) return setUsernameError("Enter a username first.");
+    setUsernameSaving(true);
+    const error = await onSubmitUsername(trimmed);
+    setUsernameSaving(false);
+    setUsernameError(error);
+  };
   const levels: {
     key: Experience;
     title: string;
@@ -2115,6 +2134,40 @@ function OnboardingModal({
               ← back to avatar
             </button>
           </div>
+        )}
+
+        {step === "username" && (
+          <>
+            <h2 id="onboarding-title">Pick a username.</h2>
+            <p>
+              This is what's displayed on your profile.
+              We tried pulling it from your Slack account but couldn't.
+            </p>
+            <label className="repo-name-field">
+              <span>@</span>
+              <input
+                value={usernameDraft}
+                onChange={(event) => {
+                  setUsernameDraft(event.target.value);
+                  if (usernameError) setUsernameError(null);
+                }}
+                placeholder="fionahacksworth"
+                autoFocus
+                autoComplete="off"
+                maxLength={80}
+                pattern="[A-Za-z0-9._-]+"
+                required
+              />
+            </label>
+            {usernameError && <p className="publish-error">{usernameError}</p>}
+            <button
+              className="primary-button continue-button"
+              onClick={() => void submitUsername()}
+              disabled={usernameSaving || !usernameDraft.trim()}
+            >
+              {usernameSaving ? "saving…" : "continue"}
+            </button>
+          </>
         )}
 
         {step === "github" && (
@@ -2906,7 +2959,7 @@ function Lobby({
                                       avatar={friend.avatar}
                                     />
                                   </span>
-                                  <strong>{friend.name}</strong>
+                                  <strong title={friend.name}>{friend.name}</strong>
                                   <button
                                     disabled={inviteBusy}
                                     onClick={() => {
@@ -4641,6 +4694,7 @@ function Match({
                       key={file}
                       className={`explorer-row ${tab === file ? "active" : ""}`}
                       onClick={() => openFile(file)}
+                      title={file}
                     >
                       <i className={`file-dot ${file.split(".").pop()}`} />
                       <span className="explorer-name">{file}</span>
@@ -4734,7 +4788,7 @@ function Match({
                     <ul className="changes-list">
                       {changedFiles.map((file) => (
                         <li key={file}>
-                          <button onClick={() => openFile(file)}>
+                          <button onClick={() => openFile(file)} title={file}>
                             <i
                               className={`file-dot ${file.split(".").pop()}`}
                             />
@@ -5270,7 +5324,9 @@ function Match({
                   that collects all your Ranked builds.
                 </p>
                 <label className="repo-name-field">
-                  <span>{auth.github?.login ?? "you"}/hackclubranked/</span>
+                  <span title={`${auth.github?.login ?? "you"}/hackclubranked/`}>
+                    {auth.github?.login ?? "you"}/hackclubranked/
+                  </span>
                   <input
                     value={buildName}
                     onChange={(event) => {
@@ -6023,6 +6079,40 @@ function Wardrobe({
   );
 }
 
+function BuildDescription({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const [clamped, setClamped] = useState(false);
+  const ref = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    // Descriptions run up to 500 characters but the card only has room for
+    // three lines — measuring the real clamp (scrollHeight vs clientHeight)
+    // instead of guessing off character count means the toggle only shows up
+    // when text is actually being cut off.
+    setClamped(el.scrollHeight > el.clientHeight + 1);
+  }, [text]);
+  return (
+    <div className="build-description-wrap">
+      <p
+        ref={ref}
+        className={`build-description${expanded ? " expanded" : ""}`}
+      >
+        {text}
+      </p>
+      {clamped && (
+        <button
+          type="button"
+          className="build-description-toggle"
+          onClick={() => setExpanded((current) => !current)}
+        >
+          {expanded ? "show less" : "read more"}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function Voting({
   navigate,
   toast,
@@ -6145,9 +6235,7 @@ function Voting({
                 />
               </div>
               {match.sites.blue.description && (
-                <p className="build-description">
-                  {match.sites.blue.description}
-                </p>
+                <BuildDescription text={match.sites.blue.description} />
               )}
               <footer>
                 <div>
@@ -6186,9 +6274,7 @@ function Voting({
                 />
               </div>
               {match.sites.red.description && (
-                <p className="build-description">
-                  {match.sites.red.description}
-                </p>
+                <BuildDescription text={match.sites.red.description} />
               )}
               <footer>
                 <div>
@@ -6466,7 +6552,10 @@ export default function RankedApp() {
         setOnboardingOpen(
           Boolean(
             next.user &&
-            (!next.github || !next.hackatime || !next.user.experience),
+            (!next.user.slackUsername ||
+              !next.github ||
+              !next.hackatime ||
+              !next.user.experience),
           ),
         );
         if (next.user) {
@@ -6542,6 +6631,29 @@ export default function RankedApp() {
     );
     setOnboardingOpen(false);
     toast(`Placement level set to ${experience}`);
+  };
+
+  const saveSlackUsername = async (username: string): Promise<string | null> => {
+    const response = await fetch("/api/profile", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ slackUsername: username }),
+    });
+    const result = await response.json().catch(() => null);
+    if (!response.ok) return result?.error ?? "Could not save that username.";
+    const saved = result.user.slackUsername as string;
+    setAuth((current) =>
+      current.user
+        ? { ...current, user: { ...current.user, slackUsername: saved } }
+        : current,
+    );
+    // Username is the first onboarding step — if every other requirement was
+    // already met (the common case for existing players just backfilling
+    // this), there's nothing left to onboard.
+    if (auth.github && auth.hackatime && auth.user?.experience)
+      setOnboardingOpen(false);
+    toast(`Username set to @${saved}`);
+    return null;
   };
 
   const onMatched = useCallback(
@@ -6818,15 +6930,18 @@ export default function RankedApp() {
           close={closePreAuthOnboarding}
         />
       )}
-      {onboardingOpen && auth.user && (
+      {onboardingOpen && auth.user && screen !== "match" && (
         <OnboardingModal
           step={
-            !auth.github
-              ? "github"
-              : !auth.hackatime
-                ? "hackatime"
-                : "placement"
+            !auth.user.slackUsername
+              ? "username"
+              : !auth.github
+                ? "github"
+                : !auth.hackatime
+                  ? "hackatime"
+                  : "placement"
           }
+          onSubmitUsername={saveSlackUsername}
           onSelectExperience={(experience) => void saveExperience(experience)}
           close={() => setOnboardingOpen(false)}
         />

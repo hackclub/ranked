@@ -38,6 +38,12 @@ export const users = pgTable("users", {
   email: text("email").notNull().unique(),
   name: text("name").notNull(),
   slackId: text("slack_id").unique(),
+  // The actual Slack handle (e.g. "meghana"), fetched from the Slack API via
+  // slackId — distinct from `name`, which is the player's real name from Hack
+  // Club Auth. Null until a successful fetch, or until the player sets it
+  // themselves in onboarding (see the "username" OnboardingStep) after a
+  // fetch came back empty or failed.
+  slackUsername: text("slack_username"),
   verificationStatus: text("verification_status"),
   experience: experienceEnum("experience"),
   elo: integer("elo").notNull().default(1500),
