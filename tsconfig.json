@@ -36,7 +36,6 @@
     "worker",
     "dist",
     ".output",
-    ".vercel",
-    ".wrangler"
+    ".vercel"
   ]
 }

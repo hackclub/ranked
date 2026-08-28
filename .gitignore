@@ -40,7 +40,6 @@ next-env.d.ts
 *.tsbuildinfo
 /dist/
 /.output/
-/.wrangler/
 /outputs/
 /work/
 
@@ -48,4 +47,3 @@ next-env.d.ts
 PRODUCT.md
 
 .claude
-.openai

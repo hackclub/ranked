@@ -3,9 +3,6 @@ import { defineConfig } from "vite";
 import { fileURLToPath } from "node:url";
 import { nitro } from "nitro/vite";
 
-// macOS Seatbelt blocks FSEvents, so Codex previews need polling for HMR.
-const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
-
 export default defineConfig(() => {
   return {
     resolve: {
@@ -17,7 +14,6 @@ export default defineConfig(() => {
     },
     server: {
       host: "0.0.0.0",
-      ...(isCodexSeatbeltSandbox ? { watch: { useFsEvents: false, usePolling: true } } : {}),
     },
     plugins: [
       vinext(),
