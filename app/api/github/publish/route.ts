@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { publishWebsite, PUBLISHABLE_FILE_NAME, type DirectoryBuild } from "@/app/lib/github";
+import { publishWebsite, PUBLISHABLE_FILE_NAME, GitHubRepoNotAccessibleError, type DirectoryBuild } from "@/app/lib/github";
 import { decryptSession, SESSION_COOKIE } from "@/app/lib/session";
 import { logAudit } from "@/app/lib/audit";
 import {
@@ -109,6 +109,12 @@ export async function POST(request: NextRequest) {
       FROM publications WHERE match_id=${matchId} AND published_by=${session.user.id} LIMIT 1`;
     return NextResponse.json({ ...result, ...saved[0] });
   } catch (error) {
+    if (error instanceof GitHubRepoNotAccessibleError) {
+      return NextResponse.json(
+        { error: error.message, code: "github_repo_required" },
+        { status: 409 },
+      );
+    }
     console.error(error);
     return NextResponse.json({ error: error instanceof Error ? error.message : "Publishing failed." }, { status: 500 });
   }

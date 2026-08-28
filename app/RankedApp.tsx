@@ -2132,8 +2132,18 @@ function OnboardingModal({
             </div>
             <h2 id="onboarding-title">Connect GitHub</h2>
             <p>
-              Every finished match gets published as a folder inside one
-              monorepo on your account and deployed with GitHub Pages.
+              Every finished match gets published as a folder inside a{" "}
+              <strong>hackclubranked</strong> repo on your own account,
+              deployed with GitHub Pages.{" "}
+              <a
+                href="https://github.com/hackclub/hackclubranked/generate"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Create that repo from our template
+              </a>{" "}
+              first, then install the Ranked GitHub App below — it only ever
+              gets access to that one repo, not everything you own.
             </p>
             <a className="primary-button" href="/api/auth/github/start">
               <Icon name="github" size={16} /> connect GitHub
@@ -3320,6 +3330,7 @@ function Match({
   const [publishState, setPublishState] = useState<{
     loading: boolean;
     error?: string;
+    code?: string;
     publicationId?: string;
     repositoryUrl?: string;
     pagesUrl?: string;
@@ -3877,6 +3888,14 @@ function Match({
       };
       if (result.code === "hca_profile_required") {
         window.location.assign("/api/auth/hackclub/start");
+        return;
+      }
+      if (result.code === "github_repo_required") {
+        setPublishState({
+          loading: false,
+          error: result.error,
+          code: result.code,
+        });
         return;
       }
       if (!response.ok || !result.repositoryUrl || !result.pagesUrl)
@@ -5306,8 +5325,22 @@ function Match({
                     </a>
                   </div>
                 )}
-                {publishState.error && (
-                  <p className="publish-error">{publishState.error}</p>
+                {publishState.code === "github_repo_required" ? (
+                  <div className="hca-address-missing">
+                    <p>{publishState.error}</p>
+                    <a
+                      className="github-connect"
+                      href="https://github.com/hackclub/hackclubranked/generate"
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      create hackclubranked from the template
+                    </a>
+                  </div>
+                ) : (
+                  publishState.error && (
+                    <p className="publish-error">{publishState.error}</p>
+                  )
                 )}
                 {auth.github ? (
                   <button

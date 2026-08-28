@@ -2242,6 +2242,10 @@ button.avatar-swatch:active {
   font: 500 11px/1.65 var(--font-geist-sans);
   color: var(--muted);
 }
+.connect-step > p a {
+  color: var(--blue-strong);
+  font-weight: 650;
+}
 .avatar-preview-note {
   display: flex;
   align-items: center;

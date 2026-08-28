@@ -5,6 +5,13 @@ const githubHeaders = (token: string) => ({
   "Content-Type": "application/json",
 });
 
+// GITHUB_CLIENT_ID/SECRET here are a GitHub App's "user authorization" OAuth
+// credentials, not a classic OAuth App's — deliberately, so the resulting
+// user access token is scoped to only whatever repos the player granted the
+// app during installation (just their own hackclubranked repo), instead of
+// the old "repo" scope's account-wide write access. There's no `scope`
+// param to send: a GitHub App's permissions are fixed on the app itself, not
+// negotiated per authorization request the way an OAuth App's are.
 export function githubAuthorizationUrl(
   state: string,
   challenge: string,
@@ -15,7 +22,6 @@ export function githubAuthorizationUrl(
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: process.env.GITHUB_REDIRECT_URI ?? redirectUri,
-    scope: process.env.GITHUB_OAUTH_SCOPE ?? "repo",
     state,
     code_challenge: challenge,
     code_challenge_method: "S256",
@@ -65,43 +71,13 @@ export async function exchangeGitHubCode(
   };
 }
 
-// Thrown only when GitHub's own response body says a repo by this name
-// already exists on the account — every other 422 (account restrictions, an
-// unverified email, a malformed field, etc.) surfaces its real reason
-// instead of being lumped into the same "name taken" message.
-class GitHubNameConflictError extends Error {}
-
-function parseGitHubErrorBody(detail: string) {
-  // GitHub's "errors" field is inconsistent across endpoints: some return an
-  // array of strings, others an array of {field, message} objects — handle
-  // both rather than assuming one shape, since assuming wrong silently drops
-  // the one part of the response that actually explains the failure.
-  try {
-    const parsed = JSON.parse(detail) as {
-      message?: string;
-      errors?: Array<string | { field?: string; message?: string }>;
-    };
-    const errorEntries = parsed.errors ?? [];
-    const errorTexts = errorEntries
-      .map((entry) => (typeof entry === "string" ? entry : entry.message))
-      .filter((text): text is string => Boolean(text));
-    const nameTaken =
-      errorTexts.some((text) => /name already exists/i.test(text)) ||
-      errorEntries.some(
-        (entry) => typeof entry !== "string" && entry.field === "name",
-      );
-    // GitHub's top-level "message" is a generic label ("Repository creation
-    // failed.") — the actual reason lives in "errors", so it has to be
-    // included or every non-name-conflict failure just says "creation
-    // failed" with no way to tell why.
-    const message = errorTexts.length
-      ? `${parsed.message ?? "Repository creation failed."} (${errorTexts.join("; ")})`
-      : parsed.message;
-    return { nameTaken, message };
-  } catch {
-    return { nameTaken: false, message: undefined };
-  }
-}
+// Thrown when the player's hackclubranked repo doesn't exist yet, or exists
+// but the Ranked GitHub App's installation doesn't cover it — GitHub returns
+// a 404 for both (it doesn't distinguish "doesn't exist" from "exists but
+// you can't see it", to avoid leaking the existence of private repos). The
+// fix is the same either way: create the repo from the template and/or grant
+// the app access to it, so both cases share one specific, actionable error.
+export class GitHubRepoNotAccessibleError extends Error {}
 
 async function githubRequest<T>(
   token: string,
@@ -114,27 +90,6 @@ async function githubRequest<T>(
   });
   if (!response.ok) {
     const detail = await response.text();
-    if (response.status === 422 && url.endsWith("/user/repos")) {
-      // Log the raw body unconditionally, independent of whatever the parsing
-      // above manages to extract — if GitHub's response has a shape that
-      // doesn't anticipate, this is the one place the real ground truth is
-      // guaranteed to be visible (server logs), instead of the user-facing
-      // message depending on a guess about that shape being right.
-      console.error("GitHub repo creation 422 response body:", detail);
-      const { nameTaken, message } = parseGitHubErrorBody(detail);
-      if (nameTaken) {
-        throw new GitHubNameConflictError(
-          "That repository name is already in use on your GitHub account. Choose another name.",
-        );
-      }
-      // Fall back to the raw response body (rather than just a generic
-      // label) whenever nothing structured could be pulled out of it, so a
-      // shape this parsing doesn't anticipate still surfaces instead of
-      // silently collapsing to "Repository creation failed."
-      throw new Error(
-        `GitHub couldn't create your hackclubranked repo: ${message ?? (detail.slice(0, 280) || "Repository creation failed.")}`,
-      );
-    }
     throw new Error(
       `GitHub request failed (${response.status}): ${detail.slice(0, 280)}`,
     );
@@ -184,11 +139,11 @@ async function configureRankedRepoForPages(token: string, login: string) {
   // a file that, after the first publish, never actually changes. Only the
   // repo settings call (not a content commit) belongs here.
   //
-  // A brand-new repo's `main` branch (from auto_init) can take a moment to
-  // become visible to GitHub's Pages service specifically, even though the
-  // repo creation call itself already returned — enabling Pages right after
-  // can 404 on that race alone. Retrying a few times beats surfacing that as
-  // a publish failure when the repo (the actual hard part) already exists.
+  // A repo freshly created from the template (or an app installation just
+  // granted) can take a moment for its `main` branch to become visible to
+  // GitHub's Pages service specifically — enabling Pages right after can 404
+  // on that race alone. Retrying a few times beats surfacing that as a
+  // publish failure when the repo itself is already there and fine.
   for (let attempt = 1; ; attempt++) {
     try {
       await githubRequest(
@@ -215,48 +170,28 @@ async function configureRankedRepoForPages(token: string, login: string) {
   }
 }
 
-// Every player's builds live in one shared "hackclubranked" repo, one folder
-// per match, instead of a fresh repo per match cluttering their account.
-//
-// This creates first and only falls back to fetching on a genuine name
-// conflict — the opposite order from checking existence and creating only
-// if missing. That older order relied on two different sources of truth
-// agreeing (a GET keyed on a possibly-stale cached login, vs. a POST that
-// always acts on the token's real, current account): if they ever disagreed,
-// the GET would 404 forever while the POST 409/422'd forever, with no way
-// out. Creating directly is authoritative — it can't be wrong about whose
-// account it's acting on — and existence only needs checking in the one
-// case that actually implies it, when GitHub itself reports the name taken.
+// Every player's builds live in one repo on their own account, one folder
+// per match — but unlike the old "repo" OAuth scope, a GitHub App's user
+// token can only see repos its installation was actually granted. It can't
+// create one on the player's behalf (that would need account-wide
+// Administration access, exactly the broad grant this migration is trying to
+// get away from), so this only ever fetches; a missing or inaccessible repo
+// is the player's own setup step to finish, not something to paper over.
 async function ensureRankedRepo(token: string, login: string) {
+  let repository: { html_url: string };
   try {
-    const repository = await githubRequest<{ html_url: string }>(
+    repository = await githubRequest<{ html_url: string }>(
       token,
-      "https://api.github.com/user/repos",
-      {
-        method: "POST",
-        body: JSON.stringify({
-          name: RANKED_REPO,
-          description:
-            "Hack Club Ranked: teenagers compete to speedrun making websites according to a theme. Win matches to raise your Ranking, and code more hours to earn H-Bucks for prizes like drawing tablets, iPads, hoodies, and headphones.",
-          homepage: `https://${login}.github.io/${RANKED_REPO}/`,
-          private: false,
-          has_issues: true,
-          auto_init: true,
-        }),
-      },
+      `https://api.github.com/repos/${login}/${RANKED_REPO}`,
     );
-    await configureRankedRepoForPages(token, login);
-    return repository;
   } catch (error) {
-    if (!(error instanceof GitHubNameConflictError)) throw error;
+    if (isNotFound(error)) {
+      throw new GitHubRepoNotAccessibleError(
+        `You don't have a "${RANKED_REPO}" repo the Ranked GitHub App can see yet — create one from the template, then make sure the app has access to it.`,
+      );
+    }
+    throw error;
   }
-  // Genuine name conflict: it already exists. Still run Pages setup — it's
-  // idempotent (the POST tolerates "already enabled") — in case an earlier
-  // attempt created the repo but died before finishing that part.
-  const repository = await githubRequest<{ html_url: string }>(
-    token,
-    `https://api.github.com/repos/${login}/${RANKED_REPO}`,
-  );
   await configureRankedRepoForPages(token, login);
   return repository;
 }
