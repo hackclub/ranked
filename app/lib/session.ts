@@ -15,6 +15,9 @@ export type GitHubConnection = {
   login: string;
   accessToken: string;
   avatarUrl: string | null;
+  refreshToken?: string | null;
+  accessTokenExpiresAt?: number | null;
+  refreshTokenExpiresAt?: number | null;
 };
 
 export type RankedSession = {

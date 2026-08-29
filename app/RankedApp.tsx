@@ -2307,8 +2307,8 @@ function OnboardingModal({
           <>
             <h2 id="onboarding-title">Pick a username.</h2>
             <p>
-              This is what's displayed on your profile.
-              We tried pulling it from your Slack account but couldn't.
+              This is what’s displayed on your profile.
+              We tried pulling it from your Slack account but couldn’t.
             </p>
             <label className="repo-name-field">
               <span>@</span>
@@ -4149,6 +4149,10 @@ function Match({
       };
       if (result.code === "hca_profile_required") {
         window.location.assign("/api/auth/hackclub/start");
+        return;
+      }
+      if (result.code === "github_reconnect_required") {
+        window.location.assign("/api/auth/github/start");
         return;
       }
       if (result.code === "github_repo_required") {
