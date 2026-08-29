@@ -21,7 +21,7 @@ async function upsertFriendship(requesterId: string, targetId: string) {
 export async function GET(request: NextRequest) {
   const user = await currentUser(request);
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const rows = await getSql()`SELECT f.id, f.status, f.requester_id AS "requesterId", u.id AS "userId", u.name, u.slack_id AS "slackId", u.avatar
+  const rows = await getSql()`SELECT f.id, f.status, f.requester_id AS "requesterId", u.id AS "userId", COALESCE(u.slack_username, u.name) AS name, u.slack_id AS "slackId", u.avatar
     FROM friendships f JOIN users u ON u.id=CASE WHEN f.requester_id=${user.id} THEN f.addressee_id ELSE f.requester_id END
     WHERE f.requester_id=${user.id} OR f.addressee_id=${user.id} ORDER BY f.updated_at DESC`;
   return NextResponse.json({ friends: rows });

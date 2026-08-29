@@ -30,8 +30,8 @@ export async function GET(request: NextRequest) {
   const offset = (page - 1) * PAGE_SIZE;
 
   const rows = type === "elo"
-    ? await sql`SELECT id, name, elo AS score, avatar, matches_played AS "matchesPlayed" FROM users ORDER BY elo DESC, matches_played DESC LIMIT ${PAGE_SIZE} OFFSET ${offset}`
-    : await sql`SELECT id, name, ROUND(coding_seconds/3600.0,1) AS score, avatar, matches_played AS "matchesPlayed" FROM users ORDER BY coding_seconds DESC LIMIT ${PAGE_SIZE} OFFSET ${offset}`;
+    ? await sql`SELECT id, COALESCE(slack_username, name) AS name, elo AS score, avatar, matches_played AS "matchesPlayed" FROM users ORDER BY elo DESC, matches_played DESC LIMIT ${PAGE_SIZE} OFFSET ${offset}`
+    : await sql`SELECT id, COALESCE(slack_username, name) AS name, ROUND(coding_seconds/3600.0,1) AS score, avatar, matches_played AS "matchesPlayed" FROM users ORDER BY coding_seconds DESC LIMIT ${PAGE_SIZE} OFFSET ${offset}`;
 
   return NextResponse.json({
     type,

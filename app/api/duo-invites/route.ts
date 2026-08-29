@@ -23,23 +23,23 @@ export async function GET(request: NextRequest) {
   const sql = getSql();
   const [partner, outgoing, incoming, missed] = await Promise.all([
     sql`SELECT di.id, (CASE WHEN di.from_user_id=${user.id} THEN di.to_user_id ELSE di.from_user_id END) AS "partnerId",
-        u.name AS "partnerName", u.avatar AS "partnerAvatar",
+        COALESCE(u.slack_username, u.name) AS "partnerName", u.avatar AS "partnerAvatar",
         (di.from_user_id=${user.id}) AS "isCreator", di.duration_minutes AS "durationMinutes",
         EXISTS(SELECT 1 FROM matchmaking_queue q WHERE q.user_id = (CASE WHEN di.from_user_id=${user.id} THEN di.to_user_id ELSE di.from_user_id END)) AS "partnerQueued"
       FROM duo_invites di JOIN users u ON u.id = (CASE WHEN di.from_user_id=${user.id} THEN di.to_user_id ELSE di.from_user_id END)
       WHERE di.status='accepted' AND (di.from_user_id=${user.id} OR di.to_user_id=${user.id})
       ORDER BY di.updated_at DESC LIMIT 1`,
-    sql`SELECT di.id, di.to_user_id AS "partnerId", u.name AS "partnerName", u.avatar AS "partnerAvatar"
+    sql`SELECT di.id, di.to_user_id AS "partnerId", COALESCE(u.slack_username, u.name) AS "partnerName", u.avatar AS "partnerAvatar"
       FROM duo_invites di JOIN users u ON u.id=di.to_user_id
       WHERE di.from_user_id=${user.id} AND di.status='pending'
         AND di.created_at>NOW()-${PENDING_INVITE_TTL}::interval
       ORDER BY di.created_at DESC LIMIT 1`,
-    sql`SELECT di.id, di.from_user_id AS "partnerId", u.name AS "partnerName", u.avatar AS "partnerAvatar"
+    sql`SELECT di.id, di.from_user_id AS "partnerId", COALESCE(u.slack_username, u.name) AS "partnerName", u.avatar AS "partnerAvatar"
       FROM duo_invites di JOIN users u ON u.id=di.from_user_id
       WHERE di.to_user_id=${user.id} AND di.status='pending'
         AND di.created_at>NOW()-${PENDING_INVITE_TTL}::interval
       ORDER BY di.created_at DESC`,
-    sql`SELECT di.id, u.name AS "partnerName", u.avatar AS "partnerAvatar"
+    sql`SELECT di.id, COALESCE(u.slack_username, u.name) AS "partnerName", u.avatar AS "partnerAvatar"
       FROM duo_invites di JOIN users u ON u.id=di.from_user_id
       WHERE di.to_user_id=${user.id} AND di.status='missed' ORDER BY di.created_at DESC`,
   ]);

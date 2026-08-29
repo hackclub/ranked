@@ -18,7 +18,7 @@ export async function GET(
   if (!viewer) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { userId } = await context.params;
 
-  const rows = await getSql()`SELECT id, name, avatar, elo, coding_seconds AS "codingSeconds",
+  const rows = await getSql()`SELECT id, COALESCE(slack_username, name) AS name, avatar, elo, coding_seconds AS "codingSeconds",
       matches_played AS "matchesPlayed"
     FROM users WHERE id=${userId}`;
   const player = rows[0] as

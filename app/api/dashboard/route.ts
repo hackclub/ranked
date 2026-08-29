@@ -10,14 +10,14 @@ export async function GET(request: NextRequest) {
   await ensureDailyChallenges(user.id);
   const sql = getSql();
   const [friends, recent, challenges, rank] = await sql.transaction([
-    sql`SELECT u.id, u.name, u.slack_id AS "slackId", u.avatar,
+    sql`SELECT u.id, COALESCE(u.slack_username, u.name) AS name, u.slack_id AS "slackId", u.avatar,
       u.last_seen_at AS "lastSeenAt", f.id AS "friendshipId", f.status,
       CASE WHEN f.addressee_id = ${user.id} THEN TRUE ELSE FALSE END AS "incoming"
       FROM friendships f JOIN users u ON u.id = CASE WHEN f.requester_id = ${user.id} THEN f.addressee_id ELSE f.requester_id END
       WHERE (f.requester_id = ${user.id} OR f.addressee_id = ${user.id}) AND f.status IN ('accepted','pending')
       ORDER BY f.updated_at DESC LIMIT 12`,
     sql`SELECT m.id, m.theme, m.mode, m.status, m.winning_team AS "winningTeam", m.created_at AS "createdAt",
-      json_agg(json_build_object('id', u.id, 'name', u.name, 'team', mp.team, 'avatar', u.avatar)) FILTER (WHERE u.id <> ${user.id}) AS opponents
+      json_agg(json_build_object('id', u.id, 'name', COALESCE(u.slack_username, u.name), 'team', mp.team, 'avatar', u.avatar)) FILTER (WHERE u.id <> ${user.id}) AS opponents
       FROM match_players mine JOIN matches m ON m.id = mine.match_id
       JOIN match_players mp ON mp.match_id = m.id JOIN users u ON u.id = mp.user_id
       WHERE mine.user_id = ${user.id}

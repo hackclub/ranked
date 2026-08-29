@@ -9,9 +9,9 @@ export async function GET(request: NextRequest, context: { params: Promise<{ mat
   const matchRows = await getSql()`SELECT m.*, mp.team, mp.slot FROM matches m JOIN match_players mp ON mp.match_id=m.id
     WHERE m.id=${matchId} AND mp.user_id=${user.id}`;
   if (!matchRows.length) return NextResponse.json({ error: "Match not found" }, { status: 404 });
-  const players = await getSql()`SELECT u.id, u.name, u.avatar, mp.team, mp.slot FROM match_players mp JOIN users u ON u.id=mp.user_id
+  const players = await getSql()`SELECT u.id, COALESCE(u.slack_username, u.name) AS name, u.avatar, mp.team, mp.slot FROM match_players mp JOIN users u ON u.id=mp.user_id
     WHERE mp.match_id=${matchId} ORDER BY mp.slot`;
-  const publications = await getSql()`SELECT p.team,p.published_by AS "publishedBy",u.name,
+  const publications = await getSql()`SELECT p.team,p.published_by AS "publishedBy",COALESCE(u.slack_username, u.name) AS name,
     p.repository_url AS "repositoryUrl",p.pages_url AS "pagesUrl" FROM publications p JOIN users u ON u.id=p.published_by WHERE p.match_id=${matchId}`;
   return NextResponse.json({ match: matchRows[0], players, publications });
 }

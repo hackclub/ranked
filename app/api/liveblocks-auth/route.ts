@@ -15,7 +15,7 @@ export async function POST(request: NextRequest) {
   const kind = match[1]!;
   const matchId = match[2]!;
   const requestedTeam = match[3];
-  const players = await getSql()`SELECT mp.team,u.name,u.slack_id AS "slackId",u.avatar FROM match_players mp JOIN users u ON u.id=mp.user_id
+  const players = await getSql()`SELECT mp.team,COALESCE(u.slack_username, u.name) AS name,u.slack_id AS "slackId",u.avatar FROM match_players mp JOIN users u ON u.id=mp.user_id
     WHERE mp.match_id=${matchId} AND mp.user_id=${userSession.user.id}`;
   const player = players[0] as { team: "blue" | "red"; name: string; slackId: string | null; avatar: AvatarConfig } | undefined;
   if (!player || (kind === "code" && requestedTeam !== player.team)) return new Response("You are not a member of this room.", { status: 403 });

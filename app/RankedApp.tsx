@@ -54,6 +54,7 @@ type AuthState = {
     name: string;
     email: string;
     slackId: string | null;
+    slackUsername: string | null;
     verificationStatus: string | null;
     experience: Experience | null;
     elo: number;
@@ -1279,13 +1280,12 @@ function Home({
   const profileCard = useProfileHoverCard();
   const [friendRequests, setFriendRequests] = useState<string[]>([]);
   const [friendDirectory, setFriendDirectory] = useState<
-    Array<{ id: string; name: string; email: string }>
+    Array<{ id: string; slackUsername: string }>
   >([]);
   const [slackQuery, setSlackQuery] = useState("");
   const [selectedFriend, setSelectedFriend] = useState<{
     id: string;
-    name: string;
-    email: string;
+    slackUsername: string;
   } | null>(null);
   const [slackSuggestionsOpen, setSlackSuggestionsOpen] = useState(false);
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
@@ -1309,11 +1309,7 @@ function Home({
     const q = slackQuery.replace(/^@/, "").trim().toLowerCase();
     if (!q || selectedFriend) return [];
     return friendDirectory
-      .filter(
-        (member) =>
-          member.name.toLowerCase().includes(q) ||
-          member.email.toLowerCase().includes(q),
-      )
+      .filter((member) => member.slackUsername.toLowerCase().includes(q))
       .slice(0, 6);
   }, [friendDirectory, slackQuery, selectedFriend]);
   const resetsIn = useCountdownToUtcMidnight();
@@ -1408,7 +1404,7 @@ function Home({
     }
     const handle = slackQuery.replace(/^@/, "").trim();
     if (!handle) return;
-    const message = `${auth.user?.name ?? "Someone"} has invited you to match-up on Hack Club Ranked! Join the match: <https://ranked.hackclub.com?utm_source=game_invite|ranked.hackclub.com>`;
+    const message = `${auth.user?.slackUsername ?? auth.user?.name ?? "Someone"} has invited you to match-up on Hack Club Ranked! Join the match: <https://ranked.hackclub.com?utm_source=game_invite|ranked.hackclub.com>`;
     void navigator.clipboard.writeText(message);
     setSlackQuery("");
     toast(`@${handle} hasn't joined Ranked yet. Copied invite to clipboard!`);
@@ -1728,7 +1724,7 @@ function Home({
                   }}
                   onFocus={() => setSlackSuggestionsOpen(true)}
                   onBlur={() => setSlackSuggestionsOpen(false)}
-                  placeholder="ex. Fiona Hacksworth"
+                  placeholder="ex. MeghanaM4"
                   autoComplete="off"
                   required
                 />
@@ -1741,11 +1737,11 @@ function Home({
                           onMouseDown={(event) => event.preventDefault()}
                           onClick={() => {
                             setSelectedFriend(member);
-                            setSlackQuery(member.name);
+                            setSlackQuery(member.slackUsername);
                             setSlackSuggestionsOpen(false);
                           }}
                         >
-                          <strong>{member.name}</strong>
+                          <strong>@{member.slackUsername}</strong>
                         </button>
                       </li>
                     ))}
@@ -1867,7 +1863,7 @@ function Home({
             <div className="queue-note">
               <i />{" "}
               {auth.user
-                ? `${auth.user.name} · authenticated`
+                ? `${auth.user.slackUsername ?? auth.user.name} · authenticated`
                 : "Hack Club account required"}
             </div>
           </div>
@@ -2040,6 +2036,7 @@ function DailyChallenges({
 type OnboardingStep =
   | "avatar"
   | "hackclub"
+  | "username"
   | "github-template"
   | "github"
   | "hackatime"
@@ -2056,6 +2053,7 @@ function OnboardingModal({
   onAvatarContinue,
   onConnectHackClub,
   onBackToAvatar,
+  onSubmitUsername,
   onContinueGithubTemplate,
   onSelectExperience,
   close,
@@ -2066,11 +2064,24 @@ function OnboardingModal({
   onAvatarContinue?: () => void;
   onConnectHackClub?: () => void;
   onBackToAvatar?: () => void;
+  onSubmitUsername?: (username: string) => Promise<string | null>;
   onContinueGithubTemplate?: () => void;
   onSelectExperience?: (e: Experience) => void;
   close: () => void;
 }) {
   const [templateOpened, setTemplateOpened] = useState(false);
+  const [usernameDraft, setUsernameDraft] = useState("");
+  const [usernameError, setUsernameError] = useState<string | null>(null);
+  const [usernameSaving, setUsernameSaving] = useState(false);
+  const submitUsername = async () => {
+    if (!onSubmitUsername) return;
+    const trimmed = usernameDraft.trim().replace(/^@/, "");
+    if (!trimmed) return setUsernameError("Enter a username first.");
+    setUsernameSaving(true);
+    const error = await onSubmitUsername(trimmed);
+    setUsernameSaving(false);
+    setUsernameError(error);
+  };
   const levels: {
     key: Experience;
     title: string;
@@ -2146,6 +2157,40 @@ function OnboardingModal({
               ← back to avatar
             </button>
           </div>
+        )}
+
+        {step === "username" && (
+          <>
+            <h2 id="onboarding-title">Pick a username.</h2>
+            <p>
+              This is what's displayed on your profile.
+              We tried pulling it from your Slack account but couldn't.
+            </p>
+            <label className="repo-name-field">
+              <span>@</span>
+              <input
+                value={usernameDraft}
+                onChange={(event) => {
+                  setUsernameDraft(event.target.value);
+                  if (usernameError) setUsernameError(null);
+                }}
+                placeholder="meghanam4"
+                autoFocus
+                autoComplete="off"
+                maxLength={80}
+                pattern="[A-Za-z0-9._-]+"
+                required
+              />
+            </label>
+            {usernameError && <p className="publish-error">{usernameError}</p>}
+            <button
+              className="primary-button continue-button"
+              onClick={() => void submitUsername()}
+              disabled={usernameSaving || !usernameDraft.trim()}
+            >
+              {usernameSaving ? "saving…" : "continue"}
+            </button>
+          </>
         )}
 
         {step === "github-template" && (
@@ -2867,7 +2912,7 @@ function Lobby({
                   </span>
                 )}
               </div>
-              <strong>{user.name}</strong>
+              <strong>{user.slackUsername ?? user.name}</strong>
             </div>
             {mode === "duo" && (
               <div
@@ -4353,7 +4398,7 @@ function Match({
             <div className="call-tiles">
               <VideoTile
                 compact
-                name={auth.user?.name ?? "you"}
+                name={auth.user?.slackUsername ?? auth.user?.name ?? "you"}
                 team={`${team} · you`}
                 avatar={auth.user?.avatar}
                 stream={video ? localStream : null}
@@ -4701,7 +4746,7 @@ function Match({
             </div>
             <div className="collab-state">
               <div className="face-stack">
-                <i>{auth.user?.name?.[0] ?? "Y"}</i>
+                <i>{(auth.user?.slackUsername ?? auth.user?.name)?.[0] ?? "Y"}</i>
                 {codeCollaborators.slice(0, 2).map((peer) => (
                   <i key={peer.connectionId}>{peer.name[0]}</i>
                 ))}
@@ -6546,7 +6591,7 @@ function ProfileModal({
         </button>
         <ScribbleAvatar avatar={auth.user?.avatar} size="md" />
         <div>
-          <h2 id="profile-title">{auth.user?.name ?? "Guest player"}</h2>
+          <h2 id="profile-title">{auth.user?.slackUsername ?? auth.user?.name ?? "Guest player"}</h2>
           <p>
             {auth.user
               ? `${auth.user.email} · ${auth.user.elo} ELO · ${Math.round(auth.user.codingSeconds / 360) / 10}h`
@@ -6718,7 +6763,10 @@ export default function RankedApp() {
         setOnboardingOpen(
           Boolean(
             next.user &&
-            (!next.github || !next.hackatime || !next.user.experience),
+            (!next.user.slackUsername ||
+              !next.github ||
+              !next.hackatime ||
+              !next.user.experience),
           ),
         );
         if (next.user) {
@@ -6779,6 +6827,29 @@ export default function RankedApp() {
         : current,
     );
   }, []);
+
+  const saveSlackUsername = async (username: string): Promise<string | null> => {
+    const response = await fetch("/api/profile", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ slackUsername: username }),
+    });
+    const result = await response.json().catch(() => null);
+    if (!response.ok) return result?.error ?? "Could not save that username.";
+    const saved = result.user.slackUsername as string;
+    setAuth((current) =>
+      current.user
+        ? { ...current, user: { ...current.user, slackUsername: saved } }
+        : current,
+    );
+    // Username is the first onboarding step — if every other requirement was
+    // already met (the common case for existing players just backfilling
+    // this), there's nothing left to onboard.
+    if (auth.github && auth.hackatime && auth.user?.experience)
+      setOnboardingOpen(false);
+    toast(`Username set to @${saved}`);
+    return null;
+  };
 
   const saveExperience = async (experience: Experience) => {
     const response = await fetch("/api/profile", {
@@ -7073,14 +7144,17 @@ export default function RankedApp() {
       {onboardingOpen && auth.user && (
         <OnboardingModal
           step={
-            !auth.github && !githubTemplateStepDone
-              ? "github-template"
-              : !auth.github
-                ? "github"
-                : !auth.hackatime
-                  ? "hackatime"
-                  : "placement"
+            !auth.user.slackUsername
+              ? "username"
+              : !auth.github && !githubTemplateStepDone
+                ? "github-template"
+                : !auth.github
+                  ? "github"
+                  : !auth.hackatime
+                    ? "hackatime"
+                    : "placement"
           }
+          onSubmitUsername={saveSlackUsername}
           onContinueGithubTemplate={() => setGithubTemplateStepDone(true)}
           onSelectExperience={(experience) => void saveExperience(experience)}
           close={() => setOnboardingOpen(false)}
