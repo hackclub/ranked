@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { publishWebsite, PUBLISHABLE_FILE_NAME, GitHubRepoNotAccessibleError, type DirectoryBuild } from "@/app/lib/github";
-import { decryptSession, SESSION_COOKIE } from "@/app/lib/session";
+import { publishWebsite, PUBLISHABLE_FILE_NAME, GitHubCredentialsError, GitHubRepoNotAccessibleError, refreshGitHubConnection, type DirectoryBuild } from "@/app/lib/github";
+import { decryptSession, encryptSession, SESSION_COOKIE, sessionCookieOptions, type GitHubConnection } from "@/app/lib/session";
 import { logAudit } from "@/app/lib/audit";
 import {
   completeSubmissionProfile,
@@ -23,6 +23,19 @@ export async function POST(request: NextRequest) {
   const session = await decryptSession(request.cookies.get(SESSION_COOKIE)?.value);
   if (!session?.user) return NextResponse.json({ error: "Sign in with Hack Club first." }, { status: 401 });
   if (!session.github) return NextResponse.json({ error: "Connect GitHub first." }, { status: 401 });
+  let github: GitHubConnection = session.github;
+  let githubRefreshed = false;
+  const githubResponse = async (body: unknown, init?: ResponseInit) => {
+    const response = NextResponse.json(body, init);
+    if (githubRefreshed) {
+      response.cookies.set(
+        SESSION_COOKIE,
+        await encryptSession({ user: session.user, github, exp: session.exp }),
+        sessionCookieOptions(),
+      );
+    }
+    return response;
+  };
   try {
     const { matchId, name, pages, files, description } = await request.json() as { matchId?: string; name?: string; pages?: Record<string, string>; files?: Record<string, string>; description?: string };
     if (!validFileMap(pages, 50, 1_000_000) || !pages!["index.html"]) return NextResponse.json({ error: "A valid website is required." }, { status: 400 });
@@ -72,7 +85,9 @@ export async function POST(request: NextRequest) {
     const existingBuilds = await getSql()`SELECT p.github_repo AS "folderName", m.theme, p.created_at AS "publishedAt"
       FROM publications p JOIN matches m ON m.id=p.match_id
       WHERE p.published_by=${session.user.id} ORDER BY p.created_at DESC`;
-    const result = await publishWebsite(session.github.accessToken, session.github.login, name, player.theme, pages!, files, trimmedDescription, existingBuilds as DirectoryBuild[]);
+    github = await refreshGitHubConnection(session.github);
+    githubRefreshed = github !== session.github;
+    const result = await publishWebsite(github.accessToken, github.login, name, player.theme, pages!, files, trimmedDescription, existingBuilds as DirectoryBuild[]);
     const publicationId = crypto.randomUUID();
     // These used to run as separate round-trips. If the client disconnected
     // (tab closed right after publishing) between the publications insert and
@@ -107,15 +122,27 @@ export async function POST(request: NextRequest) {
 
     const saved = await getSql()`SELECT id AS "publicationId",airtable_status AS "airtableStatus"
       FROM publications WHERE match_id=${matchId} AND published_by=${session.user.id} LIMIT 1`;
-    return NextResponse.json({ ...result, ...saved[0] });
+    return githubResponse({ ...result, ...saved[0] });
   } catch (error) {
+    if (error instanceof GitHubCredentialsError) {
+      const response = NextResponse.json(
+        { error: error.message, code: "github_reconnect_required" },
+        { status: 401 },
+      );
+      response.cookies.set(
+        SESSION_COOKIE,
+        await encryptSession({ user: session.user, exp: session.exp }),
+        sessionCookieOptions(),
+      );
+      return response;
+    }
     if (error instanceof GitHubRepoNotAccessibleError) {
-      return NextResponse.json(
+      return githubResponse(
         { error: error.message, code: "github_repo_required" },
         { status: 409 },
       );
     }
     console.error(error);
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Publishing failed." }, { status: 500 });
+    return githubResponse({ error: error instanceof Error ? error.message : "Publishing failed." }, { status: 500 });
   }
 }

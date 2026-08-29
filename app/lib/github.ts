@@ -1,3 +1,5 @@
+import type { GitHubConnection } from "@/app/lib/session";
+
 const githubHeaders = (token: string) => ({
   Accept: "application/vnd.github+json",
   Authorization: `Bearer ${token}`,
@@ -49,10 +51,7 @@ export async function exchangeGitHubCode(
       redirect_uri: process.env.GITHUB_REDIRECT_URI ?? redirectUri,
     }),
   });
-  const token = (await response.json()) as {
-    access_token?: string;
-    error_description?: string;
-  };
+  const token = (await response.json()) as GitHubTokenResponse;
   if (!response.ok || !token.access_token)
     throw new Error(token.error_description ?? "GitHub token exchange failed.");
   const userResponse = await fetch("https://api.github.com/user", {
@@ -68,6 +67,85 @@ export async function exchangeGitHubCode(
     accessToken: token.access_token,
     login: user.login,
     avatarUrl: user.avatar_url ?? null,
+    refreshToken: token.refresh_token ?? null,
+    accessTokenExpiresAt: expiresAt(token.expires_in),
+    refreshTokenExpiresAt: expiresAt(token.refresh_token_expires_in),
+  };
+}
+
+type GitHubTokenResponse = {
+  access_token?: string;
+  expires_in?: number;
+  refresh_token?: string;
+  refresh_token_expires_in?: number;
+  error?: string;
+  error_description?: string;
+};
+
+const TOKEN_REFRESH_SKEW_MS = 5 * 60 * 1000;
+
+function expiresAt(seconds: number | undefined) {
+  return typeof seconds === "number" && Number.isFinite(seconds)
+    ? Date.now() + seconds * 1000
+    : null;
+}
+
+export class GitHubCredentialsError extends Error {}
+
+// GitHub App user access tokens expire after eight hours by default. Their
+// refresh tokens rotate on every use, so callers must persist the returned
+// connection whenever this function produces a new object.
+export async function refreshGitHubConnection(
+  connection: GitHubConnection,
+): Promise<GitHubConnection> {
+  if (
+    !connection.accessTokenExpiresAt ||
+    connection.accessTokenExpiresAt > Date.now() + TOKEN_REFRESH_SKEW_MS
+  ) {
+    return connection;
+  }
+  if (
+    !connection.refreshToken ||
+    (connection.refreshTokenExpiresAt &&
+      connection.refreshTokenExpiresAt <= Date.now())
+  ) {
+    throw new GitHubCredentialsError(
+      "Your GitHub connection expired. Reconnect GitHub and try publishing again.",
+    );
+  }
+
+  const clientId = process.env.GITHUB_CLIENT_ID;
+  const clientSecret = process.env.GITHUB_CLIENT_SECRET;
+  if (!clientId || !clientSecret) {
+    throw new Error("GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET are required.");
+  }
+  const response = await fetch("https://github.com/login/oauth/access_token", {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      grant_type: "refresh_token",
+      refresh_token: connection.refreshToken,
+    }),
+  });
+  const token = (await response.json()) as GitHubTokenResponse;
+  if (!response.ok || !token.access_token) {
+    throw new GitHubCredentialsError(
+      token.error_description ??
+        "Your GitHub connection could not be refreshed. Reconnect GitHub and try again.",
+    );
+  }
+
+  return {
+    ...connection,
+    accessToken: token.access_token,
+    refreshToken: token.refresh_token ?? connection.refreshToken,
+    accessTokenExpiresAt: expiresAt(token.expires_in),
+    refreshTokenExpiresAt: expiresAt(token.refresh_token_expires_in),
   };
 }
 
@@ -90,6 +168,11 @@ async function githubRequest<T>(
   });
   if (!response.ok) {
     const detail = await response.text();
+    if (response.status === 401) {
+      throw new GitHubCredentialsError(
+        "Your GitHub authorization is no longer valid. Reconnect GitHub and try publishing again.",
+      );
+    }
     throw new Error(
       `GitHub request failed (${response.status}): ${detail.slice(0, 280)}`,
     );
@@ -683,4 +766,3 @@ function renderDirectoryIndex(login: string, builds: DirectoryBuild[]) {
 </html>
 `;
 }
-
