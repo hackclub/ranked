@@ -16,7 +16,7 @@
     "cost": 400,
     "iconName": "flipper",
     "color": "#BF5A5A",
-    "imageUrl": null
+    "imageUrl": "https://cdn.shopify.com/s/files/1/0527/9806/2745/files/product_flipper-zero_1.png?v=1765368572"
   },
   {
     "id": "ipad",
@@ -25,7 +25,7 @@
     "cost": 3000,
     "iconName": "ipad",
     "color": "#CCD96C",
-    "imageUrl": null
+    "imageUrl": "https://store.storeimages.cdn-apple.com/4982/as-images.apple.com/is/ipad-finish-select-202503-blue-wifi?wid=800&hei=800&fmt=png-alpha&.v=1739318920731"
   },
   {
     "id": "macbook",
@@ -34,6 +34,6 @@
     "cost": 6000,
     "iconName": "macbook",
     "color": "#497CBF",
-    "imageUrl": null
+    "imageUrl": "https://www.apple.com/v/macbook-air/z/images/overview/hero/hero_static__c9sislzzicq6_large.png"
   }
 ]

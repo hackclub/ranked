@@ -3584,6 +3584,7 @@ function Match({
     repositoryUrl?: string;
     pagesUrl?: string;
     airtableStatus?: string;
+    actionUrl?: string;
   }>({ loading: false });
   const [submissionProfile, setSubmissionProfile] = useState<{
     loading: boolean;
@@ -4146,6 +4147,7 @@ function Match({
         repositoryUrl?: string;
         pagesUrl?: string;
         airtableStatus?: string;
+        installationUrl?: string;
       };
       if (result.code === "hca_profile_required") {
         window.location.assign("/api/auth/hackclub/start");
@@ -4155,11 +4157,15 @@ function Match({
         window.location.assign("/api/auth/github/start");
         return;
       }
-      if (result.code === "github_repo_required") {
+      if (
+        result.code === "github_repo_required" ||
+        result.code === "github_pages_permission_required"
+      ) {
         setPublishState({
           loading: false,
           error: result.error,
           code: result.code,
+          actionUrl: result.installationUrl,
         });
         return;
       }
@@ -5654,6 +5660,22 @@ function Match({
                       rel="noreferrer"
                     >
                       create hackclubranked repo
+                    </a>
+                  </div>
+                ) : publishState.code ===
+                  "github_pages_permission_required" ? (
+                  <div className="hca-address-missing">
+                    <p>{publishState.error}</p>
+                    <a
+                      className="github-connect"
+                      href={
+                        publishState.actionUrl ??
+                        "https://github.com/settings/installations"
+                      }
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      approve GitHub App permissions
                     </a>
                   </div>
                 ) : (

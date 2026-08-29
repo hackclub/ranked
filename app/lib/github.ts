@@ -157,6 +157,12 @@ export async function refreshGitHubConnection(
 // the app access to it, so both cases share one specific, actionable error.
 export class GitHubRepoNotAccessibleError extends Error {}
 
+// Creating the initial Pages site is a repository-administration operation,
+// even though every later Pages build only needs Pages access. Keep this
+// separate from a generic GitHub error so the UI can send the player to the
+// installation settings instead of displaying GitHub's opaque 403 response.
+export class GitHubPagesPermissionError extends Error {}
+
 async function githubRequest<T>(
   token: string,
   url: string,
@@ -215,13 +221,30 @@ async function pathExists(token: string, login: string, path: string) {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function configureRankedRepoForPages(token: string, login: string) {
+export async function configureRankedRepoForPages(
+  token: string,
+  login: string,
+) {
   // .nojekyll itself is committed alongside the build's own files in
   // commitFiles (see publishWebsite) rather than PUT here on its own — that
   // used to cost every publish an extra standalone commit just to re-affirm
   // a file that, after the first publish, never actually changes. Only the
   // repo settings call (not a content commit) belongs here.
   //
+  // Do not blindly POST on every publish. That endpoint requires both Pages
+  // write and Administration write, while checking an already-enabled site
+  // only needs Pages read. This lets existing Pages sites keep publishing
+  // without needlessly exercising the broader administration permission.
+  try {
+    await githubRequest(
+      token,
+      `https://api.github.com/repos/${login}/${RANKED_REPO}/pages`,
+    );
+    return;
+  } catch (error) {
+    if (!isNotFound(error)) throw error;
+  }
+
   // A repo freshly created from the template (or an app installation just
   // granted) can take a moment for its `main` branch to become visible to
   // GitHub's Pages service specifically — enabling Pages right after can 404
@@ -240,6 +263,11 @@ async function configureRankedRepoForPages(token: string, login: string) {
       return;
     } catch (error) {
       if (error instanceof Error && error.message.includes("409")) return;
+      if (error instanceof Error && error.message.includes("(403)")) {
+        throw new GitHubPagesPermissionError(
+          "GitHub Pages is not enabled yet. The Ranked GitHub App needs Pages and Administration read/write access to enable it. Approve the app's updated permissions, then publish again.",
+        );
+      }
       if (
         error instanceof Error &&
         error.message.includes("(404)") &&
@@ -255,11 +283,9 @@ async function configureRankedRepoForPages(token: string, login: string) {
 
 // Every player's builds live in one repo on their own account, one folder
 // per match — but unlike the old "repo" OAuth scope, a GitHub App's user
-// token can only see repos its installation was actually granted. It can't
-// create one on the player's behalf (that would need account-wide
-// Administration access, exactly the broad grant this migration is trying to
-// get away from), so this only ever fetches; a missing or inaccessible repo
-// is the player's own setup step to finish, not something to paper over.
+// token can only see repos its installation was actually granted. This only
+// ever fetches: the app's Administration permission is restricted to that
+// selected repo and is used solely to enable Pages, not to create repos.
 async function ensureRankedRepo(token: string, login: string) {
   let repository: { html_url: string };
   try {

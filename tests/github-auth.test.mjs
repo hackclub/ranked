@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  configureRankedRepoForPages,
   exchangeGitHubCode,
   GitHubCredentialsError,
+  GitHubPagesPermissionError,
   refreshGitHubConnection,
 } from "../app/lib/github.ts";
 
@@ -84,5 +86,56 @@ test("GitHub App credentials retain and rotate expiring user tokens", async () =
     if (originalClientSecret === undefined)
       delete process.env.GITHUB_CLIENT_SECRET;
     else process.env.GITHUB_CLIENT_SECRET = originalClientSecret;
+  }
+});
+
+test("GitHub Pages checks existing configuration before requesting administration access", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    const requests = [];
+    globalThis.fetch = async (url, init = {}) => {
+      requests.push({ url, method: init.method ?? "GET" });
+      return new Response(JSON.stringify({ html_url: "https://example.test" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    await configureRankedRepoForPages("token", "octocat");
+    assert.deepEqual(requests, [
+      {
+        url: "https://api.github.com/repos/octocat/hackclubranked/pages",
+        method: "GET",
+      },
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("GitHub Pages reports the installation permission upgrade when creation is forbidden", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    const responses = [
+      new Response(JSON.stringify({ message: "Not Found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      }),
+      new Response(
+        JSON.stringify({ message: "Resource not accessible by integration" }),
+        {
+          status: 403,
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+    ];
+    globalThis.fetch = async () => responses.shift();
+
+    await assert.rejects(
+      configureRankedRepoForPages("token", "octocat"),
+      GitHubPagesPermissionError,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
   }
 });
