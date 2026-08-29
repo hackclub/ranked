@@ -1703,8 +1703,8 @@ function Home({
               ) : (
                 <li>
                   <div>
-                    <strong>No teammates yet</strong>
-                    <small>Add someone from a recent match.</small>
+                    <strong>No friends yet</strong>
+                    <small>Add someone from a recent match or search for a slack username!</small>
                   </div>
                 </li>
               )}
