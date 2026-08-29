@@ -269,16 +269,25 @@ select:focus-visible {
 }
 
 .home-grid {
-  width: 100%;
   display: grid;
+  /* Breaks out of .screen-pad's 42px inset so the side columns actually
+     reach the browser's edge instead of stopping at the page's padded
+     content edge — width intentionally left auto (not 100%) since a
+     negative inline margin only expands an auto-width block to fill the
+     extra space; a literal 100% would just shift the box instead of
+     growing it. Undone at the ≤1050px breakpoint below, where the grid
+     stacks and the page's normal padding should hold instead. */
+  margin-inline: -42px;
   /* The side columns absorb whatever width the viewport has to give — on a
      wide monitor that used to mean two narrow card columns floating in a
      sea of empty margin (the grid itself was capped at 1300px, and even
      inside that cap the side columns were pinned to a fixed px width while
      only the hero column could grow). The hero column stays bounded instead
      since it's just a centered avatar and button, not something that
-     benefits from stretching edge to edge. */
-  grid-template-columns: minmax(260px, 1fr) minmax(380px, 680px) minmax(300px, 1fr);
+     benefits from stretching edge to edge — capped at the same 460px max as
+     .start-button's own width clamp so the column hugs the button rather
+     than leaving it stranded in a much wider gutter. */
+  grid-template-columns: minmax(260px, 1fr) minmax(280px, 460px) minmax(300px, 1fr);
   gap: clamp(20px, 3vw, 90px);
   align-items: stretch;
   align-content: stretch;
@@ -2527,11 +2536,12 @@ button.avatar-swatch:active {
   background: var(--green);
 }
 .report-menu {
-  position: absolute;
+  /* Portaled to document.body with its top/left computed (and clamped to
+     the viewport) in JS — see the report-menu-button click handler — rather
+     than anchored here with CSS, which centered it under the button with no
+     regard for whether that ran it off the screen's edge. */
+  position: fixed;
   z-index: 31;
-  top: calc(100% + 10px);
-  left: 50%;
-  transform: translateX(-50%);
   width: 210px;
   display: flex;
   flex-direction: column;
@@ -2563,6 +2573,30 @@ button.avatar-swatch:active {
   flex-wrap: wrap;
   gap: 8px;
   margin: 14px 0;
+}
+.report-roster-error {
+  display: grid;
+  gap: 10px;
+  margin: 14px 0;
+  padding: 12px;
+  border: 2px dashed #bf5a5a;
+  border-radius: 14px;
+  background: #fff0e7;
+}
+.report-roster-error p {
+  font: 500 13px/1.5 var(--font-geist-mono);
+  color: var(--ink);
+}
+.report-roster-error button {
+  justify-self: start;
+  border: 1.5px solid var(--ink);
+  background: var(--paper);
+  padding: 6px 12px;
+  font: 700 11px var(--font-geist-mono);
+  border-radius: var(--blob);
+}
+.report-roster-error button:hover {
+  background: var(--green);
 }
 .report-roster button {
   border: 2px solid var(--ink);
@@ -4806,6 +4840,10 @@ button.avatar-swatch:active {
     padding-inline: 24px;
   }
   .home-grid {
+    /* The full-bleed trick above is desktop-only — here the grid stacks and
+       should sit inside the page's normal (now 24px) padding like every
+       other subpage, not fight it. */
+    margin-inline: 0;
     grid-template-columns: 210px 1fr;
   }
   .home-right {

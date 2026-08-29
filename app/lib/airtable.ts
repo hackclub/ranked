@@ -145,3 +145,34 @@ export async function createRankedSubmission(input: {
   }
   return recordId;
 }
+
+// Reuses the existing Description field rather than adding a new column —
+// no new field id to add to SUBMISSION_FIELDS, so submissionTable()'s strict
+// schema check (every expected field must already exist, exactly) can't be
+// broken by this. Used to flag a submission as reported for AI-generated
+// code after the fact, including on a submission that's already been sent.
+export async function updateSubmissionDescription(
+  recordId: string,
+  description: string,
+) {
+  const { baseId, tableId } = configuration();
+  const response = await airtableFetch(
+    `https://api.airtable.com/v0/${baseId}/${tableId}/${recordId}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        fields: { [SUBMISSION_FIELDS.description.id]: description },
+        typecast: true,
+      }),
+    },
+  );
+  if (!response.ok) {
+    const result = (await response.json().catch(() => null)) as {
+      error?: { message?: string };
+    } | null;
+    throw new Error(
+      `Airtable description update failed (${result?.error?.message ?? response.status}).`,
+    );
+  }
+}

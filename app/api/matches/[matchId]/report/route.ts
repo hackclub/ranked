@@ -1,7 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { currentUser } from "@/app/lib/current-user";
 import { logAudit } from "@/app/lib/audit";
+import { updateSubmissionDescription } from "@/app/lib/airtable";
 import { getSql } from "@/db";
+
+// Prepended to a publication's description the first time it's reported for
+// AI-generated code — checked for on repeat reports so the same build never
+// gets flagged twice over. No new Airtable field: this rides in the existing
+// Description column so a reviewer sees it right on the submission itself,
+// whether or not it had already been sent to Airtable when the report came in.
+const AI_REPORT_FLAG = "[REPORTED: possible AI-generated code] ";
 
 export async function POST(request: NextRequest, context: { params: Promise<{ matchId: string }> }) {
   const user = await currentUser(request);
@@ -36,5 +44,52 @@ export async function POST(request: NextRequest, context: { params: Promise<{ ma
     targetId: reportId,
     metadata: { matchId, reportedUserId: targetId, type },
   });
+
+  if (type === "ai") {
+    const publicationRows = await getSql()`SELECT id, description, airtable_record_id AS "airtableRecordId"
+      FROM publications WHERE match_id=${matchId} AND published_by=${targetId}`;
+    const publication = publicationRows[0] as
+      | { id: string; description: string | null; airtableRecordId: string | null }
+      | undefined;
+    // No publication yet (they haven't published this build) — nothing to
+    // flag; the report itself is still filed and audited above regardless.
+    if (publication && !publication.description?.startsWith(AI_REPORT_FLAG)) {
+      const flaggedDescription = `${AI_REPORT_FLAG}${publication.description ?? ""}`;
+      await getSql()`UPDATE publications SET description=${flaggedDescription} WHERE id=${publication.id}`;
+      let airtableSynced = false;
+      let airtableError: string | undefined;
+      if (publication.airtableRecordId) {
+        try {
+          await updateSubmissionDescription(publication.airtableRecordId, flaggedDescription);
+          airtableSynced = true;
+        } catch (error) {
+          // The report and the local flag are already saved regardless — an
+          // Airtable-side hiccup here shouldn't fail (or roll back) the
+          // report a player just filed. Logged below either way so this
+          // never silently fails to reach a reviewer.
+          airtableError = error instanceof Error ? error.message : "Airtable update failed.";
+          console.error("Could not flag Airtable submission for AI report", error);
+        }
+      }
+      await logAudit({
+        actor: null,
+        action: "report.ai_flag.applied",
+        summary: publication.airtableRecordId
+          ? `${targetRow[0].name}'s submission was flagged as possible AI-generated code${airtableSynced ? " in Airtable" : " (Airtable sync failed — flagged locally only)"}`
+          : `${targetRow[0].name}'s build was flagged as possible AI-generated code (not yet submitted to Airtable)`,
+        targetType: "publication",
+        targetId: publication.id,
+        metadata: {
+          matchId,
+          reportId,
+          reportedUserId: targetId,
+          airtableRecordId: publication.airtableRecordId,
+          airtableSynced,
+          airtableError,
+        },
+      });
+    }
+  }
+
   return NextResponse.json({ ok: true });
 }

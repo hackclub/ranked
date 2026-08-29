@@ -980,6 +980,11 @@ type PublicPlayerProfile = {
 };
 
 const HOVER_CARD_WIDTH = 264;
+// Matches .friend-menu's own width — needed up front (not measured after
+// render) to clamp the popover's position before it ever paints.
+const FRIEND_MENU_WIDTH = 152;
+// Matches .report-menu's own width, same reasoning as FRIEND_MENU_WIDTH above.
+const REPORT_MENU_WIDTH = 210;
 // Rough ceiling on the card's rendered height (identity row + stat row +
 // link row + padding), used only to decide which side of the trigger has
 // room — not for pixel-perfect placement, so an estimate is fine; the
@@ -1451,7 +1456,7 @@ function Home({
   const friendMenuPopoverRef = useRef<HTMLDivElement>(null);
   const [friendMenuPosition, setFriendMenuPosition] = useState<{
     top: number;
-    right: number;
+    left: number;
   } | null>(null);
   useOutsideDismiss(
     Boolean(friendMenuOpen),
@@ -1615,10 +1620,18 @@ function Home({
                               if (menuOpen) return closeFriendMenu();
                               const rect =
                                 event.currentTarget.getBoundingClientRect();
-                              setFriendMenuPosition({
-                                top: rect.bottom + 8,
-                                right: window.innerWidth - rect.right,
-                              });
+                              // Anchoring off the button's right edge via a
+                              // CSS `right` offset (the old approach) ran the
+                              // menu off the left edge of the screen for any
+                              // trigger near it — clamping an explicit `left`
+                              // instead keeps it fully on-screen regardless
+                              // of where the button sits.
+                              const edgeMargin = 12;
+                              const left = Math.min(
+                                Math.max(rect.right - FRIEND_MENU_WIDTH, edgeMargin),
+                                window.innerWidth - FRIEND_MENU_WIDTH - edgeMargin,
+                              );
+                              setFriendMenuPosition({ top: rect.bottom + 8, left });
                               setFriendMenuOpen(friend.friendshipId);
                               setFriendMenuConfirm(null);
                             }}
@@ -1636,7 +1649,7 @@ function Home({
                                 ref={friendMenuPopoverRef}
                                 style={{
                                   top: friendMenuPosition.top,
-                                  right: friendMenuPosition.right,
+                                  left: friendMenuPosition.left,
                                 }}
                               >
                                 <button
@@ -2141,11 +2154,11 @@ function OnboardingModal({
             <p>
               Every finished match gets published as a folder inside a{" "}
               <strong>hackclubranked</strong> repo on your own account,
-              deployed with GitHub Pages. Create the repo now from this GitHub template.
+              deployed with GitHub Pages. Create the repo now from this GitHub template. <strong>Your repo must be called "hackclubranked"</strong>
             </p>
             <a
               className="primary-button"
-              href="https://github.com/hackclub/hackclubranked/generate"
+              href="https://github.com/new?template_owner=hackclub&template_name=hackclubranked&owner=%40me&name=hackclubranked&visibility=public"
               target="_blank"
               rel="noreferrer"
             >
@@ -3326,6 +3339,10 @@ function Match({
   const [forfeitLoading, setForfeitLoading] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [reportMenuOpen, setReportMenuOpen] = useState(false);
+  const [reportMenuPosition, setReportMenuPosition] = useState<{
+    top: number;
+    left: number;
+  } | null>(null);
   const [reportType, setReportType] = useState<"misconduct" | "ai" | null>(
     null,
   );
@@ -3333,6 +3350,9 @@ function Match({
     Array<{ id: string; name: string }>
   >([]);
   const [reportRosterLoading, setReportRosterLoading] = useState(false);
+  const [reportRosterError, setReportRosterError] = useState<string | null>(
+    null,
+  );
   const [reportTargetId, setReportTargetId] = useState("");
   const [reportDetails, setReportDetails] = useState("");
   const [reportSubmitting, setReportSubmitting] = useState(false);
@@ -4130,26 +4150,46 @@ function Match({
     }
   }, [applyLifecycle, match.id, toast]);
 
+  // Split out from openReport so the "try again" button can re-run just this
+  // half — a failure here used to be swallowed entirely (any network hiccup,
+  // a 401, a 500) and silently rendered as "there's no one else in this
+  // match," indistinguishable from actually being alone and with no way to
+  // recover short of closing and reopening the whole report flow.
+  const loadReportRoster = useCallback(async () => {
+    setReportRoster([]);
+    setReportRosterError(null);
+    setReportRosterLoading(true);
+    try {
+      const response = await fetch(`/api/matches/${match.id}`);
+      if (!response.ok) {
+        throw new Error(`Could not load the match roster (${response.status}).`);
+      }
+      const roster = (await response.json()) as {
+        players?: Array<{ id: string; name: string }>;
+      };
+      const players = roster.players ?? [];
+      setReportRoster(players.filter((player) => player.id !== auth.user?.id));
+    } catch (error) {
+      setReportRosterError(
+        error instanceof Error
+          ? error.message
+          : "Could not load the match roster.",
+      );
+    } finally {
+      setReportRosterLoading(false);
+    }
+  }, [auth.user?.id, match.id]);
+
   const openReport = useCallback(
-    async (type: "misconduct" | "ai") => {
+    (type: "misconduct" | "ai") => {
       setReportMenuOpen(false);
       setReportType(type);
       setReportTargetId("");
       setReportDetails("");
       setReportError(null);
-      setReportRoster([]);
-      setReportRosterLoading(true);
-      const roster = await fetch(`/api/matches/${match.id}`)
-        .then((r) => (r.ok ? r.json() : null))
-        .catch(() => null);
-      const players = (roster?.players ?? []) as Array<{
-        id: string;
-        name: string;
-      }>;
-      setReportRoster(players.filter((player) => player.id !== auth.user?.id));
-      setReportRosterLoading(false);
+      void loadReportRoster();
     },
-    [auth.user?.id, match.id],
+    [loadReportRoster],
   );
 
   const submitReport = useCallback(async () => {
@@ -4342,34 +4382,63 @@ function Match({
             <div className="report-menu-anchor">
               <button
                 className="report-menu-button"
-                onClick={() => setReportMenuOpen((open) => !open)}
+                onClick={(event) => {
+                  if (reportMenuOpen) return setReportMenuOpen(false);
+                  // This sits near the horizontal center of the match header,
+                  // so the old CSS-only `left: 50%; translateX(-50%)`
+                  // centering usually looked fine — but "usually" still ran
+                  // it off the edge at some widths. Computing (and clamping)
+                  // the position in JS instead makes it correct everywhere,
+                  // the same fix already applied to the friend menu.
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  const edgeMargin = 12;
+                  const left = Math.min(
+                    Math.max(
+                      rect.left + rect.width / 2 - REPORT_MENU_WIDTH / 2,
+                      edgeMargin,
+                    ),
+                    window.innerWidth - REPORT_MENU_WIDTH - edgeMargin,
+                  );
+                  setReportMenuPosition({ top: rect.bottom + 10, left });
+                  setReportMenuOpen(true);
+                }}
                 aria-label="Report options"
                 aria-expanded={reportMenuOpen}
               >
                 <Icon name="more" size={17} />
               </button>
-              {reportMenuOpen && (
-                <>
-                  <div
-                    className="popover-backdrop"
-                    onClick={() => setReportMenuOpen(false)}
-                  />
-                  <div className="report-menu" role="menu">
-                    <button
-                      role="menuitem"
-                      onClick={() => void openReport("misconduct")}
+              {reportMenuOpen &&
+                reportMenuPosition &&
+                createPortal(
+                  <>
+                    <div
+                      className="popover-backdrop"
+                      onClick={() => setReportMenuOpen(false)}
+                    />
+                    <div
+                      className="report-menu"
+                      role="menu"
+                      style={{
+                        top: reportMenuPosition.top,
+                        left: reportMenuPosition.left,
+                      }}
                     >
-                      <Icon name="flag" size={13} /> report misconduct
-                    </button>
-                    <button
-                      role="menuitem"
-                      onClick={() => void openReport("ai")}
-                    >
-                      <Icon name="flag" size={13} /> report AI-generated code
-                    </button>
-                  </div>
-                </>
-              )}
+                      <button
+                        role="menuitem"
+                        onClick={() => void openReport("misconduct")}
+                      >
+                        <Icon name="flag" size={13} /> report misconduct
+                      </button>
+                      <button
+                        role="menuitem"
+                        onClick={() => void openReport("ai")}
+                      >
+                        <Icon name="flag" size={13} /> report AI-generated code
+                      </button>
+                    </div>
+                  </>,
+                  document.body,
+                )}
             </div>
           </div>
           <div className="match-timer-cluster">
@@ -4466,6 +4535,13 @@ function Match({
             </h2>
             {reportRosterLoading ? (
               <p>Loading match roster…</p>
+            ) : reportRosterError ? (
+              <div className="report-roster-error">
+                <p>{reportRosterError}</p>
+                <button type="button" onClick={() => void loadReportRoster()}>
+                  try again
+                </button>
+              </div>
             ) : reportRoster.length ? (
               <div className="report-roster">
                 {reportRoster.map((player) => (
@@ -5391,11 +5467,11 @@ function Match({
                     <p>{publishState.error}</p>
                     <a
                       className="github-connect"
-                      href="https://github.com/hackclub/hackclubranked/generate"
+                      href="https://github.com/new?template_owner=hackclub&template_name=hackclubranked&owner=%40me&name=hackclubranked&visibility=public"
                       target="_blank"
                       rel="noreferrer"
                     >
-                      create hackclubranked from the template
+                      create hackclubranked repo
                     </a>
                   </div>
                 ) : (
