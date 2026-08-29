@@ -59,7 +59,13 @@ export async function generateMetadata(): Promise<Metadata> {
   return {
     title: "Hack Club Ranked",
     description: "the best coopertive competitive coding game for teens",
-    icons: { icon: "/favicon.svg", shortcut: "/favicon.svg" },
+    icons: {
+      icon: [
+        { url: "/favicon.ico", sizes: "any" },
+        { url: "/favicon.svg", type: "image/svg+xml" },
+      ],
+      shortcut: "/favicon.ico",
+    },
     openGraph: {
       title: "Hack Club Ranked",
       description: "make a better website than kevin.",

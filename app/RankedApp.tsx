@@ -6273,7 +6273,11 @@ function Shop({
             >
               <div className="product-art">
                 {item.kind === "physical" ? (
-                  item.imageUrl ? (
+                  item.emoji ? (
+                    <span className="product-emoji" aria-hidden="true">
+                      {item.emoji}
+                    </span>
+                  ) : item.imageUrl ? (
                     <img src={item.imageUrl} alt="" width={56} height={56} />
                   ) : (
                     <Icon name={item.iconName as IconName} size={56} />

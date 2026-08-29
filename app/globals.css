@@ -4136,11 +4136,19 @@ button.avatar-swatch:active {
   border-radius: var(--blob);
   overflow: hidden;
 }
+.product-emoji {
+  font-size: 56px;
+  line-height: 1;
+}
 .product-accessory-img {
   width: 100%;
   height: 100%;
   object-fit: contain;
-  padding: 14px;
+  /* --blob's corners are wildly asymmetric radii (see :root), not a plain
+     rounded rect — 14px of clearance let art whose mass sits toward a
+     corner (the party hat's tip, the top hat's brim) get clipped by the
+     aggressive curve there even though it was never actually cropped. */
+  padding: 32px;
 }
 .product-card h2 {
   margin: 8px 0 4px;

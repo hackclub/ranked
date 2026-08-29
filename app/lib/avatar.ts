@@ -11,6 +11,18 @@ export const AVATAR_COUNTS = {
 export type AvatarPartName = keyof typeof AVATAR_COUNTS;
 export const AVATAR_PARTS = Object.keys(AVATAR_COUNTS) as AvatarPartName[];
 
+// A starter value normally counts as free the instant it's <= AVATAR_COUNTS[part]
+// (see isOwnedOrStarterValue below). Listing one here pulls it out of that free
+// pool instead — it now has to be bought as the matching PREMIUM_AVATAR_ITEMS
+// entry, same as any value past the starter range.
+const PAYWALLED_STARTER_VALUES: Partial<Record<AvatarPartName, number[]>> = {
+  limbs: [3],
+};
+
+export function isPaywalledStarterValue(part: AvatarPartName, value: number): boolean {
+  return PAYWALLED_STARTER_VALUES[part]?.includes(value) ?? false;
+}
+
 export type PremiumAvatarItem = {
   id: string;
   part: AvatarPartName;
@@ -28,15 +40,16 @@ export type PremiumAvatarItem = {
 // already falls back to that part's first starter asset/layout (see GoofyGuyAvatar.tsx)
 // until real art lands at public/goofyguys/{shapes|limbs|eyes|hair|mouth}/{value}.png.
 export const PREMIUM_AVATAR_ITEMS: PremiumAvatarItem[] = [
-  { id: "avatar_shape_comet", part: "shape", value: AVATAR_COUNTS.shape + 1, name: "Comet Body", cost: 300, listed: false },
-  { id: "avatar_limbs_noodle", part: "limbs", value: AVATAR_COUNTS.limbs + 1, name: "Noodle Limbs", cost: 300, listed: false },
-  { id: "avatar_eye_starstruck", part: "eye", value: AVATAR_COUNTS.eye + 1, name: "Starstruck Eyes", cost: 250, listed: false },
   // Keep the original ids stable for anyone who already bought the placeholder
   // items; the finished art now occupies those same stored avatar values.
-  { id: "avatar_hair_neon", part: "hair", value: 6, name: "Top Hat", cost: 250 },
-  { id: "avatar_hair_cat_ears", part: "hair", value: 7, name: "Cat Ears", cost: 250 },
-  { id: "avatar_hair_party_hat", part: "hair", value: 8, name: "Party Hat", cost: 250 },
-  { id: "avatar_mouth_grin", part: "mouth", value: 7, name: "Fancy Mustache", cost: 250 },
+  { id: "avatar_hair_neon", part: "hair", value: 6, name: "Top Hat", cost: 25 },
+  { id: "avatar_hair_cat_ears", part: "hair", value: 7, name: "Cat Ears", cost: 25 },
+  { id: "avatar_hair_party_hat", part: "hair", value: 8, name: "Party Hat", cost: 25 },
+  { id: "avatar_mouth_grin", part: "mouth", value: 7, name: "Fancy Mustache", cost: 25 },
+  // Was a free starter limbs value (3) until it got pulled into
+  // PAYWALLED_STARTER_VALUES above — the art at limbs/3.png already exists,
+  // so this is listed immediately instead of waiting on a placeholder.
+  { id: "avatar_limbs_crossed", part: "limbs", value: 3, name: "Sophisticated Legs", cost: 50 },
 ];
 
 export function maxAvatarValue(part: AvatarPartName): number {
@@ -52,7 +65,7 @@ export function isOwnedOrStarterValue(
   value: number,
   ownedItemIds: Set<string>,
 ): boolean {
-  if (value <= AVATAR_COUNTS[part]) return true;
+  if (value <= AVATAR_COUNTS[part] && !isPaywalledStarterValue(part, value)) return true;
   const item = PREMIUM_AVATAR_ITEMS.find((entry) => entry.part === part && entry.value === value);
   return Boolean(item && ownedItemIds.has(item.id));
 }
@@ -91,13 +104,19 @@ export const DEFAULT_AVATAR: ResolvedAvatarConfig = {
 // the exact same look — picks only from each part's free starter range
 // (AVATAR_COUNTS), since a new account hasn't unlocked any premium items yet.
 export function randomStarterAvatar(): ResolvedAvatarConfig {
-  const pick = (count: number) => Math.floor(Math.random() * count) + 1;
+  const pick = (part: AvatarPartName) => {
+    let value: number;
+    do {
+      value = Math.floor(Math.random() * AVATAR_COUNTS[part]) + 1;
+    } while (isPaywalledStarterValue(part, value));
+    return value;
+  };
   return {
-    shape: pick(AVATAR_COUNTS.shape),
-    limbs: pick(AVATAR_COUNTS.limbs),
-    eye: pick(AVATAR_COUNTS.eye),
-    hair: pick(AVATAR_COUNTS.hair),
-    mouth: pick(AVATAR_COUNTS.mouth),
+    shape: pick("shape"),
+    limbs: pick("limbs"),
+    eye: pick("eye"),
+    hair: pick("hair"),
+    mouth: pick("mouth"),
   };
 }
 
@@ -150,6 +169,9 @@ export type PhysicalShopItem = {
   // Real product photo, once one exists — the drawn icon (iconName) is the
   // fallback for items that don't have one yet.
   imageUrl: string | null;
+  // Takes priority over imageUrl/iconName when set — a quick, zero-asset
+  // stand-in for items that don't have (or don't need) real product art.
+  emoji?: string | null;
 };
 
 export type AvatarShopItem = {

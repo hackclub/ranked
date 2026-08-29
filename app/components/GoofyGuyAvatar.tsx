@@ -6,6 +6,7 @@ import { useState } from "react";
 import {
   AVATAR_COUNTS,
   PREMIUM_AVATAR_ITEMS,
+  isPaywalledStarterValue,
   normalizeAvatar,
   type AvatarConfig,
   type PremiumAvatarItem,
@@ -346,7 +347,7 @@ export function AvatarCustomizer({
       const starterValues = Array.from(
         { length: AVATAR_COUNTS[part] },
         (_, index) => index + 1,
-      );
+      ).filter((value) => !isPaywalledStarterValue(part, value));
       const ownedPremiumValues = ownedPremiumIds
         ? PREMIUM_AVATAR_ITEMS.filter(
             (item) => item.part === part && ownedPremiumIds.has(item.id),
