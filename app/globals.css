@@ -300,6 +300,15 @@ select:focus-visible {
   flex-direction: column;
   gap: clamp(10px, 4vh, min(22px, 10vh));
 }
+
+.home-left {
+  margin-left: 2vw;
+}
+
+.home-right {
+  margin-right: 2vw;
+}
+
 .home-left > .paper-card,
 .home-right > .paper-card {
   /* The list-driven cards (friends, interactions, challenges) hold a fixed
@@ -711,6 +720,7 @@ select:focus-visible {
   justify-content: space-between;
   align-items: center;
   padding-block: clamp(6px, 2vh, 24px);
+  /* width: fit-content; */
 }
 .hero-zone .scribble-avatar {
   z-index: 2;
@@ -2282,6 +2292,14 @@ button.avatar-swatch:active {
   font: 600 10px var(--font-geist-mono);
   border-bottom: 1px solid var(--ink);
   padding: 0;
+}
+.connect-step .github-template-button {
+  width: fit-content;
+  margin-inline: auto;
+}
+.connect-step .github-template-link {
+  width: fit-content;
+  margin-inline: auto;
 }
 
 .match-screen {

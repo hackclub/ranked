@@ -2046,6 +2046,8 @@ type OnboardingStep =
   | "placement";
 type AvatarDraft = ResolvedAvatarConfig;
 const PENDING_AVATAR_KEY = "ranked_pending_avatar";
+const GITHUB_TEMPLATE_URL =
+  "https://github.com/new?template_owner=hackclub&template_name=hackclubranked&owner=%40me&name=hackclubranked&visibility=public";
 
 function OnboardingModal({
   step,
@@ -2068,6 +2070,7 @@ function OnboardingModal({
   onSelectExperience?: (e: Experience) => void;
   close: () => void;
 }) {
+  const [templateOpened, setTemplateOpened] = useState(false);
   const levels: {
     key: Experience;
     title: string;
@@ -2157,21 +2160,34 @@ function OnboardingModal({
               deployed with GitHub Pages. Create the repo now from this GitHub
               template. <strong>Your repo must be called &quot;hackclubranked&quot;</strong>
             </p>
-            <a
-              className="primary-button"
-              href="https://github.com/new?template_owner=hackclub&template_name=hackclubranked&owner=%40me&name=hackclubranked&visibility=public"
-              target="_blank"
-              rel="noreferrer"
-            >
-              <Icon name="github" size={16} /> create hackclubranked from the
-              template
-            </a>
-            <button
-              className="onboarding-back"
-              onClick={onContinueGithubTemplate}
-            >
-              I made the repo, continue →
-            </button>
+            {templateOpened ? (
+              <button
+                className="primary-button continue-button github-template-button"
+                onClick={onContinueGithubTemplate}
+              >
+                continue <Icon name="external" size={16} />
+              </button>
+            ) : (
+              <a
+                className="primary-button github-template-button"
+                href={GITHUB_TEMPLATE_URL}
+                target="_blank"
+                rel="noreferrer"
+                onClick={() => setTemplateOpened(true)}
+              >
+                <Icon name="github" size={16} /> create hackclubranked repo
+              </a>
+            )}
+            {templateOpened && (
+              <a
+                className="onboarding-back github-template-link"
+                href={GITHUB_TEMPLATE_URL}
+                target="_blank"
+                rel="noreferrer"
+              >
+                link to github template
+              </a>
+            )}
           </div>
         )}
 
@@ -5274,7 +5290,7 @@ function Match({
           aria-labelledby="results-title"
         >
           <section className="modal results-modal">
-            <h2 id="results-title">{match.theme}</h2>
+            <h2>how beautiful!</h2>
             <div className="vote-grid results-grid">
               <article>
                 <div className="vote-site">
@@ -5435,40 +5451,12 @@ function Match({
                     required
                   />
                 </label>
-                {submissionProfile.loading ? (
-                  <p className="hca-address-note">loading your HCA profile…</p>
-                ) : submissionProfile.ready ? (
-                  <p className="hca-address-note">
-                    Ships to your primary address on{" "}
-                    <a
-                      href="https://auth.hackclub.com"
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      auth.hackclub.com
-                    </a>
-                    .
-                  </p>
-                ) : (
-                  <div className="hca-address-missing">
-                    <p>
-                      Reconnect Hack Club Auth to share your verified birthday
-                      and choose an address for the automatic submission.
-                    </p>
-                    <a
-                      className="github-connect"
-                      href="/api/auth/hackclub/start"
-                    >
-                      reconnect Hack Club Auth
-                    </a>
-                  </div>
-                )}
                 {publishState.code === "github_repo_required" ? (
                   <div className="hca-address-missing">
                     <p>{publishState.error}</p>
                     <a
                       className="github-connect"
-                      href="https://github.com/new?template_owner=hackclub&template_name=hackclubranked&owner=%40me&name=hackclubranked&visibility=public"
+                      href={GITHUB_TEMPLATE_URL}
                       target="_blank"
                       rel="noreferrer"
                     >
@@ -5502,16 +5490,12 @@ function Match({
                   </button>
                 ) : (
                   <a
-                    className="primary-button github-connect"
+                    className="primary-button github-connect gap-2"
                     href="/api/auth/github/start"
                   >
                     <Icon name="github" size={15} /> connect GitHub
                   </a>
                 )}
-                <small>
-                  Includes the finished site plus the original HTML, CSS, and
-                  JavaScript files.
-                </small>
                 {canSkipPublish && (
                   <button
                     className="skip-publish-button"
@@ -6229,7 +6213,6 @@ function Wardrobe({
         back to dash
       </button>
       <div className="subpage-head">
-        <h1>Wardrobe</h1>
       </div>
       <AvatarCustomizer
         value={draft}
@@ -6246,7 +6229,7 @@ function Wardrobe({
         </button>
         <button
           type="button"
-          className="wardrobe-shop-link"
+          className="wardrobe-shop-link mt-[2vh]"
           onClick={() => navigate("shop")}
         >
           browse more looks in the shop <Icon name="external" size={11} />
