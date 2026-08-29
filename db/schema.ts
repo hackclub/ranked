@@ -51,6 +51,11 @@ export const users = pgTable("users", {
   hBucks: integer("h_bucks").notNull().default(0),
   avatar: jsonb("avatar").$type<{ color: string; eyes: number; mouths: number; eyeStyle?: string; mouthStyle?: string }>().notNull().default({ color: "#497CBF", eyes: 2, mouths: 1 }),
   avatarUrl: text("avatar_url"),
+  // Equipped banner color (one of BANNER_ITEMS' `color` values, or null for
+  // none) — tints this player's leaderboard row and their profile hover
+  // card. Ownership itself lives in shop_orders like every other purchase;
+  // this only tracks which owned banner is currently active.
+  bannerColor: text("banner_color"),
   lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

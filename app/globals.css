@@ -194,9 +194,94 @@ select:focus-visible {
 }
 
 .rank-wrap {
+  position: relative;
   width: min(560px, 30vw);
   flex-shrink: 0;
   margin: clamp(4px, 1vh, 18px) auto clamp(8px, 1.8vh, 28px);
+}
+.rank-celebrate {
+  position: absolute;
+  inset: -40px -20px;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  z-index: 5;
+}
+.rank-celebrate-ring {
+  position: absolute;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 3px solid var(--tier-color);
+  box-shadow: 0 0 24px 3px var(--tier-color);
+  animation: rank-celebrate-burst 900ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+.rank-celebrate-ring-2 {
+  animation-delay: 180ms;
+}
+.rank-celebrate-text {
+  position: relative;
+  font: 800 clamp(13px, 1.4vw, 20px) var(--font-geist-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+  background: var(--paper);
+  border: 2px solid var(--ink);
+  border-radius: 99px;
+  padding: 8px 20px;
+  white-space: nowrap;
+  box-shadow: 0 0 0 4px var(--tier-color), 4px 4px 0 var(--ink);
+  animation: rank-celebrate-pop 2200ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+@keyframes rank-celebrate-burst {
+  0% {
+    transform: scale(0.3);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(9);
+    opacity: 0;
+  }
+}
+@keyframes rank-celebrate-pop {
+  0% {
+    transform: scale(0.4) translateY(10px);
+    opacity: 0;
+  }
+  15% {
+    transform: scale(1.08) translateY(0);
+    opacity: 1;
+  }
+  22% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  80% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(0.94) translateY(-6px);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rank-celebrate-ring {
+    animation: none;
+    opacity: 0;
+  }
+  .rank-celebrate-text {
+    animation: rank-celebrate-fade 2200ms ease forwards;
+  }
+}
+@keyframes rank-celebrate-fade {
+  0%,
+  85% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
 }
 .rank-labels {
   display: flex;
@@ -215,6 +300,27 @@ select:focus-visible {
   text-transform: uppercase;
   color: var(--muted);
   margin-left: 3px;
+}
+.rank-elo-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+}
+.rank-adjust-button {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1.5px solid var(--ink);
+  background: var(--paper);
+  font: 800 14px var(--font-geist-mono);
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+}
+.rank-adjust-button:hover {
+  background: var(--orange);
 }
 .rank-tier {
   font: 700 clamp(9px, 0.65vw, 15px) var(--font-geist-mono);
@@ -235,6 +341,22 @@ select:focus-visible {
   border-style: dashed;
   border-color: #a89f7f;
 }
+.rank-tier-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.rank-multiplier {
+  font: 800 clamp(8px, 0.55vw, 12px) var(--font-geist-mono);
+  letter-spacing: 0.02em;
+  padding: 2px 7px;
+  border-radius: 99px;
+  border: 1.5px solid var(--ink);
+  background: var(--green);
+  color: var(--ink);
+  line-height: 1.4;
+  white-space: nowrap;
+}
 .rank-track {
   height: 14px;
   background: linear-gradient(180deg, #fffbe2, #f1eac2);
@@ -244,18 +366,19 @@ select:focus-visible {
   box-shadow: 2px 3px 0 var(--ink);
 }
 .rank-fill {
+  /* Colored per rank tier via inline style (RankedApp.tsx) — comet through
+     galaxy each get one of the app's existing brand tokens. */
   position: absolute;
   inset: 0;
-  background: linear-gradient(90deg, #aec158, var(--green));
 }
 .rank-dot {
+  /* Background also set inline per tier, alongside .rank-fill above. */
   position: absolute;
   top: 50%;
   width: 18px;
   height: 18px;
   border-radius: 50%;
   transform: translate(-50%, -50%);
-  background: var(--blue);
   border: 2px solid var(--ink);
   box-shadow: 2px 3px 0 var(--ink);
 }
@@ -913,6 +1036,103 @@ select:focus-visible {
      win on the cascade rather than by source order alone. */
   flex: none;
   height: fit-content;
+}
+
+/* A deliberate pastiche of a battle-pass promo (Fortnite, etc.) — the one
+   place in the app meant to look like a different game's UI dropped in, not
+   an extension of Ranked's own paper/ink world. Gradient "border" is two
+   nested clip-path polygons a few px apart rather than a real border, since
+   clip-path can't take a gradient stroke directly. */
+.battle-pass-teaser {
+  /* Fixed to the viewport, not the document, so it stays put in the header's
+     corner — sitting between the elo bar (center) and the profile picture
+     (far right) — instead of scrolling away with the dashboard content. */
+  position: fixed;
+  top: 18px;
+  right: 112px;
+  width: min(230px, 20vw);
+  padding: 3px;
+  background: linear-gradient(120deg, #7f5af0, #2cb5e8, #f7d046, #ff5ac1, #7f5af0);
+  background-size: 300% 300%;
+  animation: battle-pass-hue-drift 6s ease-in-out infinite;
+  clip-path: polygon(0 0, 100% 0, 100% 78%, 90% 100%, 0 100%);
+  z-index: 25;
+}
+.battle-pass-teaser-inner {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(135deg, #170a2e, #0a1830 60%, #170a2e);
+  clip-path: polygon(0 0, 100% 0, 100% 78%, 90% 100%, 0 100%);
+  padding: 10px 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.battle-pass-teaser-inner::after {
+  content: "";
+  position: absolute;
+  top: -60%;
+  left: -60%;
+  width: 35%;
+  height: 220%;
+  background: linear-gradient(115deg, transparent, rgba(255, 255, 255, 0.22), transparent);
+  transform: rotate(20deg);
+  animation: battle-pass-shine 3.4s ease-in-out infinite;
+}
+.battle-pass-badge {
+  align-self: flex-start;
+  background: linear-gradient(90deg, #f7d046, #ffef9f);
+  color: #241706;
+  font: 800 9px var(--font-geist-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 3px 9px;
+  border-radius: 3px;
+  transform: skewX(-8deg);
+  margin-bottom: 2px;
+}
+.battle-pass-title {
+  font: 800 13px var(--font-geist-sans);
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0.005em;
+  color: #fff;
+  transform: skewX(-6deg);
+  line-height: 1.2;
+}
+.battle-pass-soon {
+  font: 700 10px var(--font-geist-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #7fe0ff;
+  transform: skewX(-6deg);
+}
+@keyframes battle-pass-shine {
+  0% {
+    left: -60%;
+  }
+  55%,
+  100% {
+    left: 130%;
+  }
+}
+@keyframes battle-pass-hue-drift {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .battle-pass-teaser {
+    animation: none;
+  }
+  .battle-pass-teaser-inner::after {
+    animation: none;
+    display: none;
+  }
 }
 .vote-icon {
   border: 1px solid white;
@@ -3912,6 +4132,13 @@ button.avatar-swatch:active {
   place-items: center;
   margin-bottom: 16px;
   border-radius: var(--blob);
+  overflow: hidden;
+}
+.product-accessory-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  padding: 14px;
 }
 .product-card h2 {
   margin: 8px 0 4px;
@@ -4850,6 +5077,12 @@ button.avatar-swatch:active {
      range where the dashboard scrolls as a whole rather than clipping. */
   .home-screen {
     overflow-y: auto;
+  }
+  /* The header itself condenses at this width (see the 760px breakpoint
+     below) with no clear gap left between the logo and the profile picture
+     to fix this into — it's a desktop-only flourish, not core information. */
+  .battle-pass-teaser {
+    display: none;
   }
   .site-header {
     padding-inline: 24px;

@@ -17,6 +17,7 @@ export type DbUser = {
   hBucks: number;
   avatar: AvatarConfig;
   avatarUrl: string | null;
+  bannerColor: string | null;
   hackatimeConnected: boolean;
   hackatimeUserId: string | null;
   hackatimeEmail: string | null;
@@ -35,6 +36,7 @@ export async function currentUser(request: NextRequest): Promise<DbUser | null> 
       u.verification_status AS "verificationStatus", u.experience, u.elo,
       u.matches_played AS "matchesPlayed", u.coding_seconds AS "codingSeconds",
       u.h_bucks AS "hBucks", u.avatar, u.avatar_url AS "avatarUrl",
+      u.banner_color AS "bannerColor",
       (hc.user_id IS NOT NULL) AS "hackatimeConnected",
       hc.hackatime_user_id AS "hackatimeUserId",
       hc.primary_email AS "hackatimeEmail"

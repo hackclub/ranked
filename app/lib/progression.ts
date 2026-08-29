@@ -8,7 +8,7 @@ import { getSql } from "@/db";
 // at 35 Ħ/day (~$1.94) no matter how many challenges a player clears.
 const challengeConfig = {
   play_matches: { target: 2, rewardElo: 25, rewardHBucks: 0 },
-  code_seconds: { target: 10_800, rewardElo: 0, rewardHBucks: 10 },
+  code_seconds: { target: 10_800, rewardElo: 0, rewardHBucks: 30 },
   add_friends: { target: 2, rewardElo: 40, rewardHBucks: 0 },
   win_matches: { target: 1, rewardElo: 35, rewardHBucks: 0 },
   cast_votes: { target: 3, rewardElo: 0, rewardHBucks: 10 },

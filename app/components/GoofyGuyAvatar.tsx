@@ -150,7 +150,7 @@ function avatarLayout(avatar: ResolvedAvatarConfig) {
   };
 }
 
-function assetPath(part: AvatarPart, value: number) {
+export function assetPath(part: AvatarPart, value: number) {
   const folder = part === "shape" ? "shapes" : part === "eye" ? "eyes" : part;
   return `/goofyguys/${folder}/${value}.png`;
 }
@@ -367,7 +367,10 @@ export function AvatarCustomizer({
 
   const activeOptions = allowedValuesByPart[activePart];
   const activeLocked = PREMIUM_AVATAR_ITEMS.filter(
-    (item) => item.part === activePart && !ownedPremiumIds?.has(item.id),
+    (item) =>
+      item.part === activePart &&
+      item.listed !== false &&
+      !ownedPremiumIds?.has(item.id),
   );
   const unlockedCount = activeOptions.length;
   const totalCount = activeOptions.length + activeLocked.length;
