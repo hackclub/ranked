@@ -1045,11 +1045,13 @@ select:focus-visible {
    clip-path can't take a gradient stroke directly. */
 .battle-pass-teaser {
   /* Fixed to the viewport, not the document, so it stays put in the header's
-     corner — sitting between the elo bar (center) and the profile picture
-     (far right) — instead of scrolling away with the dashboard content. */
+     corner instead of scrolling away with the dashboard content. `left` is
+     computed in JS as the true midpoint between the logo and the profile
+     picture (RankedApp.tsx) and applied inline; translateX centers the box
+     itself on that point rather than starting its left edge there. */
   position: fixed;
   top: 18px;
-  right: 112px;
+  transform: translateX(-50%);
   width: min(230px, 20vw);
   padding: 3px;
   background: linear-gradient(120deg, #7f5af0, #2cb5e8, #f7d046, #ff5ac1, #7f5af0);

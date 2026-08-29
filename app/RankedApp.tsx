@@ -1620,15 +1620,46 @@ function Home({
     toast(`Unblocked @${name}`);
   };
 
+  // Centered on the actual gap between the logo and the profile picture —
+  // both live in SiteHeader, a sibling component, and the logo's width is
+  // never fixed (font-dependent), so a hardcoded offset would drift off
+  // center at different viewport widths. Measuring both elements directly
+  // is the only way to genuinely center between them rather than guess.
+  const [battlePassCenter, setBattlePassCenter] = useState<number | null>(
+    null,
+  );
+  useLayoutEffect(() => {
+    const recompute = () => {
+      const logo = document.querySelector<HTMLElement>(".site-header .logo");
+      const profile = document.querySelector<HTMLElement>(
+        ".site-header .profile-button",
+      );
+      if (!logo || !profile) return;
+      const logoRight = logo.getBoundingClientRect().right;
+      const profileLeft = profile.getBoundingClientRect().left;
+      setBattlePassCenter((logoRight + profileLeft) / 2);
+    };
+    recompute();
+    window.addEventListener("resize", recompute);
+    return () => window.removeEventListener("resize", recompute);
+  }, []);
+
   return (
     <main className="home-screen screen-pad">
-      <div className="battle-pass-teaser">
-        <div className="battle-pass-teaser-inner">
-          <span className="battle-pass-badge">season 1</span>
-          <strong className="battle-pass-title">Hack Club Battle Pass</strong>
-          <span className="battle-pass-soon">coming soon!</span>
+      {battlePassCenter !== null && (
+        <div
+          className="battle-pass-teaser"
+          style={{ left: battlePassCenter }}
+        >
+          <div className="battle-pass-teaser-inner">
+            <span className="battle-pass-badge">season 1</span>
+            <strong className="battle-pass-title">
+              Hack Club Battle Pass
+            </strong>
+            <span className="battle-pass-soon">coming soon!</span>
+          </div>
         </div>
-      </div>
+      )}
       <ProgressBar
         elo={auth.user?.elo}
         isAdmin={isAdmin(auth.user?.email)}
