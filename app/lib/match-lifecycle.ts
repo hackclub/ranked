@@ -202,12 +202,21 @@ export async function finalizeForfeit(
             CASE WHEN mp.team=${winner}::match_team THEN 1.0 ELSE 0.0 END AS score
           FROM match_players mp JOIN users u ON u.id=mp.user_id
           JOIN team_averages opponent ON opponent.team<>mp.team WHERE mp.match_id=${matchId}
+        ), scored AS (
+          -- Winners (score=1) get their gain scaled by a rank-tier multiplier
+          -- (app/lib/rank.ts's WIN_MULTIPLIER, thresholds from RANK_TIERS) —
+          -- losers always keep the unscaled loss. A win against a much
+          -- lower-rated average can otherwise round the base Elo gain down
+          -- to 0 even after the multiplier — GREATEST floors every win at
+          -- +1 so winning never nets nothing, no matter the mismatch.
+          SELECT *,(CASE WHEN score=1.0 THEN GREATEST(1, ROUND(32*(score-(1.0/(1.0+POWER(10,(average_elo-before)/400.0))))*
+              (CASE WHEN before>=3300 THEN 2.0 WHEN before>=2100 THEN 1.5
+                    WHEN before>=1500 THEN 1.25 WHEN before>=1200 THEN 1.05 ELSE 1.0 END))::int)
+            ELSE ROUND(32*(score-(1.0/(1.0+POWER(10,(average_elo-before)/400.0)))))::int
+            END) AS delta FROM ratings
         ) INSERT INTO elo_transactions (id,user_id,match_id,source_key,before,delta,after,reason)
-        SELECT gen_random_uuid()::text,user_id,match_id,'forfeit:'||match_id,before,
-          ROUND(32*(score-(1.0/(1.0+POWER(10,(average_elo-before)/400.0)))))::int,
-          before+ROUND(32*(score-(1.0/(1.0+POWER(10,(average_elo-before)/400.0)))))::int,
-          ${reason}
-        FROM ratings ON CONFLICT (user_id,source_key) DO NOTHING`,
+        SELECT gen_random_uuid()::text,user_id,match_id,'forfeit:'||match_id,before,delta,before+delta,${reason}
+        FROM scored ON CONFLICT (user_id,source_key) DO NOTHING`,
       getSql()`UPDATE users u SET elo=e.after,matches_played=u.matches_played+1,updated_at=NOW()
         FROM elo_transactions e WHERE e.match_id=${matchId} AND e.user_id=u.id`,
       getSql()`UPDATE match_players mp SET post_elo=e.after,finished_at=NOW()

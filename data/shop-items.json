@@ -1,0 +1,38 @@
+[
+  {
+    "id": "stickers",
+    "name": "Ranked sticker pack",
+    "description": "Cover absolutely everything.",
+    "cost": 100,
+    "iconName": "sticker",
+    "color": "#D891D9",
+    "imageUrl": null
+  },
+  {
+    "id": "flipper",
+    "name": "Flipper Zero",
+    "description": "For curious hardware hackers.",
+    "cost": 4500,
+    "iconName": "flipper",
+    "color": "#BF5A5A",
+    "imageUrl": null
+  },
+  {
+    "id": "ipad",
+    "name": "iPad",
+    "description": "Sketch the next strange thing.",
+    "cost": 9000,
+    "iconName": "ipad",
+    "color": "#CCD96C",
+    "imageUrl": null
+  },
+  {
+    "id": "macbook",
+    "name": "MacBook Air",
+    "description": "A lot of hours. Very worth it.",
+    "cost": 18000,
+    "iconName": "macbook",
+    "color": "#497CBF",
+    "imageUrl": null
+  }
+]

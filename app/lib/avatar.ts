@@ -1,3 +1,5 @@
+import physicalShopItemsData from "@/data/shop-items.json";
+
 export const AVATAR_COUNTS = {
   shape: 8,
   limbs: 8,
@@ -15,6 +17,10 @@ export type PremiumAvatarItem = {
   value: number;
   name: string;
   cost: number;
+  // False delists an item from the Shop and the Wardrobe's "locked, buy in
+  // Shop" prompt without touching anyone who already bought it — the id and
+  // value stay valid so their purchase and equipped look keep working.
+  listed?: boolean;
 };
 
 // Values continue numbering past each part's starter range (AVATAR_COUNTS) so they
@@ -22,9 +28,9 @@ export type PremiumAvatarItem = {
 // already falls back to that part's first starter asset/layout (see GoofyGuyAvatar.tsx)
 // until real art lands at public/goofyguys/{shapes|limbs|eyes|hair|mouth}/{value}.png.
 export const PREMIUM_AVATAR_ITEMS: PremiumAvatarItem[] = [
-  { id: "avatar_shape_comet", part: "shape", value: AVATAR_COUNTS.shape + 1, name: "Comet Body", cost: 300 },
-  { id: "avatar_limbs_noodle", part: "limbs", value: AVATAR_COUNTS.limbs + 1, name: "Noodle Limbs", cost: 300 },
-  { id: "avatar_eye_starstruck", part: "eye", value: AVATAR_COUNTS.eye + 1, name: "Starstruck Eyes", cost: 250 },
+  { id: "avatar_shape_comet", part: "shape", value: AVATAR_COUNTS.shape + 1, name: "Comet Body", cost: 300, listed: false },
+  { id: "avatar_limbs_noodle", part: "limbs", value: AVATAR_COUNTS.limbs + 1, name: "Noodle Limbs", cost: 300, listed: false },
+  { id: "avatar_eye_starstruck", part: "eye", value: AVATAR_COUNTS.eye + 1, name: "Starstruck Eyes", cost: 250, listed: false },
   // Keep the original ids stable for anyone who already bought the placeholder
   // items; the finished art now occupies those same stored avatar values.
   { id: "avatar_hair_neon", part: "hair", value: 6, name: "Top Hat", cost: 250 },
@@ -141,6 +147,9 @@ export type PhysicalShopItem = {
   cost: number;
   iconName: string;
   color: string;
+  // Real product photo, once one exists — the drawn icon (iconName) is the
+  // fallback for items that don't have one yet.
+  imageUrl: string | null;
 };
 
 export type AvatarShopItem = {
@@ -154,19 +163,44 @@ export type AvatarShopItem = {
   color: string;
 };
 
-export type ShopItem = PhysicalShopItem | AvatarShopItem;
+export type BannerShopItem = {
+  id: string;
+  kind: "banner";
+  name: string;
+  description: string;
+  cost: number;
+  color: string;
+};
+
+export type ShopItem = PhysicalShopItem | AvatarShopItem | BannerShopItem;
 
 const AVATAR_ITEM_COLORS = ["#D891D9", "#497CBF", "#CCD96C", "#D99F6C", "#BF5A5A"];
+
+// Purely cosmetic and dirt cheap — tints the buyer's leaderboard row and
+// profile hover card. Purple is deliberately left out: it's reserved for the
+// galaxy rank tier (app/lib/rank.ts), not something anyone can just buy.
+export const BANNER_ITEMS: BannerShopItem[] = [
+  { id: "banner_pink", kind: "banner", name: "Pink Banner", description: "Tints your leaderboard row and profile card pink.", cost: 5, color: "var(--pink)" },
+  { id: "banner_blue", kind: "banner", name: "Blue Banner", description: "Tints your leaderboard row and profile card blue.", cost: 5, color: "var(--blue)" },
+  { id: "banner_green", kind: "banner", name: "Green Banner", description: "Tints your leaderboard row and profile card green.", cost: 5, color: "var(--green)" },
+  { id: "banner_orange", kind: "banner", name: "Orange Banner", description: "Tints your leaderboard row and profile card orange.", cost: 5, color: "var(--orange)" },
+  { id: "banner_red", kind: "banner", name: "Red Banner", description: "Tints your leaderboard row and profile card red.", cost: 5, color: "var(--red)" },
+];
+
+// Physical prizes live in data/shop-items.json (name, description, cost,
+// icon fallback, and a real product photo once one exists) since they're
+// plain catalog data — unlike avatar accessories below, which are rendered
+// by compositing part+value onto a live avatar preview, not a flat image.
+const PHYSICAL_SHOP_ITEMS: PhysicalShopItem[] = (
+  physicalShopItemsData as Array<Omit<PhysicalShopItem, "kind">>
+).map((item) => ({ ...item, kind: "physical" as const }));
 
 // Single source of truth for the shop — the client (Shop/Wardrobe UI) and the
 // server (app/api/shop/orders/route.ts) both import this instead of keeping
 // hand-synced copies.
 export const SHOP_CATALOG: ShopItem[] = [
-  { id: "stickers", kind: "physical", name: "Ranked sticker pack", description: "Cover absolutely everything.", cost: 100, iconName: "sticker", color: "#D891D9" },
-  { id: "flipper", kind: "physical", name: "Flipper Zero", description: "For curious hardware hackers.", cost: 4500, iconName: "flipper", color: "#BF5A5A" },
-  { id: "ipad", kind: "physical", name: "iPad", description: "Sketch the next strange thing.", cost: 9000, iconName: "ipad", color: "#CCD96C" },
-  { id: "macbook", kind: "physical", name: "MacBook Air", description: "A lot of hours. Very worth it.", cost: 18000, iconName: "macbook", color: "#497CBF" },
-  ...PREMIUM_AVATAR_ITEMS.map((item, index) => ({
+  ...PHYSICAL_SHOP_ITEMS,
+  ...PREMIUM_AVATAR_ITEMS.filter((item) => item.listed !== false).map((item, index) => ({
     id: item.id,
     kind: "avatar" as const,
     name: item.name,
@@ -176,8 +210,13 @@ export const SHOP_CATALOG: ShopItem[] = [
     value: item.value,
     color: AVATAR_ITEM_COLORS[index % AVATAR_ITEM_COLORS.length],
   })),
+  ...BANNER_ITEMS,
 ];
 
 export function shopItemById(id: string) {
   return SHOP_CATALOG.find((item) => item.id === id);
+}
+
+export function bannerItemByColor(color: string) {
+  return BANNER_ITEMS.find((item) => item.color === color);
 }

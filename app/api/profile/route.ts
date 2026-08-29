@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { currentUser } from "@/app/lib/current-user";
 import { getSql } from "@/db";
 import { AVATAR_PARTS, isOwnedOrStarterValue, normalizeAvatar } from "@/app/lib/avatar";
+import { STARTING_ELO, type Experience } from "@/app/lib/rank";
 
 const experiences = new Set(["beginner", "intermediate", "expert"]);
 const SLACK_USERNAME_PATTERN = /^[a-z0-9._-]{1,80}$/;
@@ -16,6 +17,12 @@ export async function PATCH(request: NextRequest) {
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const body = await request.json();
   const experience = experiences.has(body.experience) ? body.experience : user.experience;
+  // Placement (choosing a starting bracket) only ever happens once, the
+  // first time onboarding sets an experience level — a starting ELO applied
+  // here would otherwise silently reset progress if this endpoint were ever
+  // called again with the same field.
+  const isFirstPlacement = !user.experience && experiences.has(body.experience);
+  const startingElo = isFirstPlacement ? STARTING_ELO[experience as Experience] : null;
   const wantsAvatarChange = Boolean(body.avatar && typeof body.avatar === "object");
   const avatar = normalizeAvatar(wantsAvatarChange ? body.avatar : user.avatar);
 
@@ -54,9 +61,9 @@ export async function PATCH(request: NextRequest) {
   }
   const rows = await getSql()`
     UPDATE users SET experience = ${experience}::experience_level, avatar = ${JSON.stringify(avatar)}::jsonb,
-      slack_username = ${slackUsername}, updated_at = NOW()
+      slack_username = ${slackUsername}, elo = COALESCE(${startingElo}, elo), updated_at = NOW()
     WHERE id = ${user.id}
-    RETURNING experience, avatar, slack_username AS "slackUsername"
+    RETURNING experience, avatar, slack_username AS "slackUsername", elo
   `;
   return NextResponse.json({ user: rows[0] });
 }

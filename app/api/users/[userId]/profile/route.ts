@@ -19,7 +19,7 @@ export async function GET(
   const { userId } = await context.params;
 
   const rows = await getSql()`SELECT id, COALESCE(slack_username, name) AS name, avatar, elo, coding_seconds AS "codingSeconds",
-      matches_played AS "matchesPlayed"
+      matches_played AS "matchesPlayed", banner_color AS "bannerColor"
     FROM users WHERE id=${userId}`;
   const player = rows[0] as
     | {
@@ -29,6 +29,7 @@ export async function GET(
         elo: number;
         codingSeconds: number;
         matchesPlayed: number;
+        bannerColor: string | null;
       }
     | undefined;
   if (!player) return NextResponse.json({ error: "Player not found" }, { status: 404 });
@@ -64,6 +65,7 @@ export async function GET(
     elo: player.elo,
     hours: Math.round(player.codingSeconds / 360) / 10,
     matchesPlayed: player.matchesPlayed,
+    bannerColor: player.bannerColor,
     githubRepoUrl,
     githubGalleryUrl,
   });

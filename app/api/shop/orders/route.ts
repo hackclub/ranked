@@ -29,9 +29,18 @@ export async function POST(request: NextRequest) {
   // trusting whatever free-text a form submitted — same reasoning as the
   // match-publish flow's move to a server-resolved HCA address.
   let shipping: Record<string, string | null> | null = null;
-  if (item.kind === "avatar") {
+  if (item.kind === "avatar" || item.kind === "banner") {
     const owned = await getSql()`SELECT 1 FROM shop_orders WHERE user_id=${user.id} AND item_id=${itemId} LIMIT 1`;
-    if (owned.length) return NextResponse.json({ error: "You already own this." }, { status: 400 });
+    if (owned.length) {
+      // Already bought this banner before — re-equipping it is free, not a
+      // repeat purchase. Avatar items have no such re-select shortcut here
+      // (the Wardrobe handles picking among owned parts instead).
+      if (item.kind === "banner") {
+        await getSql()`UPDATE users SET banner_color=${item.color}, updated_at=NOW() WHERE id=${user.id}`;
+        return NextResponse.json({ ok: true, bannerColor: item.color });
+      }
+      return NextResponse.json({ error: "You already own this." }, { status: 400 });
+    }
   } else {
     const profile = await getHackClubProfile(user.id);
     const selected = completeSubmissionAddresses(profile).find(
@@ -58,9 +67,10 @@ export async function POST(request: NextRequest) {
   }
 
   const orderId = crypto.randomUUID();
-  // Digital avatar unlocks have nothing to ship, so they auto-approve instead of
-  // sitting in the manual shipping-approval queue physical prizes go through.
-  const status = item.kind === "avatar" ? "approved" : "pending";
+  // Digital unlocks (avatar parts, banners) have nothing to ship, so they
+  // auto-approve instead of sitting in the manual shipping-approval queue
+  // physical prizes go through.
+  const status = item.kind !== "physical" ? "approved" : "pending";
   const shippingJson = shipping ? JSON.stringify(shipping) : null;
   const result = await getSql()`WITH debit AS (
       UPDATE users SET h_bucks=h_bucks-${item.cost},updated_at=NOW() WHERE id=${user.id} AND h_bucks>=${item.cost} RETURNING h_bucks
@@ -69,16 +79,23 @@ export async function POST(request: NextRequest) {
       SELECT ${orderId},${user.id},${itemId},${item.name},${item.cost},${status}::order_status,${shippingJson}::jsonb FROM debit RETURNING id,status
     ) SELECT placed.id,placed.status,debit.h_bucks AS balance FROM placed CROSS JOIN debit`;
   if (!result.length) return NextResponse.json({ error: "Not enough H-Bucks." }, { status: 400 });
+  if (item.kind === "banner") {
+    await getSql()`UPDATE users SET banner_color=${item.color}, updated_at=NOW() WHERE id=${user.id}`;
+  }
   await addChallengeProgress(user.id, "shop_purchase", 1);
   await logAudit({
     actor: { id: user.id, name: user.name, email: user.email },
-    action: item.kind === "avatar" ? "shop.avatar_item.unlocked" : "shop.order.created",
-    summary: item.kind === "avatar"
+    action: item.kind !== "physical" ? "shop.avatar_item.unlocked" : "shop.order.created",
+    summary: item.kind !== "physical"
       ? `${user.name} bought "${item.name}" for ${item.cost} Ħ`
-      : `${user.name} redeemed ${item.name} for ${item.cost} Ħ — pending shipping approval`,
+      : `${user.name} bought ${item.name} for ${item.cost} Ħ — pending shipping approval`,
     targetType: "shop_order",
     targetId: orderId,
     metadata: { itemId, cost: item.cost },
   });
-  return NextResponse.json({ order: result[0], balance: result[0].balance });
+  return NextResponse.json({
+    order: result[0],
+    balance: result[0].balance,
+    bannerColor: item.kind === "banner" ? item.color : undefined,
+  });
 }

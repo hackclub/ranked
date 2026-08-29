@@ -64,7 +64,17 @@ export async function POST(request: NextRequest) {
             FROM match_players mp JOIN users u ON u.id=mp.user_id
             JOIN team_averages opponent ON opponent.team<>mp.team WHERE mp.match_id=${matchId}
           ), scored AS (
-            SELECT *,ROUND(32*(score-(1.0/(1.0+POWER(10,(average_elo-before)/400.0)))))::int AS delta FROM ratings
+            -- Winners (score=1) get their gain scaled by a rank-tier multiplier
+            -- (app/lib/rank.ts's WIN_MULTIPLIER, thresholds from RANK_TIERS) —
+            -- losers always keep the unscaled loss. A win against a much
+            -- lower-rated average can otherwise round the base Elo gain down
+            -- to 0 even after the multiplier — GREATEST floors every win at
+            -- +1 so winning never nets nothing, no matter the mismatch.
+            SELECT *,(CASE WHEN score=1.0 THEN GREATEST(1, ROUND(32*(score-(1.0/(1.0+POWER(10,(average_elo-before)/400.0))))*
+                (CASE WHEN before>=3300 THEN 2.0 WHEN before>=2100 THEN 1.5
+                      WHEN before>=1500 THEN 1.25 WHEN before>=1200 THEN 1.05 ELSE 1.0 END))::int)
+              ELSE ROUND(32*(score-(1.0/(1.0+POWER(10,(average_elo-before)/400.0)))))::int
+              END) AS delta FROM ratings
           ) INSERT INTO elo_transactions (id,user_id,match_id,source_key,before,delta,after,reason)
           SELECT gen_random_uuid()::text,user_id,match_id,'match:'||match_id,before,delta,before+delta,'community_vote' FROM scored
           ON CONFLICT (user_id,source_key) DO NOTHING`,

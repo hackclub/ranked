@@ -23,8 +23,18 @@ import {
 } from "./realtime/useMatchRecording";
 import { getYjsProviderForRoom } from "@liveblocks/yjs";
 import { isAdmin } from "./lib/admin";
+import {
+  RANK_TIERS,
+  rankProgress,
+  winMultiplierForElo,
+  type RankTier,
+} from "./lib/rank";
 import { recordingConsentCopy } from "./lib/recording-policy";
-import { AvatarCustomizer, ScribbleAvatar } from "./components/GoofyGuyAvatar";
+import {
+  AvatarCustomizer,
+  ScribbleAvatar,
+  assetPath,
+} from "./components/GoofyGuyAvatar";
 import {
   DEFAULT_AVATAR,
   SHOP_CATALOG,
@@ -33,6 +43,7 @@ import {
   randomStarterAvatar,
   type AvatarConfig,
   type AvatarShopItem,
+  type BannerShopItem,
   type ResolvedAvatarConfig,
   type ShopItem,
 } from "./lib/avatar";
@@ -62,6 +73,7 @@ type AuthState = {
     codingSeconds: number;
     hBucks: number;
     avatar: AvatarConfig;
+    bannerColor: string | null;
   } | null;
   github: { login: string; avatarUrl: string | null } | null;
   hackatime: { id: string | null; email: string | null } | null;
@@ -854,22 +866,105 @@ function Logo({ compact = false }: { compact?: boolean }) {
   );
 }
 
-function ProgressBar({ elo = 1500 }: { elo?: number }) {
-  const progress = Math.max(0, Math.min(100, ((elo - 1500) / 1500) * 100));
+function ProgressBar({
+  elo = 1500,
+  isAdmin = false,
+  onAdjust,
+}: {
+  elo?: number;
+  isAdmin?: boolean;
+  onAdjust?: (direction: "up" | "down") => void;
+}) {
+  const { tier, next, progress, toNext } = rankProgress(elo);
+  const multiplier = winMultiplierForElo(elo);
+
+  // Fires only on a genuine forward tier change (never on first mount, never
+  // on a drop) — this is the one moment on this screen that's earned an
+  // authored celebration rather than a routine feedback tick.
+  const [celebrating, setCelebrating] = useState(false);
+  const previousTierKeyRef = useRef<RankTier["key"] | null>(null);
+  useEffect(() => {
+    const previousKey = previousTierKeyRef.current;
+    previousTierKeyRef.current = tier.key;
+    if (previousKey === null || previousKey === tier.key) return;
+    const previousIndex = RANK_TIERS.findIndex((t) => t.key === previousKey);
+    const nextIndex = RANK_TIERS.findIndex((t) => t.key === tier.key);
+    if (nextIndex <= previousIndex) return;
+    setCelebrating(true);
+    const timer = window.setTimeout(() => setCelebrating(false), 2200);
+    return () => window.clearTimeout(timer);
+  }, [tier.key]);
+
   return (
-    <div className="rank-wrap" aria-label={`Elo rating ${elo}`}>
+    <div className="rank-wrap" aria-label={`Elo rating ${elo}, ${tier.key} tier`}>
+      {celebrating && (
+        <div
+          className="rank-celebrate"
+          style={{ "--tier-color": tier.color } as React.CSSProperties}
+          aria-live="polite"
+        >
+          <span className="rank-celebrate-ring" />
+          <span className="rank-celebrate-ring rank-celebrate-ring-2" />
+          <span className="rank-celebrate-text">rank up → {tier.key}</span>
+        </div>
+      )}
       <div className="rank-labels">
-        <span className="rank-tier current">meteor</span>
-        <strong>
-          {elo} <small>elo</small>
-        </strong>
-        <span className="rank-tier target">celestial</span>
+        <span className="rank-tier-group">
+          <span className="rank-tier current">{tier.key}</span>
+          {multiplier > 1 && (
+            <span
+              className="rank-multiplier"
+              title={`Wins earn ${multiplier}× elo at ${tier.key}`}
+            >
+              {multiplier}&times;
+            </span>
+          )}
+        </span>
+        <span className="rank-elo-group">
+          {isAdmin && onAdjust && (
+            <button
+              type="button"
+              className="rank-adjust-button"
+              onClick={() => onAdjust("down")}
+              aria-label="Lower your ELO by 100 (admin)"
+              title="Admin: -100 elo"
+            >
+              −
+            </button>
+          )}
+          <strong>
+            {elo} <small>elo</small>
+          </strong>
+          {isAdmin && onAdjust && (
+            <button
+              type="button"
+              className="rank-adjust-button"
+              onClick={() => onAdjust("up")}
+              aria-label="Raise your ELO by 100 (admin)"
+              title="Admin: +100 elo"
+            >
+              +
+            </button>
+          )}
+        </span>
+        <span className="rank-tier target">{next?.key ?? tier.key}</span>
       </div>
       <div className="rank-track">
-        <div className="rank-fill" style={{ width: `${progress}%` }} />
-        <i className="rank-dot" style={{ left: `${progress}%` }} />
+        <div
+          className="rank-fill"
+          style={{
+            width: `${progress}%`,
+            background: `linear-gradient(90deg, color-mix(in oklch, ${tier.color} 55%, white), ${tier.color})`,
+          }}
+        />
+        <i
+          className="rank-dot"
+          style={{ left: `${progress}%`, background: tier.color }}
+        />
       </div>
-      <div className="rank-meta">{Math.max(0, 3000 - elo)} to celestial</div>
+      <div className="rank-meta">
+        {next ? `${toNext} to ${next.key}` : "top tier"}
+      </div>
     </div>
   );
 }
@@ -976,6 +1071,7 @@ type PublicPlayerProfile = {
   elo: number;
   hours: number;
   matchesPlayed: number;
+  bannerColor: string | null;
   githubRepoUrl: string | null;
   githubGalleryUrl: string | null;
 };
@@ -1124,23 +1220,18 @@ function PlayerProfileCard({
     };
   }, [userId]);
 
-  // Mirrors the exact floor/ceiling and copy the home screen's own
-  // ProgressBar already uses (1500 "meteor" -> 3000 "celestial") — Ranked
-  // only has this one band today, not a multi-tier ladder, so the ring
-  // shows progress toward that same single target rather than inventing a
-  // tier system that doesn't exist elsewhere in the product.
-  const eloProgressRaw = profile
-    ? Math.max(0, Math.min(100, ((profile.elo - 1500) / 1500) * 100))
-    : 0;
-  // Anyone below 1500 (a brand new account, or anyone who's lost more than
-  // won) legitimately computes to 0% — which, rendered as an actual 0-length
-  // arc, is indistinguishable from no fill at all: exactly the "this just
-  // looks like a plain circle" report. A small floor keeps a sliver of the
-  // fill color always visible so the ring reads as a live progress meter
-  // even at the bottom of the range, not as decoration that happens to be
-  // empty right now.
-  const eloProgress = Math.max(eloProgressRaw, 7);
-  const eloRemaining = profile ? Math.max(0, 3000 - profile.elo) : 0;
+  // Mirrors the home screen's own ProgressBar: progress toward the *next*
+  // rank tier, not a single fixed band.
+  const eloTierProgress = profile ? rankProgress(profile.elo) : null;
+  // Anyone at the very bottom of their tier legitimately computes to 0% —
+  // which, rendered as an actual 0-length arc, is indistinguishable from no
+  // fill at all: exactly the "this just looks like a plain circle" report. A
+  // small floor keeps a sliver of the fill color always visible so the ring
+  // reads as a live progress meter even at the bottom of the range, not as
+  // decoration that happens to be empty right now.
+  const eloProgress = Math.max(eloTierProgress?.progress ?? 0, 7);
+  const eloRemaining = eloTierProgress?.toNext ?? 0;
+  const nextTierKey = eloTierProgress?.next?.key ?? null;
   const ringRadius = 24;
   const ringCircumference = 2 * Math.PI * ringRadius;
   const ringOffset = ringCircumference * (1 - eloProgress / 100);
@@ -1156,6 +1247,9 @@ function PlayerProfileCard({
         top: anchor.top,
         bottom: anchor.bottom,
         width: HOVER_CARD_WIDTH,
+        background: profile?.bannerColor
+          ? `color-mix(in oklch, ${profile.bannerColor} 30%, var(--paper))`
+          : undefined,
       }}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
@@ -1175,17 +1269,17 @@ function PlayerProfileCard({
               className="player-card-ring"
               aria-hidden="true"
               title={
-                eloRemaining > 0
-                  ? `${eloRemaining} to celestial`
-                  : "celestial rank"
+                nextTierKey
+                  ? `${eloRemaining} to ${nextTierKey}`
+                  : `${eloTierProgress?.tier.key ?? ""} rank`
               }
             >
               <svg viewBox="0 0 60 60" width="60" height="60">
                 <defs>
-                  {/* Same two stops as the home screen's own ELO bar
-                      (.rank-fill: linear-gradient(90deg, #aec158, var(--green)))
-                      — this ring and that bar are the same signal in two
-                      shapes, so they're built from the same gradient. */}
+                  {/* Same two-stop gradient language as the home screen's own
+                      ELO bar (.rank-fill) — this ring and that bar are the
+                      same signal in two shapes, colored by the same rank
+                      tier so the ring changes color right alongside it. */}
                   <linearGradient
                     id={ringGradientId}
                     x1="0"
@@ -1193,8 +1287,14 @@ function PlayerProfileCard({
                     x2="1"
                     y2="0"
                   >
-                    <stop offset="0%" stopColor="#aec158" />
-                    <stop offset="100%" stopColor="var(--green)" />
+                    <stop
+                      offset="0%"
+                      stopColor={`color-mix(in oklch, ${eloTierProgress?.tier.color ?? "var(--green)"} 55%, white)`}
+                    />
+                    <stop
+                      offset="100%"
+                      stopColor={eloTierProgress?.tier.color ?? "var(--green)"}
+                    />
                   </linearGradient>
                 </defs>
                 <circle
@@ -1270,12 +1370,14 @@ function Home({
   auth,
   startOnboarding,
   customizeAvatar,
+  onAdjustElo,
 }: {
   navigate: (s: Screen) => void;
   toast: (m: string) => void;
   auth: AuthState;
   startOnboarding: () => void;
   customizeAvatar: () => void;
+  onAdjustElo?: (direction: "up" | "down") => void;
 }) {
   const profileCard = useProfileHoverCard();
   const [friendRequests, setFriendRequests] = useState<string[]>([]);
@@ -1520,7 +1622,18 @@ function Home({
 
   return (
     <main className="home-screen screen-pad">
-      <ProgressBar elo={auth.user?.elo} />
+      <div className="battle-pass-teaser">
+        <div className="battle-pass-teaser-inner">
+          <span className="battle-pass-badge">season 1</span>
+          <strong className="battle-pass-title">Hack Club Battle Pass</strong>
+          <span className="battle-pass-soon">coming soon!</span>
+        </div>
+      </div>
+      <ProgressBar
+        elo={auth.user?.elo}
+        isAdmin={isAdmin(auth.user?.email)}
+        onAdjust={onAdjustElo}
+      />
       <section className="home-grid">
         <aside className="home-left">
           <div className="paper-card friends-card">
@@ -5638,6 +5751,7 @@ type LeaderboardPage = {
     avatar: AvatarConfig | null;
     score: number | string;
     matchesPlayed: number;
+    bannerColor: string | null;
   }>;
 };
 
@@ -5707,6 +5821,13 @@ function Leaderboard({
             <div
               className={isYou ? "leader-row you" : "leader-row"}
               key={row.id}
+              style={
+                row.bannerColor
+                  ? {
+                      background: `color-mix(in oklch, ${row.bannerColor} 22%, var(--paper))`,
+                    }
+                  : undefined
+              }
             >
               <strong>#{rank}</strong>
               <span>
@@ -5970,18 +6091,25 @@ function Shop({
   toast,
   auth,
   avatarInventory,
+  bannerInventory,
   onAvatarPurchased,
+  onBannerChanged,
 }: {
   navigate: (s: Screen) => void;
   toast: (m: string) => void;
   auth: AuthState;
   avatarInventory: Set<string>;
+  bannerInventory: Set<string>;
   onAvatarPurchased: () => void;
+  onBannerChanged: (color: string) => void;
 }) {
   const [selected, setSelected] = useState<ShopItem | null>(null);
   useEscapeKey(Boolean(selected), () => setSelected(null));
   const [balance, setBalance] = useState(auth.user?.hBucks ?? 0);
   const [redeemingId, setRedeemingId] = useState<string | null>(null);
+  const [equippedBanner, setEquippedBanner] = useState(
+    auth.user?.bannerColor ?? null,
+  );
   const [addressState, setAddressState] = useState<{
     loading: boolean;
     ready: boolean;
@@ -6034,10 +6162,10 @@ function Shop({
     const result = await response.json();
     if (!response.ok) {
       toast(result.error ?? "Redemption failed");
-      return false;
+      return null;
     }
-    setBalance(result.balance);
-    return true;
+    if (typeof result.balance === "number") setBalance(result.balance);
+    return result as { balance?: number; bannerColor?: string };
   };
 
   const redeemPhysical = async () => {
@@ -6066,6 +6194,24 @@ function Shop({
     }
   };
 
+  // A banner already owned re-equips for free (server-side no-op on the
+  // charge) — same call either way, so there's no separate "equip" request.
+  const redeemBanner = async (item: BannerShopItem) => {
+    if (redeemingId || equippedBanner === item.color) return;
+    setRedeemingId(item.id);
+    try {
+      const result = await redeemItem(item.id);
+      if (result) {
+        const color = result.bannerColor ?? item.color;
+        setEquippedBanner(color);
+        onBannerChanged(color);
+        toast(`Equipped the ${item.name}`);
+      }
+    } finally {
+      setRedeemingId(null);
+    }
+  };
+
   return (
     <main className="subpage shop-page screen-pad">
       <button className="lobby-exit-button" onClick={() => navigate("home")}>
@@ -6079,7 +6225,11 @@ function Shop({
       </div>
       <section className="product-grid">
         {SHOP_CATALOG.map((item) => {
-          const owned = item.kind === "avatar" && avatarInventory.has(item.id);
+          const owned =
+            (item.kind === "avatar" && avatarInventory.has(item.id)) ||
+            (item.kind === "banner" && bannerInventory.has(item.id));
+          const isEquippedBanner =
+            item.kind === "banner" && equippedBanner === item.color;
           return (
             <article
               key={item.id}
@@ -6088,19 +6238,47 @@ function Shop({
             >
               <div className="product-art">
                 {item.kind === "physical" ? (
-                  <Icon name={item.iconName as IconName} size={56} />
-                ) : (
-                  <ScribbleAvatar
-                    avatar={{ ...DEFAULT_AVATAR, [item.part]: item.value }}
-                    size="sm"
+                  item.imageUrl ? (
+                    <img src={item.imageUrl} alt="" width={56} height={56} />
+                  ) : (
+                    <Icon name={item.iconName as IconName} size={56} />
+                  )
+                ) : item.kind === "avatar" ? (
+                  <img
+                    className="product-accessory-img"
+                    src={assetPath(item.part, item.value)}
+                    alt=""
                   />
+                ) : (
+                  <Icon name="flag" size={56} />
                 )}
               </div>
               <h2>{item.name}</h2>
               <p>{item.description}</p>
               <div>
                 <strong>{item.cost.toLocaleString()} Ħ</strong>
-                {owned ? (
+                {item.kind === "banner" ? (
+                  isEquippedBanner ? (
+                    <span className="product-owned">equipped</span>
+                  ) : (
+                    <button
+                      disabled={redeemingId === item.id}
+                      onClick={() => {
+                        if (!owned && item.cost > balance)
+                          return toast(
+                            `Keep building, you need more H-Bucks for ${item.name}`,
+                          );
+                        void redeemBanner(item);
+                      }}
+                    >
+                      {redeemingId === item.id
+                        ? "equipping…"
+                        : owned
+                          ? "equip"
+                          : "buy"}
+                    </button>
+                  )
+                ) : owned ? (
                   <span className="product-owned">owned</span>
                 ) : (
                   <button
@@ -6124,7 +6302,7 @@ function Shop({
                   >
                     {item.kind === "avatar" && redeemingId === item.id
                       ? "unlocking…"
-                      : "redeem"}
+                      : "buy"}
                   </button>
                 )}
               </div>
@@ -6193,8 +6371,8 @@ function Shop({
               }
             >
               {redeeming
-                ? "redeeming…"
-                : `redeem ${selected.cost.toLocaleString()} Ħ`}
+                ? "buying..."
+                : `buy ${selected.cost.toLocaleString()} Ħ`}
             </button>
           </section>
         </div>
@@ -6677,6 +6855,9 @@ export default function RankedApp() {
   const [avatarInventory, setAvatarInventory] = useState<Set<string>>(
     new Set(),
   );
+  const [bannerInventory, setBannerInventory] = useState<Set<string>>(
+    new Set(),
+  );
   const [auth, setAuth] = useState<AuthState>({
     user: null,
     github: null,
@@ -6711,7 +6892,7 @@ export default function RankedApp() {
     window.setTimeout(() => setToastMessage(""), 2600);
   }, []);
 
-  const refreshAvatarInventory = useCallback(() => {
+  const refreshShopInventory = useCallback(() => {
     fetch("/api/shop/orders")
       .then((response) => response.json())
       .then((data: { orders?: Array<{ itemId: string }> }) => {
@@ -6720,15 +6901,28 @@ export default function RankedApp() {
             (item) => item.id,
           ),
         );
-        setAvatarInventory(
-          new Set(
-            (data.orders ?? [])
-              .map((order) => order.itemId)
-              .filter((id) => avatarItemIds.has(id)),
+        const bannerItemIds = new Set(
+          SHOP_CATALOG.filter((item) => item.kind === "banner").map(
+            (item) => item.id,
           ),
+        );
+        const orderedIds = (data.orders ?? []).map((order) => order.itemId);
+        setAvatarInventory(
+          new Set(orderedIds.filter((id) => avatarItemIds.has(id))),
+        );
+        setBannerInventory(
+          new Set(orderedIds.filter((id) => bannerItemIds.has(id))),
         );
       })
       .catch(() => undefined);
+  }, []);
+
+  const handleBannerChanged = useCallback((color: string) => {
+    setAuth((current) =>
+      current.user
+        ? { ...current, user: { ...current.user, bannerColor: color } }
+        : current,
+    );
   }, []);
 
   useEffect(() => {
@@ -6770,7 +6964,7 @@ export default function RankedApp() {
           ),
         );
         if (next.user) {
-          refreshAvatarInventory();
+          refreshShopInventory();
           const queue = await fetch("/api/matchmaking/queue")
             .then((response) => response.json())
             .catch(() => null);
@@ -6813,7 +7007,7 @@ export default function RankedApp() {
       );
     if (["auth", "github", "hackatime"].some((key) => params.has(key)))
       window.history.replaceState({}, "", window.location.pathname);
-  }, [toast, refreshAvatarInventory]);
+  }, [toast, refreshShopInventory]);
 
   const navigate = (next: Screen) => {
     setScreen(next);
@@ -6851,6 +7045,19 @@ export default function RankedApp() {
     return null;
   };
 
+  const adjustElo = async (direction: "up" | "down") => {
+    const response = await fetch("/api/admin/elo", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ direction }),
+    });
+    const result = await response.json().catch(() => null);
+    if (!response.ok) return toast(result?.error ?? "Could not adjust ELO.");
+    setAuth((current) =>
+      current.user ? { ...current, user: { ...current.user, elo: result.elo } } : current,
+    );
+  };
+
   const saveExperience = async (experience: Experience) => {
     const response = await fetch("/api/profile", {
       method: "PATCH",
@@ -6858,9 +7065,17 @@ export default function RankedApp() {
       body: JSON.stringify({ experience }),
     });
     if (!response.ok) return toast("Could not save your placement level");
+    const result = await response.json().catch(() => null);
     setAuth((current) =>
       current.user
-        ? { ...current, user: { ...current.user, experience } }
+        ? {
+            ...current,
+            user: {
+              ...current.user,
+              experience,
+              elo: result?.user?.elo ?? current.user.elo,
+            },
+          }
         : current,
     );
     setOnboardingOpen(false);
@@ -7043,6 +7258,7 @@ export default function RankedApp() {
                 "Buy your first avatar item in the Shop to unlock the Wardrobe",
               );
           }}
+          onAdjustElo={adjustElo}
         />
       )}
       {screen === "lobby" && auth.user && (
@@ -7092,6 +7308,7 @@ export default function RankedApp() {
                 "Buy your first avatar item in the Shop to unlock the Wardrobe",
               );
           }}
+          onAdjustElo={adjustElo}
         />
       )}
       {screen === "vote" && <Voting navigate={navigate} toast={toast} />}
@@ -7104,7 +7321,9 @@ export default function RankedApp() {
           toast={toast}
           auth={auth}
           avatarInventory={avatarInventory}
-          onAvatarPurchased={refreshAvatarInventory}
+          bannerInventory={bannerInventory}
+          onAvatarPurchased={refreshShopInventory}
+          onBannerChanged={handleBannerChanged}
         />
       )}
       {screen === "wardrobe" && (
