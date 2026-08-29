@@ -54,11 +54,11 @@ Create a GitHub App and configure its user authorization flow:
 
 - Callback: `http://localhost:3000/api/auth/github/callback`
 - Environment: `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`
-- Repository permissions: **Contents — Read and write** and **Pages — Read and write**
+- Repository permissions: **Contents — Read and write**, **Pages — Read and write**, and **Administration — Read and write**
 - Use the app's **Client ID**, not its numeric App ID. No classic OAuth `repo` scope is used.
 - Keep expiring user-to-server tokens enabled. Ranked stores and rotates the refresh token automatically.
 
-When the timer ends, every participant chooses a build name. Ranked commits the build into a folder of that name inside a single `hackclubranked` repository in the participant's connected GitHub account and enables GitHub Pages from its `main` branch. The player creates that repository from the Ranked template and grants the GitHub App access to it first. Every later match adds another folder to the same repo instead of creating a new one. Duo teammates publish the same finished team build independently to their own accounts; voting opens after every player has published.
+When the timer ends, every participant chooses a build name. Ranked commits the build into a folder of that name inside a single `hackclubranked` repository in the participant's connected GitHub account and enables GitHub Pages from its `main` branch. GitHub's Pages creation endpoint requires both Pages and Administration write permissions; Administration remains limited to the selected `hackclubranked` repository. Existing installations must approve newly-added repository permissions before they take effect. The player creates that repository from the Ranked template and grants the GitHub App access to it first. Every later match adds another folder to the same repo instead of creating a new one. Duo teammates publish the same finished team build independently to their own accounts; voting opens after every player has published.
 
 Every publish also regenerates a root `index.html` in that repo — a directory page linking to every folder (build) the player has published, generated from the `publications` table rather than by listing the repo. This gives each player one stable GitHub Pages URL (`https://<login>.github.io/hackclubranked/`) that lists all of their builds, alongside each individual build's own page.
 

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { publishWebsite, PUBLISHABLE_FILE_NAME, GitHubCredentialsError, GitHubRepoNotAccessibleError, refreshGitHubConnection, type DirectoryBuild } from "@/app/lib/github";
+import { publishWebsite, PUBLISHABLE_FILE_NAME, GitHubCredentialsError, GitHubPagesPermissionError, GitHubRepoNotAccessibleError, refreshGitHubConnection, type DirectoryBuild } from "@/app/lib/github";
 import { decryptSession, encryptSession, SESSION_COOKIE, sessionCookieOptions, type GitHubConnection } from "@/app/lib/session";
 import { logAudit } from "@/app/lib/audit";
 import {
@@ -139,6 +139,16 @@ export async function POST(request: NextRequest) {
     if (error instanceof GitHubRepoNotAccessibleError) {
       return githubResponse(
         { error: error.message, code: "github_repo_required" },
+        { status: 409 },
+      );
+    }
+    if (error instanceof GitHubPagesPermissionError) {
+      return githubResponse(
+        {
+          error: error.message,
+          code: "github_pages_permission_required",
+          installationUrl: "https://github.com/settings/installations",
+        },
         { status: 409 },
       );
     }
