@@ -264,8 +264,14 @@ export async function configureRankedRepoForPages(
     } catch (error) {
       if (error instanceof Error && error.message.includes("409")) return;
       if (error instanceof Error && error.message.includes("(403)")) {
+        // GitHub's own detail text is the only way to tell "installation
+        // hasn't accepted the Pages/Administration scopes" apart from other
+        // 403 causes the app permissions can't fix (e.g. an org policy
+        // blocking Pages, or a private repo on a plan that doesn't support
+        // it) — surface it instead of assuming which one this is.
+        console.error("Pages creation 403:", error.message);
         throw new GitHubPagesPermissionError(
-          "GitHub Pages is not enabled yet. The Ranked GitHub App needs Pages and Administration read/write access to enable it. Approve the app's updated permissions, then publish again.",
+          `GitHub Pages could not be enabled: ${error.message.replace(/^GitHub request failed \(403\): ?/, "")} If this doesn't mention a plan or policy restriction, approve the Ranked GitHub App's Pages/Administration permissions and publish again.`,
         );
       }
       if (
