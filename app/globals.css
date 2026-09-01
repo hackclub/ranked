@@ -1488,6 +1488,22 @@ select:focus-visible {
   display: block;
   font: 450 8px var(--font-geist-mono);
 }
+.queue-counts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 4px;
+}
+.queue-counts-time {
+  grid-template-columns: repeat(3, 1fr);
+}
+.queue-counts span {
+  display: block;
+  text-align: center;
+  font: 550 8px var(--font-geist-mono);
+  color: var(--ink);
+  opacity: 0.6;
+}
 .camera-preview {
   position: relative;
   border: 1px solid var(--ink);

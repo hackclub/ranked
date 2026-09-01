@@ -2891,6 +2891,33 @@ function Lobby({
     };
   }, [fetchDuoState, mode]);
 
+  const [queueCounts, setQueueCounts] = useState({
+    counts: {
+      solo: { 10: 0, 30: 0, 60: 0 },
+      duo: { 10: 0, 30: 0, 60: 0 },
+    },
+  });
+  useEffect(() => {
+    let cancelled = false;
+    const fetchQueueCounts = async () => {
+      try {
+        const { response, data } = await fetchJsonWithTimeout<
+          typeof queueCounts
+        >("/api/matchmaking/queue-counts", {}, 8000);
+        if (!cancelled && response.ok) setQueueCounts(data);
+      } catch {
+        // Skip this tick — the next poll retries, no need to surface a toast
+        // over a purely informational headcount.
+      }
+    };
+    void fetchQueueCounts();
+    const poll = window.setInterval(fetchQueueCounts, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(poll);
+    };
+  }, []);
+
   const sendInvite = async (friendId: string) => {
     if (inviteBusy || matching) return;
     setInviteBusy(true);
@@ -3218,6 +3245,10 @@ function Lobby({
                 </span>
               </button>
             </div>
+            <div className="queue-counts">
+              <span>{queueCounts.counts.solo[effectiveLength as 10 | 30 | 60]} in queue</span>
+              <span>{queueCounts.counts.duo[effectiveLength as 10 | 30 | 60]} in queue</span>
+            </div>
           </div>
           <div className={`hud-block ${isDuoJoiner ? "hud-block-locked" : ""}`}>
             <span className="hud-label">
@@ -3235,6 +3266,11 @@ function Lobby({
                   <strong>{time}</strong>
                   <small>min</small>
                 </button>
+              ))}
+            </div>
+            <div className="queue-counts queue-counts-time">
+              {([10, 30, 60] as const).map((time) => (
+                <span key={time}>{queueCounts.counts[mode][time]} in queue</span>
               ))}
             </div>
           </div>
