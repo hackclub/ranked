@@ -3032,7 +3032,17 @@ function Lobby({
                 disabled={matching}
               />
               <span>
-                <strong>audio/video recording required</strong>
+                <strong>
+                  audio/video recording required
+                  <i
+                    className="info-tip"
+                    data-tip="audio/video is not required. if your video/mic is off, we'll be recording a black screen. we just want to prevent bullying and vulgar gestures."
+                    tabIndex={0}
+                    onClick={(event) => event.preventDefault()}
+                  >
+                    i
+                  </i>
+                </strong>
                 <small>{recordingConsentCopy()}</small>
               </span>
             </label>
