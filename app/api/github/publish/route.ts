@@ -87,7 +87,21 @@ export async function POST(request: NextRequest) {
       WHERE p.published_by=${session.user.id} ORDER BY p.created_at DESC`;
     github = await refreshGitHubConnection(session.github);
     githubRefreshed = github !== session.github;
-    const result = await publishWebsite(github.accessToken, github.login, name, player.theme, pages!, files, trimmedDescription, existingBuilds as DirectoryBuild[]);
+    let result;
+    try {
+      result = await publishWebsite(github.accessToken, github.login, name, player.theme, pages!, files, trimmedDescription, existingBuilds as DirectoryBuild[]);
+    } catch (error) {
+      // A 403 enabling Pages can mean the installation's permissions were
+      // just approved — the cached token issued beforehand keeps its old,
+      // narrower scope until it's actually reissued, not just when it
+      // happens to near its 8-hour expiry (see refreshGitHubConnection).
+      // One forced reissue-and-retry covers that case automatically instead
+      // of sending the player back to "approve" something they already did.
+      if (!(error instanceof GitHubPagesPermissionError)) throw error;
+      github = await refreshGitHubConnection(github, { force: true });
+      githubRefreshed = true;
+      result = await publishWebsite(github.accessToken, github.login, name, player.theme, pages!, files, trimmedDescription, existingBuilds as DirectoryBuild[]);
+    }
     const publicationId = crypto.randomUUID();
     // These used to run as separate round-trips. If the client disconnected
     // (tab closed right after publishing) between the publications insert and

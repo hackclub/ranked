@@ -95,12 +95,21 @@ export class GitHubCredentialsError extends Error {}
 // GitHub App user access tokens expire after eight hours by default. Their
 // refresh tokens rotate on every use, so callers must persist the returned
 // connection whenever this function produces a new object.
+//
+// A user access token's permission scope is fixed at the moment it's issued
+// — accepting an installation's updated permissions on GitHub doesn't
+// upgrade tokens already handed out, only ones minted afterward. `force`
+// skips the expiry check so a token can be reissued (and thus pick up a
+// just-accepted permission) well before its natural 8-hour expiry would
+// otherwise trigger a refresh.
 export async function refreshGitHubConnection(
   connection: GitHubConnection,
+  options?: { force?: boolean },
 ): Promise<GitHubConnection> {
   if (
-    !connection.accessTokenExpiresAt ||
-    connection.accessTokenExpiresAt > Date.now() + TOKEN_REFRESH_SKEW_MS
+    !options?.force &&
+    (!connection.accessTokenExpiresAt ||
+      connection.accessTokenExpiresAt > Date.now() + TOKEN_REFRESH_SKEW_MS)
   ) {
     return connection;
   }
