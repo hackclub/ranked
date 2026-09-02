@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { publishWebsite, PUBLISHABLE_FILE_NAME, GitHubCredentialsError, GitHubPagesPermissionError, GitHubRepoNotAccessibleError, refreshGitHubConnection, type DirectoryBuild } from "@/app/lib/github";
+import { publishWebsite, PUBLISHABLE_FILE_NAME, GitHubCredentialsError, GitHubPermissionError, GitHubRepoNotAccessibleError, refreshGitHubConnection, type DirectoryBuild } from "@/app/lib/github";
 import { decryptSession, encryptSession, SESSION_COOKIE, sessionCookieOptions, type GitHubConnection } from "@/app/lib/session";
 import { logAudit } from "@/app/lib/audit";
 import {
@@ -97,7 +97,7 @@ export async function POST(request: NextRequest) {
       // happens to near its 8-hour expiry (see refreshGitHubConnection).
       // One forced reissue-and-retry covers that case automatically instead
       // of sending the player back to "approve" something they already did.
-      if (!(error instanceof GitHubPagesPermissionError)) throw error;
+      if (!(error instanceof GitHubPermissionError)) throw error;
       github = await refreshGitHubConnection(github, { force: true });
       githubRefreshed = true;
       result = await publishWebsite(github.accessToken, github.login, name, player.theme, pages!, files, trimmedDescription, existingBuilds as DirectoryBuild[]);
@@ -156,11 +156,11 @@ export async function POST(request: NextRequest) {
         { status: 409 },
       );
     }
-    if (error instanceof GitHubPagesPermissionError) {
+    if (error instanceof GitHubPermissionError) {
       return githubResponse(
         {
           error: error.message,
-          code: "github_pages_permission_required",
+          code: "github_permission_required",
           installationUrl: "https://github.com/settings/installations",
         },
         { status: 409 },

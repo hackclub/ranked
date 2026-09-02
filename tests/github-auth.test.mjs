@@ -5,7 +5,8 @@ import {
   configureRankedRepoForPages,
   exchangeGitHubCode,
   GitHubCredentialsError,
-  GitHubPagesPermissionError,
+  GitHubPermissionError,
+  publishWebsite,
   refreshGitHubConnection,
 } from "../app/lib/github.ts";
 
@@ -133,7 +134,46 @@ test("GitHub Pages reports the installation permission upgrade when creation is 
 
     await assert.rejects(
       configureRankedRepoForPages("token", "octocat"),
-      GitHubPagesPermissionError,
+      GitHubPermissionError,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("publishing reports the installation permission upgrade when the commit is forbidden", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    const json = (body, status) =>
+      new Response(JSON.stringify(body), {
+        status,
+        headers: { "Content-Type": "application/json" },
+      });
+    const responses = [
+      json({ login: "octocat" }, 200), // currentGitHubLogin
+      json({ html_url: "https://example.test/octocat/hackclubranked" }, 200), // ensureRankedRepo repo check
+      json({}, 200), // configureRankedRepoForPages: Pages already enabled
+      json({ message: "Not Found" }, 404), // pathExists(folderName): not taken yet
+      json({ object: { sha: "base-sha" } }, 200), // commitFiles ref
+      json({ tree: { sha: "base-tree-sha" } }, 200), // commitFiles base commit
+      json({ message: "Resource not accessible by integration" }, 403), // commitFiles tree creation
+    ];
+    globalThis.fetch = async () => responses.shift();
+
+    await assert.rejects(
+      publishWebsite(
+        "token",
+        "octocat",
+        "my-build",
+        "theme",
+        { "index.html": "<html></html>" },
+        undefined,
+        undefined,
+        [],
+      ),
+      (error) =>
+        error instanceof GitHubPermissionError &&
+        /Contents permissions/.test(error.message),
     );
   } finally {
     globalThis.fetch = originalFetch;

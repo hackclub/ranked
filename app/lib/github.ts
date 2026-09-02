@@ -166,11 +166,12 @@ export async function refreshGitHubConnection(
 // the app access to it, so both cases share one specific, actionable error.
 export class GitHubRepoNotAccessibleError extends Error {}
 
-// Creating the initial Pages site is a repository-administration operation,
-// even though every later Pages build only needs Pages access. Keep this
-// separate from a generic GitHub error so the UI can send the player to the
-// installation settings instead of displaying GitHub's opaque 403 response.
-export class GitHubPagesPermissionError extends Error {}
+// Thrown for a 403 whose cause is the installation not having accepted one
+// of the app's repository permissions yet — enabling Pages (Pages +
+// Administration) or committing a build (Contents). Keep this separate from
+// a generic GitHub error so the UI can send the player to the installation
+// settings instead of displaying GitHub's opaque 403 response.
+export class GitHubPermissionError extends Error {}
 
 async function githubRequest<T>(
   token: string,
@@ -279,7 +280,7 @@ export async function configureRankedRepoForPages(
         // blocking Pages, or a private repo on a plan that doesn't support
         // it) — surface it instead of assuming which one this is.
         console.error("Pages creation 403:", error.message);
-        throw new GitHubPagesPermissionError(
+        throw new GitHubPermissionError(
           `GitHub Pages could not be enabled: ${error.message.replace(/^GitHub request failed \(403\): ?/, "")} If this doesn't mention a plan or policy restriction, approve the Ranked GitHub App's Pages/Administration permissions and publish again.`,
         );
       }
@@ -355,35 +356,48 @@ async function commitFiles(
   // the ref update — the same race the old per-file PUTs could hit, but now
   // there's one ref update to retry instead of several.
   for (let attempt = 1; ; attempt++) {
-    const ref = await githubRequest<{ object: { sha: string } }>(
-      token,
-      refUrl,
-    );
-    const baseCommitSha = ref.object.sha;
-    const baseCommit = await githubRequest<{ tree: { sha: string } }>(
-      token,
-      `https://api.github.com/repos/${login}/${RANKED_REPO}/git/commits/${baseCommitSha}`,
-    );
-    const tree = await githubRequest<{ sha: string }>(token, treesUrl, {
-      method: "POST",
-      body: JSON.stringify({ base_tree: baseCommit.tree.sha, tree: entries }),
-    });
-    const commit = await githubRequest<{ sha: string }>(token, commitsUrl, {
-      method: "POST",
-      body: JSON.stringify({
-        message,
-        tree: tree.sha,
-        parents: [baseCommitSha],
-      }),
-    });
     try {
-      await githubRequest(token, updateRefUrl, {
-        method: "PATCH",
-        body: JSON.stringify({ sha: commit.sha }),
+      const ref = await githubRequest<{ object: { sha: string } }>(
+        token,
+        refUrl,
+      );
+      const baseCommitSha = ref.object.sha;
+      const baseCommit = await githubRequest<{ tree: { sha: string } }>(
+        token,
+        `https://api.github.com/repos/${login}/${RANKED_REPO}/git/commits/${baseCommitSha}`,
+      );
+      const tree = await githubRequest<{ sha: string }>(token, treesUrl, {
+        method: "POST",
+        body: JSON.stringify({ base_tree: baseCommit.tree.sha, tree: entries }),
       });
-      return;
+      const commit = await githubRequest<{ sha: string }>(token, commitsUrl, {
+        method: "POST",
+        body: JSON.stringify({
+          message,
+          tree: tree.sha,
+          parents: [baseCommitSha],
+        }),
+      });
+      try {
+        await githubRequest(token, updateRefUrl, {
+          method: "PATCH",
+          body: JSON.stringify({ sha: commit.sha }),
+        });
+        return;
+      } catch (error) {
+        if (!isRefUpdateFailure(error) || attempt >= 3) throw error;
+      }
     } catch (error) {
-      if (!isRefUpdateFailure(error) || attempt >= 3) throw error;
+      // Same cause as the Pages 403 above, just against the Contents
+      // permission instead of Pages/Administration — the installation
+      // hasn't accepted it yet, or accepted it after this token was issued.
+      if (error instanceof Error && error.message.includes("(403)")) {
+        console.error("Commit 403:", error.message);
+        throw new GitHubPermissionError(
+          `GitHub could not save your build: ${error.message.replace(/^GitHub request failed \(403\): ?/, "")} If this doesn't mention a plan or policy restriction, approve the Ranked GitHub App's Contents permissions and publish again.`,
+        );
+      }
+      throw error;
     }
   }
 }

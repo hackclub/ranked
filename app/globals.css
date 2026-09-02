@@ -4912,6 +4912,10 @@ button.avatar-swatch:active {
   align-items: center;
   justify-content: center;
 }
+.publish-modal .github-connect-underline {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
 .publish-modal > small {
   display: block;
   margin-top: 15px;

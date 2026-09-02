@@ -4205,7 +4205,7 @@ function Match({
       }
       if (
         result.code === "github_repo_required" ||
-        result.code === "github_pages_permission_required"
+        result.code === "github_permission_required"
       ) {
         setPublishState({
           loading: false,
@@ -5709,11 +5709,11 @@ function Match({
                     </a>
                   </div>
                 ) : publishState.code ===
-                  "github_pages_permission_required" ? (
+                  "github_permission_required" ? (
                   <div className="hca-address-missing">
                     <p>{publishState.error}</p>
                     <a
-                      className="github-connect"
+                      className="github-connect github-connect-underline"
                       href={
                         publishState.actionUrl ??
                         "https://github.com/settings/installations"
