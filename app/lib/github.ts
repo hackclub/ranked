@@ -7,6 +7,30 @@ const githubHeaders = (token: string) => ({
   "Content-Type": "application/json",
 });
 
+// The app's slug (its URL name on github.com), not its client id — the two
+// are unrelated and only the slug can build an installation URL. Kept
+// overridable so a staging deployment can point at its own app.
+const GITHUB_APP_SLUG = process.env.GITHUB_APP_SLUG ?? "hack-club-ranked";
+
+// Where a player has to go for the app to actually gain access to their
+// repo. Authorizing the app (githubAuthorizationUrl below) and installing it
+// are two separate things on GitHub's side: authorizing only proves who they
+// are, while installing is what grants repository permissions. Authorizing
+// alone yields a user access token that can read /user perfectly well but
+// cannot see a single repo — which is why a player could finish onboarding
+// looking connected and only discover at publish time that nothing could be
+// committed. So this, not the authorize URL, is the front door.
+export function githubInstallUrl(state?: string) {
+  const params = state ? `?${new URLSearchParams({ state })}` : "";
+  return `https://github.com/apps/${GITHUB_APP_SLUG}/installations/new${params}`;
+}
+
+// Sends the player to their existing installation instead of a fresh one, so
+// they land on the repo-selection/permission-approval screen for the app they
+// already have rather than being asked to install it a second time.
+export const GITHUB_INSTALLATION_SETTINGS_URL =
+  "https://github.com/settings/installations";
+
 // GITHUB_CLIENT_ID/SECRET here are a GitHub App's "user authorization" OAuth
 // credentials, not a classic OAuth App's — deliberately, so the resulting
 // user access token is scoped to only whatever repos the player granted the
@@ -31,9 +55,13 @@ export function githubAuthorizationUrl(
   return `https://github.com/login/oauth/authorize?${params}`;
 }
 
+// `verifier` is null for a code minted by the install-then-authorize flow:
+// the installation URL has nowhere to carry a code_challenge, so there is no
+// challenge for a verifier to answer and sending one anyway fails the
+// exchange. Codes from githubAuthorizationUrl still carry their PKCE pair.
 export async function exchangeGitHubCode(
   code: string,
-  verifier: string,
+  verifier: string | null,
   redirectUri: string,
 ) {
   const clientId = process.env.GITHUB_CLIENT_ID;
@@ -47,7 +75,7 @@ export async function exchangeGitHubCode(
       client_id: clientId,
       client_secret: clientSecret,
       code,
-      code_verifier: verifier,
+      ...(verifier ? { code_verifier: verifier } : {}),
       redirect_uri: process.env.GITHUB_REDIRECT_URI ?? redirectUri,
     }),
   });
@@ -213,6 +241,165 @@ async function currentGitHubLogin(token: string) {
     "https://api.github.com/user",
   );
   return user.login;
+}
+
+// The three repository permissions publishing actually exercises: Contents
+// for the build commit, and Pages + Administration together because GitHub
+// requires both to create a Pages site. Metadata (read) is mandatory for
+// every GitHub App and never needs asking for.
+const REQUIRED_INSTALLATION_PERMISSIONS: Record<string, "write"> = {
+  contents: "write",
+  pages: "write",
+  administration: "write",
+};
+
+export type RankedAccessProblem =
+  // The app was authorized but never installed, so its user token can't see
+  // a single repository. This is the one that used to go unnoticed until
+  // publish time, because authorizing alone is enough for /user to work.
+  | "not_installed"
+  // Installed, but at permissions narrower than the app now asks for —
+  // GitHub keeps an installation on its old permissions until the owner
+  // accepts the new ones, so an app whose Contents scope was added after
+  // they installed still cannot commit.
+  | "permissions_pending"
+  // Installed with the right permissions, but not pointed at (or missing) a
+  // hackclubranked repo. GitHub can't distinguish the two — see
+  // GitHubRepoNotAccessibleError.
+  | "repo_not_accessible";
+
+export type RankedAccessStatus = {
+  login: string;
+  problem: RankedAccessProblem | null;
+  missingPermissions: string[];
+  installUrl: string;
+  settingsUrl: string;
+};
+
+type UserInstallation = {
+  id: number;
+  app_slug?: string;
+  permissions?: Record<string, string>;
+};
+
+// Answers "can this connection actually publish?" without publishing, so
+// onboarding can insist on a working installation instead of letting a
+// player reach the end of a match before finding out. Every call here is
+// cheap and needs no repository permission of its own.
+export async function rankedAccessStatus(
+  token: string,
+  sessionLogin: string,
+): Promise<RankedAccessStatus> {
+  const login = await currentGitHubLogin(token).catch(() => sessionLogin);
+  const base = {
+    login,
+    missingPermissions: [] as string[],
+    installUrl: githubInstallUrl(),
+    settingsUrl: GITHUB_INSTALLATION_SETTINGS_URL,
+  };
+
+  const { installations } = await githubRequest<{
+    installations: UserInstallation[];
+  }>(token, "https://api.github.com/user/installations?per_page=100");
+  const installation = installations.find(
+    (candidate) => candidate.app_slug === GITHUB_APP_SLUG,
+  );
+  if (!installation) return { ...base, problem: "not_installed" };
+
+  const granted = installation.permissions ?? {};
+  const missingPermissions = Object.keys(REQUIRED_INSTALLATION_PERMISSIONS)
+    .filter((name) => granted[name] !== "write" && granted[name] !== "admin")
+    .sort();
+  if (missingPermissions.length) {
+    return { ...base, missingPermissions, problem: "permissions_pending" };
+  }
+
+  try {
+    await githubRequest(
+      token,
+      `https://api.github.com/repos/${login}/${RANKED_REPO}`,
+    );
+  } catch (error) {
+    if (isNotFound(error)) return { ...base, problem: "repo_not_accessible" };
+    throw error;
+  }
+  return { ...base, problem: null };
+}
+
+export type RankedPublishBlock = {
+  error: string;
+  code: "github_install_required";
+  problem: RankedAccessProblem | "not_connected";
+  missingPermissions: string[];
+  installUrl: string;
+  settingsUrl: string;
+};
+
+const BLOCK_MESSAGES: Record<RankedAccessProblem | "not_connected", string> = {
+  not_connected:
+    "Connect GitHub and install the Ranked app on your hackclubranked repo before joining a match.",
+  not_installed:
+    "The Ranked GitHub App isn't installed on your account yet, so a finished match couldn't be published. Install it on your hackclubranked repo first.",
+  permissions_pending:
+    "Your Ranked GitHub App installation is still on its older permissions and can't commit builds. Approve the updated ones before joining a match.",
+  repo_not_accessible:
+    "The Ranked GitHub App can't see a hackclubranked repo on your account. Create it and grant the app access before joining a match.",
+};
+
+const publishBlock = (
+  problem: RankedAccessProblem | "not_connected",
+  missingPermissions: string[] = [],
+): RankedPublishBlock => ({
+  error: BLOCK_MESSAGES[problem],
+  code: "github_install_required",
+  problem,
+  missingPermissions,
+  installUrl: githubInstallUrl(),
+  settingsUrl: GITHUB_INSTALLATION_SETTINGS_URL,
+});
+
+// Null when a player can publish (or when we can't tell), and the blocking
+// body when they can't. Publishing is the last step of every match, so
+// matchmaking asks this before handing out a match instead of letting the
+// answer arrive when the timer has already run out, the opponent is waiting
+// on the publication for voting to open, and there's nothing to be done
+// about it in the moment.
+//
+// Anything short of a definite "no" lets them through: matchmaking must
+// never be held closed by a GitHub outage.
+export async function rankedPublishBlock(
+  connection: GitHubConnection | undefined,
+): Promise<RankedPublishBlock | null> {
+  if (!connection) return publishBlock("not_connected");
+  // Deliberately not refreshed. Refresh tokens rotate on every use, so
+  // refreshing obliges the caller to persist the new one or the next refresh
+  // fails with a spent token — not something a route with many exits can
+  // thread a Set-Cookie through reliably. A token too old to check with
+  // simply isn't checked: /api/github/installation refreshes and persists
+  // properly on page load, so by the time someone readies up theirs is
+  // almost always current, and publishing refreshes on its own regardless.
+  if (
+    connection.accessTokenExpiresAt &&
+    connection.accessTokenExpiresAt <= Date.now() + 60_000
+  ) {
+    return null;
+  }
+  try {
+    const access = await rankedAccessStatus(
+      connection.accessToken,
+      connection.login,
+    );
+    return access.problem
+      ? publishBlock(access.problem, access.missingPermissions)
+      : null;
+  } catch (error) {
+    // A token GitHub itself rejects is a real blocker — that has to be
+    // reconnected before a match, not after one.
+    if (error instanceof GitHubCredentialsError)
+      return publishBlock("not_connected");
+    console.error("publish readiness check failed", error);
+    return null;
+  }
 }
 
 function repoContentsPath(login: string, path = "") {

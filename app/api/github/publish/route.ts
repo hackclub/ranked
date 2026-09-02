@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { publishWebsite, PUBLISHABLE_FILE_NAME, GitHubCredentialsError, GitHubPermissionError, GitHubRepoNotAccessibleError, refreshGitHubConnection, type DirectoryBuild } from "@/app/lib/github";
+import { publishWebsite, PUBLISHABLE_FILE_NAME, GitHubCredentialsError, GitHubPermissionError, GitHubRepoNotAccessibleError, GITHUB_INSTALLATION_SETTINGS_URL, githubInstallUrl, refreshGitHubConnection, type DirectoryBuild } from "@/app/lib/github";
 import { decryptSession, encryptSession, SESSION_COOKIE, sessionCookieOptions, type GitHubConnection } from "@/app/lib/session";
 import { logAudit } from "@/app/lib/audit";
 import {
@@ -152,7 +152,14 @@ export async function POST(request: NextRequest) {
     }
     if (error instanceof GitHubRepoNotAccessibleError) {
       return githubResponse(
-        { error: error.message, code: "github_repo_required" },
+        {
+          error: error.message,
+          code: "github_repo_required",
+          // Half of this case is "the repo exists but the app was never
+          // pointed at it", so offer the installation screen alongside the
+          // template link the UI already shows.
+          installationUrl: githubInstallUrl(),
+        },
         { status: 409 },
       );
     }
@@ -161,7 +168,7 @@ export async function POST(request: NextRequest) {
         {
           error: error.message,
           code: "github_permission_required",
-          installationUrl: "https://github.com/settings/installations",
+          installationUrl: GITHUB_INSTALLATION_SETTINGS_URL,
         },
         { status: 409 },
       );

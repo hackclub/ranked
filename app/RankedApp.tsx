@@ -2190,6 +2190,44 @@ const PENDING_AVATAR_KEY = "ranked_pending_avatar";
 const GITHUB_TEMPLATE_URL =
   "https://github.com/new?template_owner=hackclub&template_name=hackclubranked&owner=%40me&name=hackclubranked&visibility=public";
 
+// Everything that can leave a player looking connected while the app still
+// can't commit for them. Authorizing the app and installing it are separate
+// steps on GitHub, and an installation keeps its original permissions until
+// its owner accepts any the app added later — so "connected" was never
+// enough to know publishing will work.
+type GitHubAccessProblem =
+  | "not_connected"
+  | "not_installed"
+  | "permissions_pending"
+  | "repo_not_accessible";
+
+type GitHubInstallation = {
+  connected: boolean;
+  problem: GitHubAccessProblem | null;
+  missingPermissions: string[];
+  installUrl: string;
+  settingsUrl: string;
+};
+
+const GITHUB_PROBLEM_COPY: Record<GitHubAccessProblem, string> = {
+  not_connected:
+    "Install the Ranked app on the hackclubranked repo you just made. It gets access to that one repo — nothing else you own — so it can commit each finished match and turn on GitHub Pages.",
+  not_installed:
+    "Ranked knows who you are on GitHub, but the app was never installed on your account, so it can't see any of your repos. Install it and pick your hackclubranked repo.",
+  permissions_pending:
+    "Your installation is still running on the app's older permissions, which is why builds can't be committed. GitHub needs you to approve the updated ones.",
+  repo_not_accessible:
+    "The app is installed but can't see a hackclubranked repo on your account. Create it from the template if you haven't yet, then add it to the app's repository access.",
+};
+
+function githubProblemCopy(installation?: GitHubInstallation | null) {
+  const problem = installation?.problem ?? "not_connected";
+  const copy = GITHUB_PROBLEM_COPY[problem];
+  if (problem !== "permissions_pending" || !installation?.missingPermissions.length)
+    return copy;
+  return `${copy} Missing: ${installation.missingPermissions.join(", ")}.`;
+}
+
 function OnboardingModal({
   step,
   avatar,
@@ -2199,6 +2237,8 @@ function OnboardingModal({
   onBackToAvatar,
   onSubmitUsername,
   onContinueGithubTemplate,
+  githubInstallation,
+  onRecheckGithub,
   onSelectExperience,
   close,
 }: {
@@ -2210,10 +2250,13 @@ function OnboardingModal({
   onBackToAvatar?: () => void;
   onSubmitUsername?: (username: string) => Promise<string | null>;
   onContinueGithubTemplate?: () => void;
+  githubInstallation?: GitHubInstallation | null;
+  onRecheckGithub?: () => Promise<void> | void;
   onSelectExperience?: (e: Experience) => void;
   close: () => void;
 }) {
   const [templateOpened, setTemplateOpened] = useState(false);
+  const [rechecking, setRechecking] = useState(false);
   const [usernameDraft, setUsernameDraft] = useState("");
   const [usernameError, setUsernameError] = useState<string | null>(null);
   const [usernameSaving, setUsernameSaving] = useState(false);
@@ -2385,15 +2428,68 @@ function OnboardingModal({
             <div className="connect-badge">
               <Icon name="github" size={30} />
             </div>
-            <h2 id="onboarding-title">Connect GitHub</h2>
-            <p>
-              Install the Ranked GitHub App and grant it access to the{" "}
-              <strong>hackclubranked</strong> repo you just made — it only
-              ever gets access to that one repo, not everything you own.
-            </p>
-            <a className="primary-button" href="/api/auth/github/start">
-              <Icon name="github" size={16} /> connect GitHub
-            </a>
+            <h2 id="onboarding-title">
+              {githubInstallation?.problem === "permissions_pending"
+                ? "Approve the app's permissions"
+                : "Install the Ranked app"}
+            </h2>
+            <p>{githubProblemCopy(githubInstallation)}</p>
+            {/* An installation that already exists can't be fixed by
+                installing again — GitHub only shows the pending-permission
+                prompt on the installation's own settings page. */}
+            {githubInstallation?.problem === "permissions_pending" ? (
+              <a
+                className="primary-button"
+                href={githubInstallation.settingsUrl}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <Icon name="github" size={16} /> approve on GitHub{" "}
+                <Icon name="external" size={14} />
+              </a>
+            ) : githubInstallation?.problem === "repo_not_accessible" ? (
+              <>
+                <a
+                  className="primary-button"
+                  href={GITHUB_TEMPLATE_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <Icon name="github" size={16} /> create hackclubranked repo
+                </a>
+                <a
+                  className="onboarding-back github-template-link"
+                  href={githubInstallation.settingsUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  already made it — give the app access
+                </a>
+              </>
+            ) : (
+              <a className="primary-button" href="/api/auth/github/start">
+                <Icon name="github" size={16} /> install on hackclubranked
+              </a>
+            )}
+            {/* GitHub sends people back to its own confirmation page after
+                the settings/template detours above, so there has to be a way
+                to re-run the check without another round through OAuth. */}
+            {githubInstallation?.problem &&
+              githubInstallation.problem !== "not_connected" &&
+              onRecheckGithub && (
+                <button
+                  className="onboarding-back"
+                  disabled={rechecking}
+                  onClick={() => {
+                    setRechecking(true);
+                    void Promise.resolve(onRecheckGithub()).finally(() =>
+                      setRechecking(false),
+                    );
+                  }}
+                >
+                  {rechecking ? "checking…" : "done on GitHub — check again"}
+                </button>
+              )}
           </div>
         )}
 
@@ -2464,11 +2560,13 @@ function Lobby({
   toast,
   user,
   onMatched,
+  onGithubBlocked,
 }: {
   navigate: (s: Screen) => void;
   toast: (m: string) => void;
   user: NonNullable<AuthState["user"]>;
   onMatched: (match: ActiveMatch, media: MediaPrefs) => void;
+  onGithubBlocked: () => void;
 }) {
   const [mode, setMode] = useState<Mode>("duo");
   const [length, setLength] = useState(30);
@@ -2639,6 +2737,17 @@ function Lobby({
       if (result.code === "hackatime_required") {
         setMatching(false);
         window.location.assign("/api/auth/hackatime/start");
+        return;
+      }
+      // Which fix this needs depends on why it failed — a missing
+      // installation, permissions awaiting approval, or an unreachable repo
+      // all want different destinations on GitHub — so hand it to the
+      // onboarding step that already spells each one out rather than
+      // guessing with a redirect.
+      if (result.code === "github_install_required") {
+        setMatching(false);
+        toast(result.error ?? "Finish setting up the Ranked GitHub App");
+        onGithubBlocked();
         return;
       }
       if (!response.ok && result.code !== "vote_required") {
@@ -5707,6 +5816,19 @@ function Match({
                     >
                       create hackclubranked repo
                     </a>
+                    {/* The repo existing but not being in the app's
+                        installation looks identical to it not existing (see
+                        GitHubRepoNotAccessibleError), so offer both fixes. */}
+                    {publishState.actionUrl && (
+                      <a
+                        className="github-connect github-connect-underline"
+                        href={publishState.actionUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        already made it — give the app access
+                      </a>
+                    )}
                   </div>
                 ) : publishState.code ===
                   "github_permission_required" ? (
@@ -6977,6 +7099,11 @@ export default function RankedApp() {
   // just a local acknowledgement gating the "connect GitHub" step behind the
   // "create the repo" step once per visit, not a persisted account fact.
   const [githubTemplateStepDone, setGithubTemplateStepDone] = useState(false);
+  // Null until the check has run; onboarding treats that as "no known
+  // problem" so a player whose setup is fine never sees the GitHub step
+  // flash back up while this is in flight.
+  const [githubInstallation, setGithubInstallation] =
+    useState<GitHubInstallation | null>(null);
   const [preAuthOpen, setPreAuthOpen] = useState(false);
   const [preAuthStep, setPreAuthStep] = useState<"avatar" | "hackclub">(
     "avatar",
@@ -7022,6 +7149,20 @@ export default function RankedApp() {
         );
       })
       .catch(() => undefined);
+  }, []);
+
+  const refreshGithubInstallation = useCallback(async () => {
+    const installation = await fetch("/api/github/installation", {
+      credentials: "include",
+    })
+      .then((response) => (response.ok ? (response.json() as Promise<GitHubInstallation>) : null))
+      .catch(() => null);
+    if (!installation) return;
+    setGithubInstallation(installation);
+    // A connection that can't publish reopens onboarding even for a player
+    // who already finished every step — that's exactly the population the
+    // install-less flow left behind.
+    if (installation.problem) setOnboardingOpen(true);
   }, []);
 
   const handleBannerChanged = useCallback((color: string) => {
@@ -7072,6 +7213,7 @@ export default function RankedApp() {
         );
         if (next.user) {
           refreshShopInventory();
+          void refreshGithubInstallation();
           const queue = await fetch("/api/matchmaking/queue")
             .then((response) => response.json())
             .catch(() => null);
@@ -7088,6 +7230,21 @@ export default function RankedApp() {
     if (params.get("github") === "connected")
       window.setTimeout(
         () => toast("GitHub connected, publishing is ready"),
+        0,
+      );
+    // The callback reports the specific reason a brand-new connection still
+    // can't publish; the onboarding step spells it out, so this is just the
+    // nudge that setup isn't finished.
+    if (
+      ["not_installed", "permissions_pending", "repo_not_accessible"].includes(
+        params.get("github") ?? "",
+      )
+    )
+      window.setTimeout(
+        () =>
+          toast(
+            "GitHub is connected but can't publish yet — finish the app setup",
+          ),
         0,
       );
     if (params.get("hackatime") === "connected")
@@ -7114,7 +7271,24 @@ export default function RankedApp() {
       );
     if (["auth", "github", "hackatime"].some((key) => params.has(key)))
       window.history.replaceState({}, "", window.location.pathname);
-  }, [toast, refreshShopInventory]);
+  }, [toast, refreshShopInventory, refreshGithubInstallation]);
+
+  // Connected *and* able to publish. Onboarding used to stop at the first
+  // half, which is how players finished setup with an app that had no access
+  // to their repo. An unfinished check counts as ready so nobody is held on
+  // this step by a slow or unreachable GitHub.
+  const githubPublishReady =
+    Boolean(auth.github) && !githubInstallation?.problem;
+
+  // The "create your repo" step only makes sense while the repo might be
+  // what's missing. Someone bounced here because their installation is
+  // awaiting permission approval already has the repo, and walking them
+  // through making a second one would be actively misleading.
+  const githubProblem = githubInstallation?.problem;
+  const needsRepoStep =
+    !githubProblem ||
+    githubProblem === "not_connected" ||
+    githubProblem === "repo_not_accessible";
 
   const navigate = (next: Screen) => {
     setScreen(next);
@@ -7374,6 +7548,7 @@ export default function RankedApp() {
           toast={toast}
           user={auth.user}
           onMatched={onMatched}
+          onGithubBlocked={() => void refreshGithubInstallation()}
         />
       )}
       {screen === "lobby" && !auth.user && (
@@ -7472,9 +7647,9 @@ export default function RankedApp() {
           step={
             !auth.user.slackUsername
               ? "username"
-              : !auth.github && !githubTemplateStepDone
+              : !githubPublishReady && needsRepoStep && !githubTemplateStepDone
                 ? "github-template"
-                : !auth.github
+                : !githubPublishReady
                   ? "github"
                   : !auth.hackatime
                     ? "hackatime"
@@ -7482,6 +7657,8 @@ export default function RankedApp() {
           }
           onSubmitUsername={saveSlackUsername}
           onContinueGithubTemplate={() => setGithubTemplateStepDone(true)}
+          githubInstallation={githubInstallation}
+          onRecheckGithub={refreshGithubInstallation}
           onSelectExperience={(experience) => void saveExperience(experience)}
           close={() => setOnboardingOpen(false)}
         />

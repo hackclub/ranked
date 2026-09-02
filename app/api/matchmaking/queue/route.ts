@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { currentUser } from "@/app/lib/current-user";
+import { rankedPublishBlock } from "@/app/lib/github";
+import { decryptSession, SESSION_COOKIE } from "@/app/lib/session";
 import { activeMatch, generateMatchTheme } from "@/app/lib/match-lifecycle";
 import { getVoteGate } from "@/app/lib/vote-gate";
 import { logAudit } from "@/app/lib/audit";
@@ -46,6 +48,12 @@ export async function POST(request: NextRequest) {
       { status: 403 },
     );
   }
+  // Publishing is the last step of every match and it needs the GitHub App
+  // installed on the player's hackclubranked repo, so that readiness is part
+  // of being allowed into a match at all (see rankedPublishBlock).
+  const session = await decryptSession(request.cookies.get(SESSION_COOKIE)?.value);
+  const githubBlock = await rankedPublishBlock(session?.github);
+  if (githubBlock) return NextResponse.json(githubBlock, { status: 403 });
   if (!recordingStorageConfigured()) {
     return NextResponse.json(
       {

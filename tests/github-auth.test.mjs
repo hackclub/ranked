@@ -6,7 +6,9 @@ import {
   exchangeGitHubCode,
   GitHubCredentialsError,
   GitHubPermissionError,
+  githubInstallUrl,
   publishWebsite,
+  rankedAccessStatus,
   refreshGitHubConnection,
 } from "../app/lib/github.ts";
 
@@ -178,4 +180,141 @@ test("publishing reports the installation permission upgrade when the commit is 
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("onboarding points at the installation URL, which is what grants repo access", () => {
+  assert.equal(
+    githubInstallUrl(),
+    "https://github.com/apps/hack-club-ranked/installations/new",
+  );
+  assert.equal(
+    githubInstallUrl("abc123"),
+    "https://github.com/apps/hack-club-ranked/installations/new?state=abc123",
+  );
+});
+
+test("a code from the installation flow is exchanged without a PKCE verifier", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalClientId = process.env.GITHUB_CLIENT_ID;
+  const originalClientSecret = process.env.GITHUB_CLIENT_SECRET;
+  process.env.GITHUB_CLIENT_ID = "client-id";
+  process.env.GITHUB_CLIENT_SECRET = "client-secret";
+  try {
+    const bodies = [];
+    const responses = [
+      new Response(JSON.stringify({ access_token: "ghu_token" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+      new Response(JSON.stringify({ login: "octocat" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    ];
+    globalThis.fetch = async (url, init = {}) => {
+      if (init.body) bodies.push(JSON.parse(init.body));
+      return responses.shift();
+    };
+
+    await exchangeGitHubCode(
+      "code",
+      null,
+      "https://ranked.example/api/auth/github/callback",
+    );
+    assert.equal("code_verifier" in bodies[0], false);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalClientId === undefined) delete process.env.GITHUB_CLIENT_ID;
+    else process.env.GITHUB_CLIENT_ID = originalClientId;
+    if (originalClientSecret === undefined)
+      delete process.env.GITHUB_CLIENT_SECRET;
+    else process.env.GITHUB_CLIENT_SECRET = originalClientSecret;
+  }
+});
+
+const json = (body, status = 200) =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+
+const withStubbedFetch = async (responses, run) => {
+  const originalFetch = globalThis.fetch;
+  const queue = [...responses];
+  globalThis.fetch = async () => queue.shift();
+  try {
+    return await run();
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+};
+
+const FULL_PERMISSIONS = {
+  contents: "write",
+  pages: "write",
+  administration: "write",
+  metadata: "read",
+};
+
+test("authorizing without installing is reported, not mistaken for a working connection", async () => {
+  const status = await withStubbedFetch(
+    [json({ login: "octocat" }), json({ installations: [] })],
+    () => rankedAccessStatus("token", "octocat"),
+  );
+  assert.equal(status.problem, "not_installed");
+  assert.equal(status.installUrl, githubInstallUrl());
+});
+
+test("an installation still on the app's older permissions is reported as pending", async () => {
+  const status = await withStubbedFetch(
+    [
+      json({ login: "octocat" }),
+      json({
+        installations: [
+          {
+            id: 1,
+            app_slug: "hack-club-ranked",
+            permissions: { pages: "write", metadata: "read" },
+          },
+        ],
+      }),
+    ],
+    () => rankedAccessStatus("token", "octocat"),
+  );
+  assert.equal(status.problem, "permissions_pending");
+  assert.deepEqual(status.missingPermissions, ["administration", "contents"]);
+});
+
+test("an installation that cannot see a hackclubranked repo is reported", async () => {
+  const status = await withStubbedFetch(
+    [
+      json({ login: "octocat" }),
+      json({
+        installations: [
+          { id: 1, app_slug: "hack-club-ranked", permissions: FULL_PERMISSIONS },
+        ],
+      }),
+      json({ message: "Not Found" }, 404),
+    ],
+    () => rankedAccessStatus("token", "octocat"),
+  );
+  assert.equal(status.problem, "repo_not_accessible");
+});
+
+test("a fully granted installation reports no problem", async () => {
+  const status = await withStubbedFetch(
+    [
+      json({ login: "octocat" }),
+      json({
+        installations: [
+          { id: 1, app_slug: "another-app", permissions: {} },
+          { id: 2, app_slug: "hack-club-ranked", permissions: FULL_PERMISSIONS },
+        ],
+      }),
+      json({ html_url: "https://example.test/octocat/hackclubranked" }),
+    ],
+    () => rankedAccessStatus("token", "octocat"),
+  );
+  assert.equal(status.problem, null);
+  assert.equal(status.login, "octocat");
 });

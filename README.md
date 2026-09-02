@@ -53,10 +53,23 @@ Create a developer app at `https://auth.hackclub.com/developer/apps` and configu
 Create a GitHub App and configure its user authorization flow:
 
 - Callback: `http://localhost:3000/api/auth/github/callback`
-- Environment: `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`
+- Environment: `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, and `GITHUB_APP_SLUG` (only to override the default `hack-club-ranked`)
 - Repository permissions: **Contents — Read and write**, **Pages — Read and write**, and **Administration — Read and write**
+- Enable **Request user authorization (OAuth) during installation**
 - Use the app's **Client ID**, not its numeric App ID. No classic OAuth `repo` scope is used.
 - Keep expiring user-to-server tokens enabled. Ranked stores and rotates the refresh token automatically.
+
+Installing the app and authorizing it are two different things on GitHub: `https://github.com/login/oauth/authorize` only establishes who the player is, and the user access token it returns can read their profile but cannot see a single repository. Only an installation (`https://github.com/apps/<slug>/installations/new`) asks for the `hackclubranked` repo and the repository permissions above. Both are required, in that order: `/api/auth/github/start` authorizes, and the callback then sends players on to `?mode=install` when the access check finds the app isn't installed.
+
+Leading with the installation URL instead looks tempting and is wrong. `installations/new` sends an account that already has the app to its existing installation's configure page, which issues no authorization code — so an install-first flow strands every returning player whose token expired, mid-publish. The authorize URL issues a code whether or not the app is installed, which makes it the only safe first hop. A one-shot `ranked_github_install_prompted` cookie stops the install detour from repeating for someone who cancels it.
+
+With **Request user authorization (OAuth) during installation** enabled, GitHub returns from the installation straight to the callback with an authorization code. The callback also handles arriving with only an `installation_id` (someone installing from the app's page, or that setting being off) by running the authorization leg itself.
+
+Because a code from the installation flow is issued without a `code_challenge`, it must be exchanged without a `code_verifier`; codes from `?mode=authorize` keep their PKCE pair. The callback tells them apart with a short-lived `ranked_github_flow` cookie.
+
+Matchmaking will not hand out a match to a player who can't publish one: `/api/matchmaking/queue`'s POST runs `rankedPublishBlock` and answers `github_install_required` (with the specific problem and the URL that fixes it) alongside its existing Hackatime and voting gates. That is what converts existing players — the check happens when they ready up, a 30-second detour, instead of after a finished build has nowhere to go. It deliberately fails open: an unreachable GitHub, or an access token too near expiry to check without spending its rotating refresh token, lets them queue rather than holding matchmaking closed.
+
+`/api/github/installation` reports whether a connection can actually publish — installed, holding the current repository permissions (an installation stays on its original permissions until its owner approves ones the app added later), and able to see a `hackclubranked` repo. Onboarding will not move past the GitHub step until that check passes, so a player cannot reach the end of a match only to find the app has no access.
 
 When the timer ends, every participant chooses a build name. Ranked commits the build into a folder of that name inside a single `hackclubranked` repository in the participant's connected GitHub account and enables GitHub Pages from its `main` branch. GitHub's Pages creation endpoint requires both Pages and Administration write permissions; Administration remains limited to the selected `hackclubranked` repository. Existing installations must approve newly-added repository permissions before they take effect. The player creates that repository from the Ranked template and grants the GitHub App access to it first. Every later match adds another folder to the same repo instead of creating a new one. Duo teammates publish the same finished team build independently to their own accounts; voting opens after every player has published.
 
