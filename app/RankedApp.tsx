@@ -2215,7 +2215,7 @@ const GITHUB_PROBLEM_COPY: Record<GitHubAccessProblem, string> = {
   not_installed:
     "Ranked knows who you are on GitHub, but the app was never installed on your account, so it can't see any of your repos. Install it and pick your hackclubranked repo.",
   permissions_pending:
-    "Your installation is still running on the app's older permissions, which is why builds can't be committed. GitHub needs you to approve the updated ones.",
+    "Your installation is still running on the app's older permissions, which is why builds can't be committed. On GitHub, click “Review request” and then “Accept new permissions”, then come back and check again.",
   repo_not_accessible:
     "The app is installed but can't see a hackclubranked repo on your account. Create it from the template if you haven't yet, then add it to the app's repository access.",
 };
@@ -2444,7 +2444,7 @@ function OnboardingModal({
                 target="_blank"
                 rel="noreferrer"
               >
-                <Icon name="github" size={16} /> approve on GitHub{" "}
+                <Icon name="github" size={16} /> review the request on GitHub{" "}
                 <Icon name="external" size={14} />
               </a>
             ) : githubInstallation?.problem === "repo_not_accessible" ? (
@@ -3740,6 +3740,7 @@ function Match({
     pagesUrl?: string;
     airtableStatus?: string;
     actionUrl?: string;
+    problem?: string | null;
   }>({ loading: false });
   const [submissionProfile, setSubmissionProfile] = useState<{
     loading: boolean;
@@ -4303,13 +4304,16 @@ function Match({
         pagesUrl?: string;
         airtableStatus?: string;
         installationUrl?: string;
+        problem?: string | null;
       };
       if (result.code === "hca_profile_required") {
         window.location.assign("/api/auth/hackclub/start");
         return;
       }
+      // Their installation is fine; it's the token that expired, so this
+      // wants the authorization leg rather than the install screen.
       if (result.code === "github_reconnect_required") {
-        window.location.assign("/api/auth/github/start");
+        window.location.assign("/api/auth/github/start?mode=authorize");
         return;
       }
       if (
@@ -4321,6 +4325,7 @@ function Match({
           error: result.error,
           code: result.code,
           actionUrl: result.installationUrl,
+          problem: result.problem,
         });
         return;
       }
@@ -5843,7 +5848,9 @@ function Match({
                       target="_blank"
                       rel="noreferrer"
                     >
-                      approve GitHub App permissions
+                      {publishState.problem === "not_installed"
+                        ? "install the Ranked GitHub App"
+                        : "fix the Ranked GitHub App's access"}
                     </a>
                   </div>
                 ) : (

@@ -25,11 +25,20 @@ export function githubInstallUrl(state?: string) {
   return `https://github.com/apps/${GITHUB_APP_SLUG}/installations/new${params}`;
 }
 
-// Sends the player to their existing installation instead of a fresh one, so
-// they land on the repo-selection/permission-approval screen for the app they
-// already have rather than being asked to install it a second time.
+// The list of every app a player has installed — only a fallback, for when
+// the installation's own id isn't known. It makes them hunt for Ranked among
+// their apps and then find Configure, so prefer the per-installation URL
+// below wherever the id is to hand.
 export const GITHUB_INSTALLATION_SETTINGS_URL =
   "https://github.com/settings/installations";
+
+// The installation's own settings page, which is where the "Review request"
+// prompt for permissions the app has since added actually appears — the one
+// click a player needs, instead of a list to search.
+export const githubInstallationSettingsUrl = (installationId?: number) =>
+  installationId
+    ? `https://github.com/settings/installations/${installationId}`
+    : GITHUB_INSTALLATION_SETTINGS_URL;
 
 // GITHUB_CLIENT_ID/SECRET here are a GitHub App's "user authorization" OAuth
 // credentials, not a classic OAuth App's — deliberately, so the resulting
@@ -273,7 +282,14 @@ export type RankedAccessStatus = {
   problem: RankedAccessProblem | null;
   missingPermissions: string[];
   installUrl: string;
+  // Points at the installation itself once one is found, and at the list of
+  // installed apps when there is none to point at.
   settingsUrl: string;
+  installationId?: number;
+  // Exactly what GitHub reported for the installation, so a disagreement
+  // between this check and GitHub's own UI can be read off the response
+  // instead of guessed at.
+  grantedPermissions?: Record<string, string> | null;
 };
 
 type UserInstallation = {
@@ -306,12 +322,36 @@ export async function rankedAccessStatus(
   );
   if (!installation) return { ...base, problem: "not_installed" };
 
-  const granted = installation.permissions ?? {};
-  const missingPermissions = Object.keys(REQUIRED_INSTALLATION_PERMISSIONS)
-    .filter((name) => granted[name] !== "write" && granted[name] !== "admin")
-    .sort();
+  // Every remaining answer is about this specific installation, so point at
+  // it directly from here on.
+  const installed = {
+    ...base,
+    installationId: installation.id,
+    settingsUrl: githubInstallationSettingsUrl(installation.id),
+  };
+
+  // An installation whose permissions map came back absent or empty tells us
+  // nothing, and must not be read as "every permission is missing" — that
+  // sends players to approve a request GitHub never made, onto a page with
+  // no Review request button to click and nothing they can do. Only a map we
+  // positively read says anything: GitHub lists every granted permission in
+  // it, so within a populated map an absent key really is absent.
+  const granted = installation.permissions;
+  const missingPermissions =
+    granted && Object.keys(granted).length
+      ? Object.keys(REQUIRED_INSTALLATION_PERMISSIONS)
+          .filter(
+            (name) => granted[name] !== "write" && granted[name] !== "admin",
+          )
+          .sort()
+      : [];
   if (missingPermissions.length) {
-    return { ...base, missingPermissions, problem: "permissions_pending" };
+    return {
+      ...installed,
+      missingPermissions,
+      grantedPermissions: granted ?? null,
+      problem: "permissions_pending",
+    };
   }
 
   try {
@@ -320,10 +360,15 @@ export async function rankedAccessStatus(
       `https://api.github.com/repos/${login}/${RANKED_REPO}`,
     );
   } catch (error) {
-    if (isNotFound(error)) return { ...base, problem: "repo_not_accessible" };
+    if (isNotFound(error))
+      return {
+        ...installed,
+        grantedPermissions: granted ?? null,
+        problem: "repo_not_accessible",
+      };
     throw error;
   }
-  return { ...base, problem: null };
+  return { ...installed, grantedPermissions: granted ?? null, problem: null };
 }
 
 export type RankedPublishBlock = {
@@ -348,14 +393,14 @@ const BLOCK_MESSAGES: Record<RankedAccessProblem | "not_connected", string> = {
 
 const publishBlock = (
   problem: RankedAccessProblem | "not_connected",
-  missingPermissions: string[] = [],
+  access?: Pick<RankedAccessStatus, "missingPermissions" | "settingsUrl">,
 ): RankedPublishBlock => ({
   error: BLOCK_MESSAGES[problem],
   code: "github_install_required",
   problem,
-  missingPermissions,
+  missingPermissions: access?.missingPermissions ?? [],
   installUrl: githubInstallUrl(),
-  settingsUrl: GITHUB_INSTALLATION_SETTINGS_URL,
+  settingsUrl: access?.settingsUrl ?? GITHUB_INSTALLATION_SETTINGS_URL,
 });
 
 // Null when a player can publish (or when we can't tell), and the blocking
@@ -389,9 +434,7 @@ export async function rankedPublishBlock(
       connection.accessToken,
       connection.login,
     );
-    return access.problem
-      ? publishBlock(access.problem, access.missingPermissions)
-      : null;
+    return access.problem ? publishBlock(access.problem, access) : null;
   } catch (error) {
     // A token GitHub itself rejects is a real blocker — that has to be
     // reconnected before a match, not after one.

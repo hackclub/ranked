@@ -283,6 +283,12 @@ test("an installation still on the app's older permissions is reported as pendin
   );
   assert.equal(status.problem, "permissions_pending");
   assert.deepEqual(status.missingPermissions, ["administration", "contents"]);
+  // Straight to the installation's own page, where the "Review request"
+  // prompt lives — not the list of every app they've installed.
+  assert.equal(
+    status.settingsUrl,
+    "https://github.com/settings/installations/1",
+  );
 });
 
 test("an installation that cannot see a hackclubranked repo is reported", async () => {
@@ -317,4 +323,26 @@ test("a fully granted installation reports no problem", async () => {
   );
   assert.equal(status.problem, null);
   assert.equal(status.login, "octocat");
+});
+
+test("an unreadable permissions map is not mistaken for missing permissions", async () => {
+  // GitHub returning an installation without a permissions map means "we
+  // didn't tell you", not "you have none" — inventing a pending approval
+  // here would send players to a page with nothing to approve.
+  for (const permissions of [undefined, {}]) {
+    const status = await withStubbedFetch(
+      [
+        json({ login: "octocat" }),
+        json({
+          installations: [
+            { id: 7, app_slug: "hack-club-ranked", permissions },
+          ],
+        }),
+        json({ html_url: "https://example.test/octocat/hackclubranked" }),
+      ],
+      () => rankedAccessStatus("token", "octocat"),
+    );
+    assert.equal(status.problem, null);
+    assert.deepEqual(status.missingPermissions, []);
+  }
 });

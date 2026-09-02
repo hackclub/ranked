@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { publishWebsite, PUBLISHABLE_FILE_NAME, GitHubCredentialsError, GitHubPermissionError, GitHubRepoNotAccessibleError, GITHUB_INSTALLATION_SETTINGS_URL, githubInstallUrl, refreshGitHubConnection, type DirectoryBuild } from "@/app/lib/github";
+import { publishWebsite, PUBLISHABLE_FILE_NAME, GitHubCredentialsError, GitHubPermissionError, GitHubRepoNotAccessibleError, GITHUB_INSTALLATION_SETTINGS_URL, githubInstallUrl, rankedAccessStatus, refreshGitHubConnection, type DirectoryBuild } from "@/app/lib/github";
 import { decryptSession, encryptSession, SESSION_COOKIE, sessionCookieOptions, type GitHubConnection } from "@/app/lib/session";
 import { logAudit } from "@/app/lib/audit";
 import {
@@ -164,11 +164,26 @@ export async function POST(request: NextRequest) {
       );
     }
     if (error instanceof GitHubPermissionError) {
+      // A 403 on its own can't say why. The overwhelmingly common cause is
+      // an app that was authorized but never installed — and telling that
+      // player to "approve permissions" sends them to a page with no
+      // installation on it, no Review request to click, and nothing they can
+      // do. Ask what's actually wrong before naming a fix.
+      const access = await rankedAccessStatus(
+        github.accessToken,
+        github.login,
+      ).catch(() => null);
+      const notInstalled = access?.problem === "not_installed";
       return githubResponse(
         {
-          error: error.message,
+          error: notInstalled
+            ? "The Ranked GitHub App isn't installed on your account, so it can't commit your build. Install it on your hackclubranked repo, then publish again."
+            : error.message,
           code: "github_permission_required",
-          installationUrl: GITHUB_INSTALLATION_SETTINGS_URL,
+          problem: access?.problem ?? null,
+          installationUrl: notInstalled
+            ? githubInstallUrl()
+            : (access?.settingsUrl ?? GITHUB_INSTALLATION_SETTINGS_URL),
         },
         { status: 409 },
       );
