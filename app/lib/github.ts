@@ -295,6 +295,8 @@ export type RankedAccessStatus = {
 type UserInstallation = {
   id: number;
   app_slug?: string;
+  target_type?: string;
+  account?: { login?: string; type?: string } | null;
   permissions?: Record<string, string>;
 };
 
@@ -317,9 +319,23 @@ export async function rankedAccessStatus(
   const { installations } = await githubRequest<{
     installations: UserInstallation[];
   }>(token, "https://api.github.com/user/installations?per_page=100");
+  // This endpoint lists every installation the player can *see*, not just
+  // their own — the app installed on the Hack Club org shows up for every
+  // member of it. Matching on the app alone could therefore pick the org's
+  // installation: the wrong id to link to (an org installation lives under
+  // /organizations/<org>/settings/installations, not /settings), and the
+  // wrong set of permissions to check, which manufactures a pending
+  // approval that has nothing to approve. A player's hackclubranked repo is
+  // always on their personal account, so their own installation is the only
+  // one that can grant access to it.
   const installation = installations.find(
-    (candidate) => candidate.app_slug === GITHUB_APP_SLUG,
+    (candidate) =>
+      candidate.app_slug === GITHUB_APP_SLUG &&
+      candidate.target_type === "User" &&
+      candidate.account?.login?.toLowerCase() === login.toLowerCase(),
   );
+  // An org installation without a personal one isn't "installed" for these
+  // purposes — it can't reach their own repo.
   if (!installation) return { ...base, problem: "not_installed" };
 
   // Every remaining answer is about this specific installation, so point at

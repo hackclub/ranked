@@ -274,6 +274,8 @@ test("an installation still on the app's older permissions is reported as pendin
           {
             id: 1,
             app_slug: "hack-club-ranked",
+            target_type: "User",
+            account: { login: "octocat", type: "User" },
             permissions: { pages: "write", metadata: "read" },
           },
         ],
@@ -297,7 +299,13 @@ test("an installation that cannot see a hackclubranked repo is reported", async 
       json({ login: "octocat" }),
       json({
         installations: [
-          { id: 1, app_slug: "hack-club-ranked", permissions: FULL_PERMISSIONS },
+          {
+            id: 1,
+            app_slug: "hack-club-ranked",
+            target_type: "User",
+            account: { login: "octocat", type: "User" },
+            permissions: FULL_PERMISSIONS,
+          },
         ],
       }),
       json({ message: "Not Found" }, 404),
@@ -314,7 +322,13 @@ test("a fully granted installation reports no problem", async () => {
       json({
         installations: [
           { id: 1, app_slug: "another-app", permissions: {} },
-          { id: 2, app_slug: "hack-club-ranked", permissions: FULL_PERMISSIONS },
+          {
+            id: 2,
+            app_slug: "hack-club-ranked",
+            target_type: "User",
+            account: { login: "octocat", type: "User" },
+            permissions: FULL_PERMISSIONS,
+          },
         ],
       }),
       json({ html_url: "https://example.test/octocat/hackclubranked" }),
@@ -335,7 +349,13 @@ test("an unreadable permissions map is not mistaken for missing permissions", as
         json({ login: "octocat" }),
         json({
           installations: [
-            { id: 7, app_slug: "hack-club-ranked", permissions },
+            {
+              id: 7,
+              app_slug: "hack-club-ranked",
+              target_type: "User",
+              account: { login: "octocat", type: "User" },
+              permissions,
+            },
           ],
         }),
         json({ html_url: "https://example.test/octocat/hackclubranked" }),
@@ -345,4 +365,62 @@ test("an unreadable permissions map is not mistaken for missing permissions", as
     assert.equal(status.problem, null);
     assert.deepEqual(status.missingPermissions, []);
   }
+});
+
+test("the player's own installation is used, not an org's that they can merely see", async () => {
+  // GET /user/installations lists the app installed on the Hack Club org for
+  // every member of it. Picking that one would link to an id that isn't even
+  // under /settings/installations and compare against the wrong permissions.
+  const status = await withStubbedFetch(
+    [
+      json({ login: "octocat" }),
+      json({
+        installations: [
+          {
+            id: 157327607,
+            app_slug: "hack-club-ranked",
+            target_type: "Organization",
+            account: { login: "hackclub", type: "Organization" },
+            permissions: { metadata: "read" },
+          },
+          {
+            id: 158569756,
+            app_slug: "hack-club-ranked",
+            target_type: "User",
+            account: { login: "octocat", type: "User" },
+            permissions: FULL_PERMISSIONS,
+          },
+        ],
+      }),
+      json({ html_url: "https://example.test/octocat/hackclubranked" }),
+    ],
+    () => rankedAccessStatus("token", "octocat"),
+  );
+  assert.equal(status.problem, null);
+  assert.equal(status.installationId, 158569756);
+  assert.equal(
+    status.settingsUrl,
+    "https://github.com/settings/installations/158569756",
+  );
+});
+
+test("an org-only installation cannot reach the player's own repo", async () => {
+  const status = await withStubbedFetch(
+    [
+      json({ login: "octocat" }),
+      json({
+        installations: [
+          {
+            id: 157327607,
+            app_slug: "hack-club-ranked",
+            target_type: "Organization",
+            account: { login: "hackclub", type: "Organization" },
+            permissions: FULL_PERMISSIONS,
+          },
+        ],
+      }),
+    ],
+    () => rankedAccessStatus("token", "octocat"),
+  );
+  assert.equal(status.problem, "not_installed");
 });

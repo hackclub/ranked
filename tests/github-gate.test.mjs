@@ -64,6 +64,8 @@ test("an installation awaiting permission approval blocks with what is missing",
           {
             id: 1,
             app_slug: "hack-club-ranked",
+            target_type: "User",
+            account: { login: "octocat", type: "User" },
             permissions: { pages: "write", administration: "write" },
           },
         ],
@@ -81,7 +83,13 @@ test("a working installation does not block the queue", async () => {
       json({ login: "octocat" }),
       json({
         installations: [
-          { id: 1, app_slug: "hack-club-ranked", permissions: FULL_PERMISSIONS },
+          {
+            id: 1,
+            app_slug: "hack-club-ranked",
+            target_type: "User",
+            account: { login: "octocat", type: "User" },
+            permissions: FULL_PERMISSIONS,
+          },
         ],
       }),
       json({ html_url: "https://example.test/octocat/hackclubranked" }),
