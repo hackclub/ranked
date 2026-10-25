@@ -1,6 +1,4 @@
-import { pathToFileURL } from "node:url";
-import { neon } from "@neondatabase/serverless";
-import { config } from "dotenv";
+import { connect, databaseFromEnv, hasConfirmation, runIfInvokedDirectly } from "./db.mjs";
 
 /**
  * Permanently removes every match and its foreign-key-dependent records.
@@ -31,53 +29,17 @@ export async function clearAllMatches(sql) {
 }
 
 async function runFromCommandLine() {
-  config({ path: ".env.local" });
-
-  const confirmation = "CLEAR_ALL_MATCHES";
-  const confirmIndex = process.argv.indexOf("--confirm");
-  const confirmed =
-    confirmIndex !== -1 && process.argv[confirmIndex + 1] === confirmation;
-
-  if (!confirmed) {
-    console.error("Match cleanup cancelled.");
-    console.error(
-      `Run: npm run db:clear-matches -- --confirm ${confirmation}`,
-    );
-    process.exitCode = 1;
+  if (!hasConfirmation("CLEAR_ALL_MATCHES", "db:clear-matches", "Match cleanup cancelled.")) {
     return;
   }
 
-  const databaseUrl = process.env.DATABASE_URL;
-  if (!databaseUrl) {
-    console.error(
-      "DATABASE_URL is not configured. Set it in .env.local or the environment.",
-    );
-    process.exitCode = 1;
-    return;
-  }
+  const database = databaseFromEnv();
+  if (!database) return;
 
-  let target;
-  try {
-    const parsed = new URL(databaseUrl);
-    target = `${parsed.hostname}${parsed.pathname}`;
-  } catch {
-    console.error("DATABASE_URL is not a valid URL.");
-    process.exitCode = 1;
-    return;
-  }
-
-  console.log(`Clearing all Ranked matches from ${target}...`);
-  const deleted = await clearAllMatches(neon(databaseUrl));
+  console.log(`Clearing all Ranked matches from ${database.target}...`);
+  const deleted = await clearAllMatches(connect(database.url));
   console.log("Match cleanup complete.");
   console.log("Deleted:", deleted);
 }
 
-const invokedDirectly =
-  process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
-
-if (invokedDirectly) {
-  runFromCommandLine().catch((error) => {
-    console.error("Match cleanup failed.", error);
-    process.exitCode = 1;
-  });
-}
+runIfInvokedDirectly(import.meta.url, runFromCommandLine, "Match cleanup failed.");

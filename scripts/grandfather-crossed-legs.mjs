@@ -1,27 +1,4 @@
-import { pathToFileURL } from "node:url";
-import { neon, neonConfig } from "@neondatabase/serverless";
-import { config } from "dotenv";
-
-// Mirrors db/index.ts: against a local Postgres, Neon's HTTP driver has to
-// be routed through local-neon-http-proxy (see docker-compose.yml) instead
-// of resolving Neon's own cloud endpoint.
-function isLocalDatabaseUrl(url) {
-  try {
-    const { hostname } = new URL(url);
-    return hostname === "localhost" || hostname === "127.0.0.1";
-  } catch {
-    return false;
-  }
-}
-
-function connect(databaseUrl) {
-  if (isLocalDatabaseUrl(databaseUrl)) {
-    neonConfig.fetchEndpoint = (host) => `http://${host}:4444/sql`;
-    neonConfig.useSecureWebSocket = false;
-    neonConfig.poolQueryViaFetch = true;
-  }
-  return neon(databaseUrl);
-}
+import { connect, databaseFromEnv, runIfInvokedDirectly } from "./db.mjs";
 
 /**
  * Limbs value 3 ("Crossed Legs") moved from the free starter pool into a
@@ -49,38 +26,12 @@ export async function grandfatherCrossedLegs(sql) {
 }
 
 async function runFromCommandLine() {
-  config({ path: ".env.local" });
+  const database = databaseFromEnv();
+  if (!database) return;
 
-  const databaseUrl = process.env.DATABASE_URL;
-  if (!databaseUrl) {
-    console.error(
-      "DATABASE_URL is not configured. Set it in .env.local or the environment.",
-    );
-    process.exitCode = 1;
-    return;
-  }
-
-  let target;
-  try {
-    const parsed = new URL(databaseUrl);
-    target = `${parsed.hostname}${parsed.pathname}`;
-  } catch {
-    console.error("DATABASE_URL is not a valid URL.");
-    process.exitCode = 1;
-    return;
-  }
-
-  console.log(`Grandfathering existing "Crossed Legs" users on ${target}...`);
-  const result = await grandfatherCrossedLegs(connect(databaseUrl));
+  console.log(`Grandfathering existing "Crossed Legs" users on ${database.target}...`);
+  const result = await grandfatherCrossedLegs(connect(database.url));
   console.log(`Done. Granted ownership to ${result.grantedCount} user(s).`);
 }
 
-const invokedDirectly =
-  process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
-
-if (invokedDirectly) {
-  runFromCommandLine().catch((error) => {
-    console.error("Grandfathering failed.", error);
-    process.exitCode = 1;
-  });
-}
+runIfInvokedDirectly(import.meta.url, runFromCommandLine, "Grandfathering failed.");

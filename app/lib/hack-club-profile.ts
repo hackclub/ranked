@@ -1,7 +1,7 @@
+import { aesGcmDecrypt, aesGcmEncrypt, aesGcmKey } from "@/app/lib/aes-gcm";
 import type { HackClubAddress, HackClubIdentity } from "@/app/lib/hackclub";
 import { getSql } from "@/db";
 
-const encoder = new TextEncoder();
 const MAX_IDENTITY_LENGTH = 320;
 const MAX_ADDRESS_LENGTH = 500;
 
@@ -71,48 +71,21 @@ export function profileFromIdentity(
   };
 }
 
-function base64url(bytes: Uint8Array) {
-  return Buffer.from(bytes).toString("base64url");
-}
-
-function fromBase64url(value: string) {
-  return new Uint8Array(Buffer.from(value, "base64url"));
-}
-
 async function profileKey() {
   const secret = process.env.AUTH_SESSION_SECRET;
   if (!secret || secret.length < 32) {
     throw new Error("AUTH_SESSION_SECRET must be at least 32 characters.");
   }
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    encoder.encode(`ranked:hca-profile:v1:${secret}`),
-  );
-  return crypto.subtle.importKey("raw", digest, "AES-GCM", false, [
-    "encrypt",
-    "decrypt",
-  ]);
+  return aesGcmKey(`ranked:hca-profile:v1:${secret}`);
 }
 
 export async function encryptHackClubProfile(profile: StoredHackClubProfile) {
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const encrypted = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv },
-    await profileKey(),
-    encoder.encode(JSON.stringify(profile)),
-  );
-  return `${base64url(iv)}.${base64url(new Uint8Array(encrypted))}`;
+  return aesGcmEncrypt(await profileKey(), JSON.stringify(profile));
 }
 
 async function decryptHackClubProfile(value: string) {
-  const [iv, encrypted] = value.split(".");
-  if (!iv || !encrypted) throw new Error("Invalid encrypted HCA profile.");
-  const decrypted = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv: fromBase64url(iv) },
-    await profileKey(),
-    fromBase64url(encrypted),
-  );
-  return JSON.parse(new TextDecoder().decode(decrypted)) as StoredHackClubProfile;
+  const decrypted = await aesGcmDecrypt(await profileKey(), value, "HCA profile");
+  return JSON.parse(decrypted) as StoredHackClubProfile;
 }
 
 export async function getHackClubProfile(userId: string) {

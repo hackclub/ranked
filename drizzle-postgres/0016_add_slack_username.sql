@@ -1,1 +1,1 @@
-ALTER TABLE "users" ADD COLUMN "slack_username" text;
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "slack_username" text;

@@ -1,27 +1,4 @@
-import { pathToFileURL } from "node:url";
-import { neon, neonConfig } from "@neondatabase/serverless";
-import { config } from "dotenv";
-
-// Mirrors db/index.ts: against a local Postgres, Neon's HTTP driver has to
-// be routed through local-neon-http-proxy (see docker-compose.yml) instead
-// of resolving Neon's own cloud endpoint.
-function isLocalDatabaseUrl(url) {
-  try {
-    const { hostname } = new URL(url);
-    return hostname === "localhost" || hostname === "127.0.0.1";
-  } catch {
-    return false;
-  }
-}
-
-function connect(databaseUrl) {
-  if (isLocalDatabaseUrl(databaseUrl)) {
-    neonConfig.fetchEndpoint = (host) => `http://${host}:4444/sql`;
-    neonConfig.useSecureWebSocket = false;
-    neonConfig.poolQueryViaFetch = true;
-  }
-  return neon(databaseUrl);
-}
+import { connect, databaseFromEnv, runIfInvokedDirectly } from "./db.mjs";
 
 /**
  * daily_challenge_progress snapshots reward_elo/reward_h_bucks onto the row
@@ -66,38 +43,12 @@ export async function resyncDailyChallengeRewards(sql) {
 }
 
 async function runFromCommandLine() {
-  config({ path: ".env.local" });
+  const database = databaseFromEnv();
+  if (!database) return;
 
-  const databaseUrl = process.env.DATABASE_URL;
-  if (!databaseUrl) {
-    console.error(
-      "DATABASE_URL is not configured. Set it in .env.local or the environment.",
-    );
-    process.exitCode = 1;
-    return;
-  }
-
-  let target;
-  try {
-    const parsed = new URL(databaseUrl);
-    target = `${parsed.hostname}${parsed.pathname}`;
-  } catch {
-    console.error("DATABASE_URL is not a valid URL.");
-    process.exitCode = 1;
-    return;
-  }
-
-  console.log(`Resyncing today's unclaimed daily challenge rewards on ${target}...`);
-  const result = await resyncDailyChallengeRewards(connect(databaseUrl));
+  console.log(`Resyncing today's unclaimed daily challenge rewards on ${database.target}...`);
+  const result = await resyncDailyChallengeRewards(connect(database.url));
   console.log(`Done. Updated ${result.updatedCount} row(s).`);
 }
 
-const invokedDirectly =
-  process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
-
-if (invokedDirectly) {
-  runFromCommandLine().catch((error) => {
-    console.error("Resync failed.", error);
-    process.exitCode = 1;
-  });
-}
+runIfInvokedDirectly(import.meta.url, runFromCommandLine, "Resync failed.");

@@ -20,6 +20,8 @@
 
 # misc
 .DS_Store
+# Finder "Duplicate" copies
+* 2.*
 *.pem
 
 # debug

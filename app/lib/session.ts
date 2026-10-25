@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import { aesGcmDecrypt, aesGcmEncrypt, aesGcmKey } from "@/app/lib/aes-gcm";
 
 export const SESSION_COOKIE = "ranked_session";
 const SESSION_MAX_AGE = 60 * 60 * 24 * 30;
@@ -32,44 +33,23 @@ function sessionSecret() {
   return secret;
 }
 
-function base64url(bytes: Uint8Array) {
-  return Buffer.from(bytes).toString("base64url");
-}
-
-function fromBase64url(value: string) {
-  return new Uint8Array(Buffer.from(value, "base64url"));
-}
-
 async function encryptionKey() {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(sessionSecret()));
-  return crypto.subtle.importKey("raw", digest, "AES-GCM", false, ["encrypt", "decrypt"]);
+  return aesGcmKey(sessionSecret());
 }
 
 export async function encryptSession(session: Omit<RankedSession, "exp"> & { exp?: number }) {
-  const iv = crypto.getRandomValues(new Uint8Array(12));
   const payload: RankedSession = {
     ...session,
     exp: session.exp ?? Math.floor(Date.now() / 1000) + SESSION_MAX_AGE,
   };
-  const encrypted = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv },
-    await encryptionKey(),
-    new TextEncoder().encode(JSON.stringify(payload)),
-  );
-  return `${base64url(iv)}.${base64url(new Uint8Array(encrypted))}`;
+  return aesGcmEncrypt(await encryptionKey(), JSON.stringify(payload));
 }
 
 export async function decryptSession(value: string | undefined): Promise<RankedSession | null> {
   if (!value) return null;
-  const [iv, encrypted] = value.split(".");
-  if (!iv || !encrypted) return null;
   try {
-    const decrypted = await crypto.subtle.decrypt(
-      { name: "AES-GCM", iv: fromBase64url(iv) },
-      await encryptionKey(),
-      fromBase64url(encrypted),
-    );
-    const session = JSON.parse(new TextDecoder().decode(decrypted)) as RankedSession;
+    const decrypted = await aesGcmDecrypt(await encryptionKey(), value, "session");
+    const session = JSON.parse(decrypted) as RankedSession;
     if (!session.exp || session.exp < Math.floor(Date.now() / 1000)) return null;
     return session;
   } catch {

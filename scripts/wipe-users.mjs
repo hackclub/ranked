@@ -1,41 +1,15 @@
-import { neon } from "@neondatabase/serverless";
-import { config } from "dotenv";
+import { connect, databaseFromEnv, hasConfirmation } from "./db.mjs";
 
-config({ path: ".env.local" });
-
-const confirmation = "WIPE_ALL_USER_DATA";
-const confirmIndex = process.argv.indexOf("--confirm");
-const confirmed =
-  confirmIndex !== -1 && process.argv[confirmIndex + 1] === confirmation;
-
-if (!confirmed) {
-  console.error("Database wipe cancelled.");
-  console.error(
-    `Run: npm run db:wipe-users -- --confirm ${confirmation}`,
-  );
-  process.exit(1);
+if (!hasConfirmation("WIPE_ALL_USER_DATA", "db:wipe-users", "Database wipe cancelled.")) {
+  process.exit();
 }
 
-const databaseUrl = process.env.DATABASE_URL;
-if (!databaseUrl) {
-  console.error(
-    "DATABASE_URL is not configured. Set it in .env.local or the environment.",
-  );
-  process.exit(1);
-}
+const database = databaseFromEnv();
+if (!database) process.exit();
 
-let target;
-try {
-  const parsed = new URL(databaseUrl);
-  target = `${parsed.hostname}${parsed.pathname}`;
-} catch {
-  console.error("DATABASE_URL is not a valid URL.");
-  process.exit(1);
-}
+const sql = connect(database.url);
 
-const sql = neon(databaseUrl);
-
-console.log(`Wiping all Ranked user data from ${target}...`);
+console.log(`Wiping all Ranked user data from ${database.target}...`);
 
 const [before] = await sql`
   SELECT

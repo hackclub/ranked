@@ -1,28 +1,5 @@
-import { pathToFileURL } from "node:url";
 import { randomUUID } from "node:crypto";
-import { neon, neonConfig } from "@neondatabase/serverless";
-import { config } from "dotenv";
-
-// Mirrors db/index.ts: against a local Postgres, Neon's HTTP driver has to
-// be routed through local-neon-http-proxy (see docker-compose.yml) instead
-// of resolving Neon's own cloud endpoint.
-function isLocalDatabaseUrl(url) {
-  try {
-    const { hostname } = new URL(url);
-    return hostname === "localhost" || hostname === "127.0.0.1";
-  } catch {
-    return false;
-  }
-}
-
-function connect(databaseUrl) {
-  if (isLocalDatabaseUrl(databaseUrl)) {
-    neonConfig.fetchEndpoint = (host) => `http://${host}:4444/sql`;
-    neonConfig.useSecureWebSocket = false;
-    neonConfig.poolQueryViaFetch = true;
-  }
-  return neon(databaseUrl);
-}
+import { connect, databaseFromEnv, runIfInvokedDirectly } from "./db.mjs";
 
 /**
  * Creates fake "finished, awaiting votes" matches so the /vote screen has
@@ -92,31 +69,17 @@ export async function seedVoteMatches(sql, count = 3) {
 }
 
 async function runFromCommandLine() {
-  config({ path: ".env.local" });
-
-  const databaseUrl = process.env.DATABASE_URL;
-  if (!databaseUrl) {
-    console.error("DATABASE_URL is not configured. Set it in .env.local or the environment.");
-    process.exitCode = 1;
-    return;
-  }
+  const database = databaseFromEnv();
+  if (!database) return;
 
   const countArg = Number(process.argv[2]);
   const count = Number.isFinite(countArg) && countArg > 0 ? Math.floor(countArg) : 3;
 
-  const created = await seedVoteMatches(connect(databaseUrl), count);
+  const created = await seedVoteMatches(connect(database.url), count);
   console.log(`Seeded ${created.length} match(es) awaiting votes:`);
   for (const match of created) {
     console.log(`  ${match.matchId} — "${match.theme}" (${match.blueUser} vs ${match.redUser})`);
   }
 }
 
-const invokedDirectly =
-  process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
-
-if (invokedDirectly) {
-  runFromCommandLine().catch((error) => {
-    console.error("Seeding vote matches failed.", error);
-    process.exitCode = 1;
-  });
-}
+runIfInvokedDirectly(import.meta.url, runFromCommandLine, "Seeding vote matches failed.");

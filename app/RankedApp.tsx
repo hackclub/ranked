@@ -36,7 +36,6 @@ import {
   assetPath,
 } from "./components/GoofyGuyAvatar";
 import {
-  DEFAULT_AVATAR,
   SHOP_CATALOG,
   avatarAccent,
   normalizeAvatar,
