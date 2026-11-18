@@ -6,8 +6,10 @@ services:
       POSTGRES_USER: ranked
       POSTGRES_PASSWORD: ranked
       POSTGRES_DB: ranked
+    # Bound to loopback only: this database uses throwaway credentials and
+    # must not be reachable from the rest of the network.
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - ranked-postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -17,12 +19,12 @@ services:
       retries: 10
 
   neon-proxy:
-    image: ghcr.io/timowilhelm/local-neon-http-proxy:main
+    image: ghcr.io/timowilhelm/local-neon-http-proxy:main@sha256:cd2ae14edf2feafbc3330492de5c80506f77274c3bd013154cdef697bdeb768a
     restart: unless-stopped
     environment:
       PG_CONNECTION_STRING: postgres://ranked:ranked@postgres:5432/ranked
     ports:
-      - "4444:4444"
+      - "127.0.0.1:4444:4444"
     depends_on:
       postgres:
         condition: service_healthy

@@ -6,7 +6,8 @@
     "node": ">=22.13.0"
   },
   "scripts": {
-    "dev": "vinext dev --hostname 0.0.0.0",
+    "dev": "vinext dev",
+    "dev:lan": "vinext dev --hostname 0.0.0.0",
     "build": "vite build",
     "start": "node .output/server/index.mjs",
     "test": "NITRO_PRESET=vercel npm run build && node --test tests/*.test.mjs",
@@ -18,11 +19,12 @@
     "db:clear-matches": "node scripts/clear-matches.mjs",
     "db:seed-vote-matches": "node scripts/seed-vote-matches.mjs",
     "db:grandfather-crossed-legs": "node scripts/grandfather-crossed-legs.mjs",
-    "db:resync-daily-challenge-rewards": "node scripts/resync-daily-challenge-rewards.mjs"
+    "db:resync-daily-challenge-rewards": "node scripts/resync-daily-challenge-rewards.mjs",
+    "shop:orders": "node scripts/shop-shipping.mjs",
+    "shop:encrypt-shipping": "node scripts/shop-shipping.mjs --encrypt-legacy"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1118.0",
-    "@aws-sdk/s3-request-presigner": "^3.1118.0",
     "@liveblocks/client": "^3.23.0",
     "@liveblocks/node": "^3.23.0",
     "@liveblocks/yjs": "^3.23.0",
@@ -32,10 +34,10 @@
     "drizzle-orm": "0.45.2",
     "html-to-image": "^1.11.13",
     "monaco-editor": "^0.56.0",
-    "next": "16.2.11",
+    "next": "16.4.5",
     "nitro": "^3.0.260610-beta",
-    "react": "19.2.8",
-    "react-dom": "19.2.8",
+    "react": "19.2.9",
+    "react-dom": "19.2.9",
     "y-monaco": "^0.1.6",
     "y-protocols": "^1.0.7",
     "yjs": "^13.6.31"
@@ -52,11 +54,11 @@
     "eslint": "9.39.4",
     "eslint-config-next": "16.2.6",
     "pg": "^8.22.0",
-    "react-server-dom-webpack": "19.2.8",
+    "react-server-dom-webpack": "19.2.9",
     "tailwindcss": "4.2.1",
     "typescript": "5.9.3",
     "vinext": "0.0.50",
-    "vite": "8.0.16"
+    "vite": "8.1.6"
   },
   "type": "module",
   "packageManager": "pnpm@11.24.0+sha512.bd27e345e976dcb0be0b7a1228217b049a817e21b1f355c90dbe7dc46671895a8bc1e6d06c24554505ea93ea0b45f489a27ec1bfbc8de6a9659fca0f16fa0000"

@@ -1,12 +1,9 @@
 import {
   DeleteObjectsCommand,
   GetObjectCommand,
-  HeadObjectCommand,
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { RECORDING_UPLOAD_URL_TTL_SECONDS } from "@/app/lib/recording-policy";
 
 let cachedClient: S3Client | null = null;
 
@@ -45,19 +42,6 @@ export function recordingR2() {
   return cachedClient;
 }
 
-export async function signedRecordingUploadUrl(key: string, contentType: string) {
-  return getSignedUrl(
-    recordingR2(),
-    new PutObjectCommand({
-      Bucket: recordingBucketName(),
-      Key: key,
-      ContentType: contentType,
-      CacheControl: "private, no-store",
-    }),
-    { expiresIn: RECORDING_UPLOAD_URL_TTL_SECONDS },
-  );
-}
-
 export async function putRecordingObject(
   key: string,
   contentType: string,
@@ -71,12 +55,6 @@ export async function putRecordingObject(
       ContentType: contentType,
       CacheControl: "private, no-store",
     }),
-  );
-}
-
-export async function headRecordingObject(key: string) {
-  return recordingR2().send(
-    new HeadObjectCommand({ Bucket: recordingBucketName(), Key: key }),
   );
 }
 

@@ -1,13 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
-import { publishWebsite, PUBLISHABLE_FILE_NAME, GitHubCredentialsError, GitHubPermissionError, GitHubRepoNotAccessibleError, GITHUB_INSTALLATION_SETTINGS_URL, githubInstallUrl, rankedAccessStatus, refreshGitHubConnection, type DirectoryBuild } from "@/app/lib/github";
+import { publishWebsite, PUBLISHABLE_FILE_NAME, GitHubCredentialsError, GitHubPermissionError, GitHubRepoNotAccessibleError, PublishInputError, GITHUB_INSTALLATION_SETTINGS_URL, githubInstallUrl, rankedAccessStatus, refreshGitHubConnection, type DirectoryBuild } from "@/app/lib/github";
 import { decryptSession, encryptSession, SESSION_COOKIE, sessionCookieOptions, type GitHubConnection } from "@/app/lib/session";
 import { logAudit } from "@/app/lib/audit";
+import { isCrossSiteMutation } from "@/app/lib/urls";
+import { TAILWIND_FILE_NAME } from "@/app/lib/tailwind";
+import { TAILWIND_SOURCE } from "@/app/lib/tailwind-source";
 import {
   completeSubmissionProfile,
   getHackClubProfile,
   resolvePrimaryAddress,
 } from "@/app/lib/hack-club-profile";
 import { addChallengeProgress } from "@/app/lib/progression";
+import { rateLimited, tooManyRequests } from "@/app/lib/rate-limit";
 import { getSql } from "@/db";
 
 function validFileMap(value: unknown, maxEntries: number, maxLength: number) {
@@ -20,9 +24,15 @@ function validFileMap(value: unknown, maxEntries: number, maxLength: number) {
 }
 
 export async function POST(request: NextRequest) {
+  if (isCrossSiteMutation(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
   const session = await decryptSession(request.cookies.get(SESSION_COOKIE)?.value);
   if (!session?.user) return NextResponse.json({ error: "Sign in with Hack Club first." }, { status: 401 });
   if (!session.github) return NextResponse.json({ error: "Connect GitHub first." }, { status: 401 });
+  // Each attempt can create commits in the player's repository and drives a
+  // run of GitHub API calls with their token.
+  if (await rateLimited(`publish:${session.user.id}`, 12, 600)) {
+    return tooManyRequests("You've tried to publish several times in a row. Wait a few minutes and try again.");
+  }
   let github: GitHubConnection = session.github;
   let githubRefreshed = false;
   const githubResponse = async (body: unknown, init?: ResponseInit) => {
@@ -85,11 +95,17 @@ export async function POST(request: NextRequest) {
     const existingBuilds = await getSql()`SELECT p.github_repo AS "folderName", m.theme, p.created_at AS "publishedAt"
       FROM publications p JOIN matches m ON m.id=p.match_id
       WHERE p.published_by=${session.user.id} ORDER BY p.created_at DESC`;
+    // Pages reference Tailwind as a file sitting next to them, so the build
+    // is self-contained: the exact script it was previewed with is committed
+    // with it and the published site loads nothing from a third-party CDN.
+    const bundledAssets: Record<string, string> = Object.values(pages!).some((html) => html.includes(TAILWIND_FILE_NAME))
+      ? { [TAILWIND_FILE_NAME]: TAILWIND_SOURCE }
+      : {};
     github = await refreshGitHubConnection(session.github);
     githubRefreshed = github !== session.github;
     let result;
     try {
-      result = await publishWebsite(github.accessToken, github.login, name, player.theme, pages!, files, trimmedDescription, existingBuilds as DirectoryBuild[]);
+      result = await publishWebsite(github.accessToken, github.login, name, player.theme, pages!, files, trimmedDescription, existingBuilds as DirectoryBuild[], bundledAssets);
     } catch (error) {
       // A 403 enabling Pages can mean the installation's permissions were
       // just approved — the cached token issued beforehand keeps its old,
@@ -100,7 +116,7 @@ export async function POST(request: NextRequest) {
       if (!(error instanceof GitHubPermissionError)) throw error;
       github = await refreshGitHubConnection(github, { force: true });
       githubRefreshed = true;
-      result = await publishWebsite(github.accessToken, github.login, name, player.theme, pages!, files, trimmedDescription, existingBuilds as DirectoryBuild[]);
+      result = await publishWebsite(github.accessToken, github.login, name, player.theme, pages!, files, trimmedDescription, existingBuilds as DirectoryBuild[], bundledAssets);
     }
     const publicationId = crypto.randomUUID();
     // These used to run as separate round-trips. If the client disconnected
@@ -188,7 +204,13 @@ export async function POST(request: NextRequest) {
         { status: 409 },
       );
     }
-    console.error(error);
-    return githubResponse({ error: error instanceof Error ? error.message : "Publishing failed." }, { status: 500 });
+    if (error instanceof PublishInputError) {
+      return githubResponse({ error: error.message }, { status: 400 });
+    }
+    // Anything else is an internal failure: a GitHub API response body, a
+    // database error, a missing setting. That detail belongs in the server
+    // log, not in a response a player (or anyone probing the API) can read.
+    console.error("Publishing failed", error);
+    return githubResponse({ error: "Publishing failed. Try again in a moment." }, { status: 500 });
   }
 }

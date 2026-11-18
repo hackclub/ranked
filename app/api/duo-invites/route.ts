@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { currentUser } from "@/app/lib/current-user";
+import { rateLimited, tooManyRequests } from "@/app/lib/rate-limit";
 import { activeMatch } from "@/app/lib/match-lifecycle";
 import { logAudit } from "@/app/lib/audit";
 import { addChallengeProgress } from "@/app/lib/progression";
@@ -23,23 +24,23 @@ export async function GET(request: NextRequest) {
   const sql = getSql();
   const [partner, outgoing, incoming, missed] = await Promise.all([
     sql`SELECT di.id, (CASE WHEN di.from_user_id=${user.id} THEN di.to_user_id ELSE di.from_user_id END) AS "partnerId",
-        COALESCE(u.slack_username, u.name) AS "partnerName", u.avatar AS "partnerAvatar",
+        COALESCE(u.slack_username, split_part(u.name, ' ', 1)) AS "partnerName", u.avatar AS "partnerAvatar",
         (di.from_user_id=${user.id}) AS "isCreator", di.duration_minutes AS "durationMinutes",
         EXISTS(SELECT 1 FROM matchmaking_queue q WHERE q.user_id = (CASE WHEN di.from_user_id=${user.id} THEN di.to_user_id ELSE di.from_user_id END)) AS "partnerQueued"
       FROM duo_invites di JOIN users u ON u.id = (CASE WHEN di.from_user_id=${user.id} THEN di.to_user_id ELSE di.from_user_id END)
       WHERE di.status='accepted' AND (di.from_user_id=${user.id} OR di.to_user_id=${user.id})
       ORDER BY di.updated_at DESC LIMIT 1`,
-    sql`SELECT di.id, di.to_user_id AS "partnerId", COALESCE(u.slack_username, u.name) AS "partnerName", u.avatar AS "partnerAvatar"
+    sql`SELECT di.id, di.to_user_id AS "partnerId", COALESCE(u.slack_username, split_part(u.name, ' ', 1)) AS "partnerName", u.avatar AS "partnerAvatar"
       FROM duo_invites di JOIN users u ON u.id=di.to_user_id
       WHERE di.from_user_id=${user.id} AND di.status='pending'
         AND di.created_at>NOW()-${PENDING_INVITE_TTL}::interval
       ORDER BY di.created_at DESC LIMIT 1`,
-    sql`SELECT di.id, di.from_user_id AS "partnerId", COALESCE(u.slack_username, u.name) AS "partnerName", u.avatar AS "partnerAvatar"
+    sql`SELECT di.id, di.from_user_id AS "partnerId", COALESCE(u.slack_username, split_part(u.name, ' ', 1)) AS "partnerName", u.avatar AS "partnerAvatar"
       FROM duo_invites di JOIN users u ON u.id=di.from_user_id
       WHERE di.to_user_id=${user.id} AND di.status='pending'
         AND di.created_at>NOW()-${PENDING_INVITE_TTL}::interval
       ORDER BY di.created_at DESC`,
-    sql`SELECT di.id, COALESCE(u.slack_username, u.name) AS "partnerName", u.avatar AS "partnerAvatar"
+    sql`SELECT di.id, COALESCE(u.slack_username, split_part(u.name, ' ', 1)) AS "partnerName", u.avatar AS "partnerAvatar"
       FROM duo_invites di JOIN users u ON u.id=di.from_user_id
       WHERE di.to_user_id=${user.id} AND di.status='missed' ORDER BY di.created_at DESC`,
   ]);
@@ -54,14 +55,22 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const user = await currentUser(request);
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const { friendId, durationMinutes } = await request.json() as { friendId?: string; durationMinutes?: number };
+  const body = await request.json().catch(() => null) as { friendId?: unknown; durationMinutes?: unknown } | null;
+  const friendId = typeof body?.friendId === "string" ? body.friendId : undefined;
+  const durationMinutes = body?.durationMinutes;
   if (!friendId || friendId === user.id) return NextResponse.json({ error: "Choose a friend to invite." }, { status: 400 });
+  if (await rateLimited(`duo-invite:${user.id}`, 30, 600)) {
+    return tooManyRequests("You've sent a lot of invites. Try again in a few minutes.");
+  }
   const duration = [10, 30, 60].includes(Number(durationMinutes)) ? Number(durationMinutes) : 30;
   const sql = getSql();
   const friendship = await sql`SELECT 1 FROM friendships WHERE status='accepted'
     AND ((requester_id=${user.id} AND addressee_id=${friendId}) OR (requester_id=${friendId} AND addressee_id=${user.id}))`;
   if (!friendship.length) return NextResponse.json({ error: "You can only invite accepted friends." }, { status: 400 });
-  const friend = await sql`SELECT name, avatar FROM users WHERE id=${friendId}`;
+  // displayName is what other players see; the legal name from Hack Club Auth
+  // only ever goes to the admin audit log.
+  const friend = await sql`SELECT name, COALESCE(slack_username, split_part(name, ' ', 1)) AS "displayName", avatar
+    FROM users WHERE id=${friendId}`;
   if (!friend[0]) return NextResponse.json({ error: "That player no longer exists." }, { status: 404 });
 
   // Reuses activeMatch's definition of "still in a match" — a match stays
@@ -82,7 +91,7 @@ export async function POST(request: NextRequest) {
     await sql`INSERT INTO duo_invites (id, from_user_id, to_user_id, status, duration_minutes)
       VALUES (${crypto.randomUUID()}, ${user.id}, ${friendId}, 'missed', ${duration})`;
     return NextResponse.json(
-      { error: `${friend[0].name} is currently playing a match — try inviting them again once they're done.` },
+      { error: `${friend[0].displayName} is currently playing a match — try inviting them again once they're done.` },
       { status: 409 },
     );
   }
@@ -135,17 +144,20 @@ export async function POST(request: NextRequest) {
     targetId: inserted[0].id,
     metadata: { partnerId: friendId, durationMinutes: duration },
   });
-  return NextResponse.json({ outgoing: { id: inserted[0].id, partnerId: friendId, partnerName: friend[0].name, partnerAvatar: friend[0].avatar } });
+  return NextResponse.json({ outgoing: { id: inserted[0].id, partnerId: friendId, partnerName: friend[0].displayName, partnerAvatar: friend[0].avatar } });
 }
 
 export async function PATCH(request: NextRequest) {
   const user = await currentUser(request);
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const { inviteId, action, durationMinutes } = await request.json() as {
-    inviteId?: string;
-    action?: string;
-    durationMinutes?: number;
-  };
+  const body = await request.json().catch(() => null) as {
+    inviteId?: unknown;
+    action?: unknown;
+    durationMinutes?: unknown;
+  } | null;
+  const inviteId = typeof body?.inviteId === "string" ? body.inviteId : undefined;
+  const action = typeof body?.action === "string" ? body.action : undefined;
+  const durationMinutes = body?.durationMinutes;
   if (!inviteId) return NextResponse.json({ error: "Invalid request." }, { status: 400 });
   const sql = getSql();
   // Only the duo's creator (from_user_id) can change match settings — the

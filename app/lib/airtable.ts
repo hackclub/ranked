@@ -26,6 +26,32 @@ const SUBMISSION_FIELDS = {
   hoursSpent: { id: "fldXLDwiCGoacnxqm", name: "Optional - Override Hours Spent", type: "number" },
 } as const;
 
+// The Description column is rich text, which Airtable renders as Markdown.
+// A player's description is plain prose, so its Markdown syntax is escaped —
+// otherwise a submission could put live links or fake headings in front of a
+// reviewer. A line that would read as a spreadsheet formula once the table is
+// exported (leading = + - @) is also defused with a leading apostrophe.
+function airtablePlainText(value: string) {
+  return value
+    .split(/\r\n|\r|\n/)
+    .map((line) => {
+      const escaped = line.replace(/[\\`*_~[\]<>|#!]/g, (character) => `\\${character}`);
+      return /^\s*[=+\-@]/.test(escaped) ? `'${escaped}` : escaped;
+    })
+    .join("\n");
+}
+
+// Names, addresses and usernames go into plain single-line columns, where
+// Markdown means nothing — but they are still values a player controls, and
+// the table gets exported to spreadsheets. A cell that starts with = + - @
+// (or a tab or carriage return, which spreadsheets skip over before looking)
+// is run as a formula there, so it gets the same leading apostrophe. Line
+// breaks and other control characters have no business in these fields at all.
+function airtableCell(value: string | null | undefined) {
+  const flattened = (value ?? "").replace(/[\u0000-\u001f\u007f]+/g, " ").trim();
+  return /^[=+\-@]/.test(flattened) ? `'${flattened}` : flattened;
+}
+
 function configuration() {
   const apiKey = process.env.AIRTABLE_API?.trim();
   if (!apiKey) throw new Error("AIRTABLE_API is required.");
@@ -86,22 +112,23 @@ export async function createRankedSubmission(input: {
   const fields: Record<string, string | number> = {
     [SUBMISSION_FIELDS.codeUrl.id]: input.codeUrl,
     [SUBMISSION_FIELDS.playableUrl.id]: input.playableUrl,
-    [SUBMISSION_FIELDS.description.id]: input.description,
-    [SUBMISSION_FIELDS.githubUsername.id]: input.githubUsername,
-    [SUBMISSION_FIELDS.firstName.id]: input.firstName,
-    [SUBMISSION_FIELDS.lastName.id]: input.lastName,
+    [SUBMISSION_FIELDS.description.id]: airtablePlainText(input.description),
+    [SUBMISSION_FIELDS.githubUsername.id]: airtableCell(input.githubUsername),
+    [SUBMISSION_FIELDS.firstName.id]: airtableCell(input.firstName),
+    [SUBMISSION_FIELDS.lastName.id]: airtableCell(input.lastName),
     [SUBMISSION_FIELDS.email.id]: input.email,
     [SUBMISSION_FIELDS.birthday.id]: input.birthday,
-    [SUBMISSION_FIELDS.line1.id]: input.address.line_1 ?? "",
-    [SUBMISSION_FIELDS.city.id]: input.address.city ?? "",
-    [SUBMISSION_FIELDS.state.id]: input.address.state ?? "",
-    [SUBMISSION_FIELDS.country.id]: input.address.country ?? "",
-    [SUBMISSION_FIELDS.postalCode.id]: input.address.postal_code ?? "",
+    [SUBMISSION_FIELDS.line1.id]: airtableCell(input.address.line_1),
+    [SUBMISSION_FIELDS.city.id]: airtableCell(input.address.city),
+    [SUBMISSION_FIELDS.state.id]: airtableCell(input.address.state),
+    [SUBMISSION_FIELDS.country.id]: airtableCell(input.address.country),
+    [SUBMISSION_FIELDS.postalCode.id]: airtableCell(input.address.postal_code),
     // Airtable is configured with one decimal place, so 10/30/60-minute
     // rounds become 0.2/0.5/1.0 hours respectively.
     [SUBMISSION_FIELDS.hoursSpent.id]: Number((input.durationMinutes / 60).toFixed(1)),
   };
-  if (input.address.line_2) fields[SUBMISSION_FIELDS.line2.id] = input.address.line_2;
+  const line2 = airtableCell(input.address.line_2);
+  if (line2) fields[SUBMISSION_FIELDS.line2.id] = line2;
 
   // Code URL is unique per player's published build. performUpsert makes a
   // retry safe if Airtable accepted a request but the server lost its response.
@@ -162,7 +189,7 @@ export async function updateSubmissionDescription(
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        fields: { [SUBMISSION_FIELDS.description.id]: description },
+        fields: { [SUBMISSION_FIELDS.description.id]: airtablePlainText(description) },
         typecast: true,
       }),
     },

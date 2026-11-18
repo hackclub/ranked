@@ -142,6 +142,12 @@ export async function POST(request: NextRequest) {
           AND q.recording_consented_at IS NOT NULL
           AND q.user_id <> ${user.id}
           AND NOT EXISTS (
+            SELECT 1 FROM friendships blocked WHERE blocked.status='blocked' AND (
+              (blocked.requester_id=${user.id} AND blocked.addressee_id=q.user_id) OR
+              (blocked.requester_id=q.user_id AND blocked.addressee_id=${user.id})
+            )
+          )
+          AND NOT EXISTS (
             SELECT 1 FROM duo_invites existing
             WHERE existing.status='accepted'
               AND q.user_id IN (existing.from_user_id,existing.to_user_id)
@@ -191,6 +197,9 @@ export async function POST(request: NextRequest) {
 
   const matchId = crypto.randomUUID();
   const theme = generateMatchTheme();
+  // Every candidate query in this route skips anyone with a 'blocked'
+  // friendship row against the requester (in either direction) — a match puts
+  // players in a shared voice/video call, so a block has to hold here too.
   // Both branches below only insert into `players`/delete from the queue when
   // they actually formed a match (gated on `made`, which only inserts when
   // enough candidates were found) — a non-empty result here is the only way
@@ -205,6 +214,12 @@ export async function POST(request: NextRequest) {
         WHERE q.user_id<>${user.id} AND q.mode='solo'::match_mode
           AND q.duration_minutes=${duration}
           AND q.recording_consented_at IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM friendships blocked WHERE blocked.status='blocked' AND (
+              (blocked.requester_id=${user.id} AND blocked.addressee_id=q.user_id) OR
+              (blocked.requester_id=q.user_id AND blocked.addressee_id=${user.id})
+            )
+          )
           AND NOT EXISTS (
             SELECT 1 FROM match_players mp JOIN matches m ON m.id=mp.match_id
             WHERE mp.user_id=q.user_id AND m.status='active' AND mp.finished_at IS NULL
@@ -258,6 +273,14 @@ export async function POST(request: NextRequest) {
           AND NOT EXISTS (
             SELECT 1 FROM match_players mp JOIN matches m ON m.id=mp.match_id
             WHERE mp.user_id=q.user_id AND m.status='active' AND mp.finished_at IS NULL
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM matchmaking_queue member JOIN friendships blocked
+              ON blocked.status='blocked' AND (
+                (blocked.requester_id=member.user_id AND blocked.addressee_id IN (${user.id},${partnerId ?? user.id})) OR
+                (blocked.addressee_id=member.user_id AND blocked.requester_id IN (${user.id},${partnerId ?? user.id}))
+              )
+            WHERE member.party_key=q.party_key
           )
         GROUP BY q.party_key
         HAVING COUNT(*)=2 AND BOOL_AND(

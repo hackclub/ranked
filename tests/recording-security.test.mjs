@@ -3,6 +3,14 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const policyPath = new URL("../app/lib/recording-policy.ts", import.meta.url);
+const staffPath = new URL("../app/lib/admin.ts", import.meta.url);
+const reviewerPath = new URL("../app/lib/recording-reviewer.ts", import.meta.url);
+const heartbeatPath = new URL(
+  "../app/api/matches/[matchId]/heartbeat/route.ts",
+  import.meta.url,
+);
+const liveblocksAuthPath = new URL("../app/api/liveblocks-auth/route.ts", import.meta.url);
+const realtimeHookPath = new URL("../app/realtime/useRealtimeRoom.ts", import.meta.url);
 const queuePath = new URL("../app/api/matchmaking/queue/route.ts", import.meta.url);
 const sessionPath = new URL("../app/api/recordings/session/route.ts", import.meta.url);
 const reviewListPath = new URL("../app/api/reviewer/recordings/route.ts", import.meta.url);
@@ -30,14 +38,25 @@ const reviewDashboardPath = new URL(
   import.meta.url,
 );
 
-test("recording review authorization is a fixed two-email server allowlist", async () => {
+test("recording review authorization is a server-side allowlist read from configuration", async () => {
   const policy = await readFile(policyPath, "utf8");
+  const staff = await readFile(staffPath, "utf8");
+  const reviewer = await readFile(reviewerPath, "utf8");
+  const app = await readFile(appPath, "utf8");
   const listRoute = await readFile(reviewListPath, "utf8");
   const playbackRoute = await readFile(playbackPath, "utf8");
 
-  assert.match(policy, /"mihir@hackclub\.com"/);
-  assert.match(policy, /"meghana@hackclub\.com"/);
-  assert.match(policy, /email\.trim\(\)\.toLowerCase\(\)/);
+  // Who has access is deployment configuration, not source: no staff address
+  // may be written into the repository, and the list must never be imported
+  // into the client bundle.
+  for (const source of [policy, staff, app]) {
+    assert.doesNotMatch(source, /[a-z0-9._-]+@hackclub\.com/i);
+  }
+  assert.match(staff, /"RECORDING_REVIEWER_EMAILS"/);
+  assert.match(staff, /"ADMIN_EMAILS"/);
+  assert.match(staff, /email\.trim\(\)\.toLowerCase\(\)/);
+  assert.match(reviewer, /isRecordingReviewer\(user\.email\)/);
+  assert.doesNotMatch(app, /lib\/admin/);
   assert.match(listRoute, /recordingReviewer\(request\)/);
   assert.match(playbackRoute, /recordingReviewer\(request\)/);
   assert.match(playbackRoute, /PRIVATE_RECORDING_HEADERS/);
@@ -100,4 +119,32 @@ test("only reviewers can permanently delete a recording and its private objects"
   assert.match(dashboard, /window\.confirm/);
   assert.match(dashboard, /method: "DELETE"/);
   assert.match(dashboard, /delete recording/);
+});
+
+test("a call is only open while the match is live and its recording is arriving", async () => {
+  const recordings = await readFile(recordingsPath, "utf8");
+  const heartbeat = await readFile(heartbeatPath, "utf8");
+  const liveblocksAuth = await readFile(liveblocksAuthPath, "utf8");
+  const realtimeHook = await readFile(realtimeHookPath, "utf8");
+  const recordingHook = await readFile(recordingHookPath, "utf8");
+  const app = await readFile(appPath, "utf8");
+
+  // The server decides whether a recording is healthy, from clips that have
+  // actually reached storage, and tells the client on every heartbeat.
+  assert.match(recordings, /export async function recordingHealth/);
+  assert.match(recordings, /s\.status='uploaded'/);
+  assert.match(heartbeat, /recordingOk: recording\.ok/);
+  assert.match(heartbeat, /flagMissingRecording\(matchId, user\)/);
+
+  // No call token once the match is over, or while nothing is being recorded.
+  assert.match(liveblocksAuth, /if \(!recording\.live\)/);
+  assert.match(liveblocksAuth, /if \(!recording\.ok\)/);
+
+  // The client leaves the call when the match ends and stops sending media
+  // while the server reports the recording missing.
+  assert.match(realtimeHook, /if \(!activeRtcConfig \|\| !enabled\) return;/);
+  assert.match(realtimeHook, /sender\.track\.enabled = transmit &&/);
+  assert.match(app, /\{ enabled: callLive, transmit: recordingOk \}/);
+  assert.match(app, /setRecordingOk\(result\.recordingOk\)/);
+  assert.match(recordingHook, /retryTimer = window\.setTimeout/);
 });

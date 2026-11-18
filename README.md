@@ -9,6 +9,15 @@ Competitive and cooperative livecoding for Hack Club builders. Ranked includes P
 3. Run `npm run db:migrate` once, then `npm run dev`.
 4. Open `http://localhost:3000`.
 
+`npm run dev` listens on this machine only. To test a call between two devices
+on the same network, use `npm run dev:lan`. It serves the app, running with
+whatever secrets are in `.env.local`, to everything on that network, so use it
+only on a network you trust.
+
+Admin tools and recording review are granted by email through `ADMIN_EMAILS`
+and `RECORDING_REVIEWER_EMAILS` (comma-separated). Both are empty by default,
+which means nobody has either role.
+
 All player state lives in PostgreSQL: profiles and avatars, queue entries, teams, match timers, snapshots, coding time, H-Bucks, daily progress, friends, votes, publications, orders, and an immutable ELO transaction ledger. ELO is calculated and applied on the server after independent votes; clients never submit rating changes.
 
 To permanently remove every user and all gameplay data while preserving the database schema and migration history, point `DATABASE_URL` at the intended database and run:
@@ -81,7 +90,9 @@ Every publish also regenerates a root `index.html` in that repo — a directory 
 
 Create a Liveblocks project and set `LIVEBLOCKS_SECRET_KEY`. Ranked verifies match membership before authorizing rooms. A match has one call room for all players and a separate code room per team, so opponents cannot read or edit each other’s source. Monaco files synchronize with Liveblocks’ Yjs provider, and call-room events carry WebRTC offer/answer/ICE signaling.
 
-Audio and video travel directly between peers. Google's public STUN servers are included for local testing. For reliable production calls across restrictive networks, fill in the optional TURN variables in `.env.local`.
+By default audio and video travel directly between peers, using Google's public STUN servers. For reliable production calls across restrictive networks, configure a TURN server with the `TURN_*` (or `CLOUDFLARE_TURN_*`) variables in `.env.example`. They are server-side only: `/api/matches/[matchId]/ice-servers` issues short-lived credentials to players in a match, so no TURN credential is built into the client.
+
+A direct peer-to-peer call reveals each player's IP address to the others in it. Set `TURN_RELAY_ONLY=true` to route all call media through TURN instead, which hides them from each other at the cost of relaying (and paying for) every call.
 
 ### Private safety recordings
 
@@ -89,9 +100,22 @@ Every participant must explicitly consent before matchmaking. During a match,
 their local camera and microphone stream is split into short, independently
 playable clips and uploaded through Ranked's authenticated server to a
 **private** Cloudflare R2 bucket. R2 credentials never reach the browser.
-Only `mihir@hackclub.com` and `meghana@hackclub.com` pass the independent,
-server-side reviewer allowlist. Reviewer playback is proxied through an
-authenticated, no-store API; the bucket must not have public access enabled.
+Only the accounts listed in `RECORDING_REVIEWER_EMAILS` pass the independent,
+server-side reviewer allowlist; it is separate from `ADMIN_EMAILS`, so being an
+admin does not grant access to recordings. Reviewer playback is proxied through
+an authenticated, no-store API; the bucket must not have public access enabled.
+
+The recording is made by each player's own browser, so the server cannot force
+it to happen, but it does check that it is happening. The call is open only
+during the match's timed window, and each player's client leaves it when the
+timer ends. While a match is live the server expects a clip from every player
+at least once a minute; a player whose clips stop arriving is flagged in the
+audit log (`recording.missing`), is refused new call tokens, and is told to
+stop sending their camera and microphone to the other players until clips
+arrive again. A deliberately modified client can still ignore that instruction
+for a call it has already joined. Closing that gap completely means recording
+on a media server instead of in the browser. Set `RECORDING_ENFORCEMENT=off`
+only to keep calls working through a storage outage.
 
 Configure these environment values:
 
@@ -121,8 +145,13 @@ For a local multiplayer test, sign in as separate Hack Club users in separate br
 
 - The friend-add picker searches Ranked accounts directly from Postgres (`users.name`/`email`, populated at Hack Club sign-in) — no Slack API calls. Typing a handle that doesn't match anyone copies a Slack DM invite to your clipboard to send yourself.
 - `VOTES_TO_FINALIZE`: community votes needed before server-side ELO settlement; defaults to `3`.
-- `NEXT_PUBLIC_TURN_*`: optional but strongly recommended for reliable WebRTC outside friendly networks.
+- `TURN_*` / `CLOUDFLARE_TURN_*`: optional but strongly recommended for reliable WebRTC outside friendly networks; `TURN_RELAY_ONLY=true` additionally keeps players' IP addresses private from each other.
 - Shop redemptions create `pending` PostgreSQL orders and atomically deduct H-Bucks. Fulfillment/approval remains an admin operation, not an automatic hardware purchase.
+- The shipping address on an order is stored encrypted (AES-GCM) and is never returned by the API. To fulfil orders, run `npm run shop:orders` with the app's secrets in `.env.local`; it prints each open order with its decrypted address. Addresses saved before encryption was added are encrypted once with `npm run shop:encrypt-shipping -- --confirm encrypt-shipping`.
+- Mutating and outbound-fetching routes are rate limited per account with counters in the `rate_limits` table (`app/lib/rate-limit.ts`). Limits by IP address for signed-out traffic are left to the platform's firewall.
+- The daily cron in `vercel.json` (authenticated with `CRON_SECRET`) also closes matches left unfinished for more than 24 hours after their timer: a match both teams published goes to community voting, anything else is cancelled with no ELO change. Without it a single player who never publishes would hold a match open indefinitely.
+- Tailwind's browser build is vendored at `app/lib/vendor/` (see the README there). Previews load it from this app and every published build carries its own copy, so player sites depend on no third-party CDN.
+- An opponent's live preview is a still, script-free copy of their rendered page, and loads nothing from the network. Images and web fonts hosted elsewhere therefore don't appear in that peek; they do on the published site voters see.
 
 ## Checks
 

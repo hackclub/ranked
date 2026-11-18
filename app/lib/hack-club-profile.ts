@@ -1,4 +1,4 @@
-import { aesGcmDecrypt, aesGcmEncrypt, aesGcmKey } from "@/app/lib/aes-gcm";
+import { aesGcmDecrypt, aesGcmEncrypt, aesGcmKey, requireSecret } from "@/app/lib/aes-gcm";
 import type { HackClubAddress, HackClubIdentity } from "@/app/lib/hackclub";
 import { getSql } from "@/db";
 
@@ -72,11 +72,7 @@ export function profileFromIdentity(
 }
 
 async function profileKey() {
-  const secret = process.env.AUTH_SESSION_SECRET;
-  if (!secret || secret.length < 32) {
-    throw new Error("AUTH_SESSION_SECRET must be at least 32 characters.");
-  }
-  return aesGcmKey(`ranked:hca-profile:v1:${secret}`);
+  return aesGcmKey(`ranked:hca-profile:v1:${requireSecret("AUTH_SESSION_SECRET")}`);
 }
 
 export async function encryptHackClubProfile(profile: StoredHackClubProfile) {

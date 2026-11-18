@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { currentUser, type DbUser } from "@/app/lib/current-user";
-import { isRecordingReviewer } from "@/app/lib/recording-policy";
+import { isRecordingReviewer } from "@/app/lib/admin";
 
 export async function recordingReviewer(
   request: NextRequest,

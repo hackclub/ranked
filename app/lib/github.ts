@@ -209,6 +209,10 @@ export class GitHubRepoNotAccessibleError extends Error {}
 // a generic GitHub error so the UI can send the player to the installation
 // settings instead of displaying GitHub's opaque 403 response.
 export class GitHubPermissionError extends Error {}
+// Something about the build itself that the player can fix (a name that is
+// taken or reserved, a missing index.html). Its message is written for them
+// and is safe to show; any other error from publishing is not.
+export class PublishInputError extends Error {}
 
 async function githubRequest<T>(
   token: string,
@@ -657,6 +661,9 @@ export async function publishWebsite(
   sourceFiles: Record<string, string> | undefined,
   description: string | undefined,
   existingBuilds: DirectoryBuild[],
+  // Files the server ships alongside the pages (never player-supplied): name
+  // within the build folder -> contents.
+  bundledAssets: Record<string, string> = {},
 ) {
   const folderName = requestedName.trim();
   if (
@@ -664,15 +671,15 @@ export async function publishWebsite(
     folderName === "." ||
     folderName === ".."
   ) {
-    throw new Error(
+    throw new PublishInputError(
       "Build names may only use letters, numbers, periods, underscores, and hyphens.",
     );
   }
   if (RESERVED_FOLDER_NAMES.includes(folderName.toLowerCase())) {
-    throw new Error(`"${folderName}" is reserved. Choose another build name.`);
+    throw new PublishInputError(`"${folderName}" is reserved. Choose another build name.`);
   }
   if (!pages["index.html"]) {
-    throw new Error("An index.html page is required.");
+    throw new PublishInputError("An index.html page is required.");
   }
   // The session's cached login can go stale (see currentGitHubLogin above);
   // refresh it so everything below acts on the account's real current name
@@ -682,7 +689,7 @@ export async function publishWebsite(
   const login = await currentGitHubLogin(token).catch(() => sessionLogin);
   const repository = await ensureRankedRepo(token, login);
   if (await pathExists(token, login, folderName)) {
-    throw new Error(
+    throw new PublishInputError(
       `"${folderName}" is already used in your ${RANKED_REPO} repo. Choose another name.`,
     );
   }
@@ -691,6 +698,9 @@ export async function publishWebsite(
 
   for (const [name, content] of Object.entries(pages)) {
     if (!PUBLISHABLE_FILE_NAME.test(name) || !name.endsWith(".html")) continue;
+    files[`${folderName}/${name}`] = content;
+  }
+  for (const [name, content] of Object.entries(bundledAssets)) {
     files[`${folderName}/${name}`] = content;
   }
   const trimmedDescription = description?.trim();

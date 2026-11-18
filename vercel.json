@@ -5,6 +5,16 @@
   "buildCommand": "NITRO_PRESET=vercel npm run build",
   "headers": [
     {
+      "source": "/((?!reviewer/recordings).*)",
+      "headers": [
+        { "key": "Content-Security-Policy", "value": "frame-ancestors 'self'" },
+        { "key": "Permissions-Policy", "value": "geolocation=(), payment=(), usb=(), display-capture=()" },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "X-Frame-Options", "value": "SAMEORIGIN" }
+      ]
+    },
+    {
       "source": "/reviewer/recordings",
       "headers": [
         { "key": "Cache-Control", "value": "private, no-store, max-age=0" },

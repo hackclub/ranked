@@ -8,6 +8,19 @@ function fromBase64url(value: string) {
   return new Uint8Array(Buffer.from(value, "base64url"));
 }
 
+// Every encryption secret goes through here so a deployment can't come up on
+// a short value or on the placeholder text copied straight from .env.example
+// — either would let anyone who has read this repository forge sessions.
+export function requireSecret(name: string) {
+  const secret = process.env[name];
+  if (!secret || secret.trim().length < 32 || /^\s*replace[-_ ]with/i.test(secret)) {
+    throw new Error(
+      `${name} must be a random value of at least 32 characters (try: openssl rand -base64 48).`,
+    );
+  }
+  return secret;
+}
+
 export async function aesGcmKey(material: string) {
   const digest = await crypto.subtle.digest("SHA-256", encoder.encode(material));
   return crypto.subtle.importKey("raw", digest, "AES-GCM", false, [

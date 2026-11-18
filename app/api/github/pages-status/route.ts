@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { rateLimited, tooManyRequests } from "@/app/lib/rate-limit";
+import { publicPageIsLive } from "@/app/lib/safe-fetch";
 import { decryptSession, SESSION_COOKIE } from "@/app/lib/session";
 
 // Locked to *.github.io/hackclubranked/<folder>/ so this can't be used as an
@@ -13,18 +15,12 @@ export async function GET(request: NextRequest) {
   if (!url || !PAGES_URL_PATTERN.test(url)) {
     return NextResponse.json({ error: "Invalid pages URL." }, { status: 400 });
   }
+  // Every call makes this server fetch a page on the caller's behalf. The
+  // client polls once every five seconds while a deploy is pending; this
+  // leaves room for that and little else.
+  if (await rateLimited(`pages-status:${session.user.id}`, 30, 60)) return tooManyRequests();
   try {
-    const response = await fetch(url, {
-      method: "GET",
-      redirect: "follow",
-      cache: "no-store",
-      // Ask the runtime to close the socket instead of pooling it — GitHub's
-      // Fastly edge resetting an idle keep-alive connection is what shows up
-      // client-side as an indefinitely stuck "deploying" (see ECONNRESET).
-      headers: { Connection: "close" },
-      signal: AbortSignal.timeout(8000),
-    });
-    return NextResponse.json({ ready: response.ok });
+    return NextResponse.json({ ready: await publicPageIsLive(url) });
   } catch (error) {
     console.error("pages-status check failed for", url, error);
     return NextResponse.json({ ready: false });

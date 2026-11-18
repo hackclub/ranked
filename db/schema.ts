@@ -42,7 +42,7 @@ export const users = pgTable("users", {
   // slackId — distinct from `name`, which is the player's real name from Hack
   // Club Auth. Null until a successful fetch, or until the player sets it
   // themselves in onboarding after a fetch came back empty or failed.
-  slackUsername: text("slack_username"),
+  slackUsername: text("slack_username").unique("users_slack_username_unique"),
   verificationStatus: text("verification_status"),
   experience: experienceEnum("experience"),
   elo: integer("elo").notNull().default(1500),
@@ -214,6 +214,8 @@ export const friendships = pgTable("friendships", {
   addresseeId: text("addressee_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   pairKey: text("pair_key").notNull().unique(),
   status: friendshipStatusEnum("status").notNull().default("pending"),
+  // Set alongside status='blocked': the one user allowed to see and lift the block.
+  blockedBy: text("blocked_by"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, table => [index("friendships_requester_idx").on(table.requesterId), index("friendships_addressee_idx").on(table.addresseeId)]);
@@ -272,7 +274,9 @@ export const shopOrders = pgTable("shop_orders", {
   itemName: text("item_name").notNull(),
   cost: integer("cost").notNull(),
   status: orderStatusEnum("status").notNull().default("pending"),
-  shipping: jsonb("shipping").$type<{ name: string; address1: string; address2?: string; city: string; region: string; postalCode: string; country: string }>(),
+  // AES-GCM ciphertext of the shipping address, never the address itself:
+  // see app/lib/shipping.ts. Decrypted only by scripts/shop-shipping.mjs.
+  shipping: jsonb("shipping").$type<{ v: 1; key: "shipping" | "session"; enc: string }>(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, table => [index("orders_user_idx").on(table.userId)]);
@@ -292,3 +296,12 @@ export const auditLog = pgTable("audit_log", {
   metadata: jsonb("metadata"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, table => [index("audit_log_created_idx").on(table.createdAt)]);
+
+// Fixed-window request counters for app/lib/rate-limit.ts. One row per
+// "<rule>:<subject>" key; rows past their window are reset on the next hit and
+// swept by the daily cron.
+export const rateLimits = pgTable("rate_limits", {
+  key: text("key").primaryKey(),
+  windowStart: timestamp("window_start", { withTimezone: true }).notNull().defaultNow(),
+  count: integer("count").notNull().default(1),
+}, table => [index("rate_limits_window_idx").on(table.windowStart)]);

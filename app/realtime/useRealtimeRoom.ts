@@ -48,19 +48,56 @@ type RemotePeer = {
   team: "blue" | "red";
 };
 
-function iceServers(): RTCIceServer[] {
-  const servers: RTCIceServer[] = [{ urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] }];
-  if (process.env.NEXT_PUBLIC_TURN_URL) {
-    servers.push({
-      urls: process.env.NEXT_PUBLIC_TURN_URL,
-      username: process.env.NEXT_PUBLIC_TURN_USERNAME,
-      credential: process.env.NEXT_PUBLIC_TURN_CREDENTIAL,
-    });
+type RtcConfig = Pick<RTCConfiguration, "iceServers" | "iceTransportPolicy">;
+
+const FALLBACK_RTC_CONFIG: RtcConfig = {
+  iceServers: [{ urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] }],
+  iceTransportPolicy: "all",
+};
+
+// ICE servers come from the server, per match, rather than from build-time
+// env vars: that keeps TURN credentials out of the public bundle (they're
+// short-lived and only issued to players in the match) and lets the server
+// decide whether calls must be relayed so peers never see each other's IPs.
+// It has to be known before the first RTCPeerConnection exists — a relay-only
+// policy applied after ICE gathering has started is too late.
+async function loadRtcConfig(roomId: string, signal: AbortSignal): Promise<RtcConfig> {
+  const matchId = roomId.match(/^ranked:call:([^:]+)$/)?.[1];
+  if (!matchId) return FALLBACK_RTC_CONFIG;
+  for (let attempt = 1; attempt <= 4 && !signal.aborted; attempt++) {
+    try {
+      const response = await fetch(`/api/matches/${encodeURIComponent(matchId)}/ice-servers`, { cache: "no-store", signal });
+      if (response.ok) {
+        const data = (await response.json()) as { iceServers?: RTCIceServer[]; iceTransportPolicy?: string };
+        if (Array.isArray(data.iceServers)) {
+          return { iceServers: data.iceServers, iceTransportPolicy: data.iceTransportPolicy === "relay" ? "relay" : "all" };
+        }
+      } else if (response.status < 500) {
+        break;
+      }
+    } catch {
+      // Network hiccup — retried below.
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, attempt * 600));
   }
-  return servers;
+  return FALLBACK_RTC_CONFIG;
 }
 
-export function useRealtimeRoom(roomId: string, mic: boolean, video: boolean, scope: "team" | "everyone", team: "blue" | "red", micDeviceId?: string, videoDeviceId?: string, onPeerVideoLost?: (peer: PeerVideoLost) => void) {
+export type CallPolicy = {
+  // False tears the call down completely: the room is left, every peer
+  // connection is closed and the camera and microphone are released. The call
+  // only exists while the match is live, which is also the only time it is
+  // recorded.
+  enabled: boolean;
+  // False keeps the call up but sends nothing to it: every outgoing track is
+  // disabled, while the local stream stays live so the recorder can keep
+  // trying. Used while this player has no working safety recording, so that
+  // nothing unrecorded ever reaches another player.
+  transmit: boolean;
+};
+
+export function useRealtimeRoom(roomId: string, mic: boolean, video: boolean, scope: "team" | "everyone", team: "blue" | "red", micDeviceId?: string, videoDeviceId?: string, onPeerVideoLost?: (peer: PeerVideoLost) => void, policy: CallPolicy = { enabled: true, transmit: true }) {
+  const { enabled, transmit } = policy;
   const [room, setRoom] = useState<Room | null>(null);
   const [status, setStatus] = useState("connecting");
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
@@ -68,15 +105,27 @@ export function useRealtimeRoom(roomId: string, mic: boolean, video: boolean, sc
   const peersRef = useRef(new Map<number, PeerState>());
   const streamRef = useRef<MediaStream | null>(null);
   const roomRef = useRef<Room | null>(null);
-  const settingsRef = useRef({ mic, video, scope, team });
-  useEffect(() => { settingsRef.current = { mic, video, scope, team }; }, [mic, scope, team, video]);
+  const settingsRef = useRef({ mic, video, scope, team, transmit });
+  useEffect(() => { settingsRef.current = { mic, video, scope, team, transmit }; }, [mic, scope, team, transmit, video]);
   const onPeerVideoLostRef = useRef(onPeerVideoLost);
   useEffect(() => { onPeerVideoLostRef.current = onPeerVideoLost; }, [onPeerVideoLost]);
 
+  const [rtcConfig, setRtcConfig] = useState<{ roomId: string; config: RtcConfig } | null>(null);
   useEffect(() => {
+    if (!enabled) return;
+    const controller = new AbortController();
+    void loadRtcConfig(roomId, controller.signal).then((config) => {
+      if (!controller.signal.aborted) setRtcConfig({ roomId, config });
+    });
+    return () => controller.abort();
+  }, [enabled, roomId]);
+  const activeRtcConfig = rtcConfig?.roomId === roomId ? rtcConfig.config : null;
+
+  useEffect(() => {
+    if (!activeRtcConfig || !enabled) return;
     let cancelled = false;
     const entered = liveblocksClient().enterRoom(roomId, {
-      initialPresence: { callReady: true, mic, video, scope, team },
+      initialPresence: { callReady: true, mic: mic && transmit, video: video && transmit, scope, team },
     });
     const joinedRoom = entered.room as unknown as Room;
     const { leave } = entered;
@@ -98,7 +147,7 @@ export function useRealtimeRoom(roomId: string, mic: boolean, video: boolean, sc
         stream,
         mic: other?.presence.mic ?? true,
         video: other?.presence.video ?? true,
-        team: other?.presence.team ?? "red",
+        team: other?.info?.team ?? other?.presence.team ?? "red",
       };
     };
 
@@ -114,21 +163,24 @@ export function useRealtimeRoom(roomId: string, mic: boolean, video: boolean, sc
       const selfId = joinedRoom.getSelf()?.connectionId ?? 0;
       const other = joinedRoom.getOthers().find(candidate => candidate.connectionId === connectionId);
       const state: PeerState = {
-        pc: new RTCPeerConnection({ iceServers: iceServers() }),
+        pc: new RTCPeerConnection(activeRtcConfig),
         makingOffer: false,
         ignoreOffer: false,
         isSettingRemoteAnswerPending: false,
         polite: selfId > connectionId,
         name: other?.info?.name ?? "Player",
-        team: other?.presence.team ?? "red",
+        team: other?.info?.team ?? other?.presence.team ?? "red",
         videoLostNotified: false,
       };
       activePeers.set(connectionId, state);
       streamRef.current?.getTracks().forEach(track => {
         const clone = track.clone();
-        const otherTeam = joinedRoom.getOthers().find(other => other.connectionId === connectionId)?.presence.team;
+        // Team-only audio is gated on info.team (set by the server when it
+        // authorizes the room), not presence.team, which any client can set
+        // to whatever it likes to listen in on the other team.
+        const otherTeam = joinedRoom.getOthers().find(other => other.connectionId === connectionId)?.info?.team;
         const settings = settingsRef.current;
-        clone.enabled = clone.kind === "video" ? settings.video : settings.mic && (settings.scope === "everyone" || otherTeam === settings.team);
+        clone.enabled = settings.transmit && (clone.kind === "video" ? settings.video : settings.mic && (settings.scope === "everyone" || otherTeam === settings.team));
         state.pc.addTrack(clone, streamRef.current!);
       });
       state.pc.onicecandidate = ({ candidate }) => {
@@ -247,9 +299,9 @@ export function useRealtimeRoom(roomId: string, mic: boolean, video: boolean, sc
         setLocalStream(stream);
         for (const [connectionId, state] of activePeers) stream.getTracks().forEach(track => {
           const clone = track.clone();
-          const otherTeam = joinedRoom.getOthers().find(other => other.connectionId === connectionId)?.presence.team;
+          const otherTeam = joinedRoom.getOthers().find(other => other.connectionId === connectionId)?.info?.team;
           const settings = settingsRef.current;
-          clone.enabled = clone.kind === "video" ? settings.video : settings.mic && (settings.scope === "everyone" || otherTeam === settings.team);
+          clone.enabled = settings.transmit && (clone.kind === "video" ? settings.video : settings.mic && (settings.scope === "everyone" || otherTeam === settings.team));
           state.pc.addTrack(clone, stream);
         });
       } catch (error) {
@@ -275,24 +327,30 @@ export function useRealtimeRoom(roomId: string, mic: boolean, video: boolean, sc
       streamRef.current?.getTracks().forEach(track => track.stop());
       streamRef.current = null;
       roomRef.current = null;
+      // Whatever is left on screen must not outlive the call: a stale stream
+      // here would keep a recorder (and a video tile) attached to dead tracks.
+      setLocalStream(null);
+      setRemotePeers([]);
       leave();
     };
   // Room membership should only restart when the room changes.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [micDeviceId, roomId, videoDeviceId]);
+  }, [activeRtcConfig, enabled, micDeviceId, roomId, videoDeviceId]);
 
   useEffect(() => {
     streamRef.current?.getAudioTracks().forEach(track => { track.enabled = mic; });
     streamRef.current?.getVideoTracks().forEach(track => { track.enabled = video; });
-    roomRef.current?.updatePresence({ mic, video, scope, team });
+    // Presence is what tells the other players whether to expect audio or
+    // video from this one, so it reports what is actually being sent.
+    roomRef.current?.updatePresence({ mic: mic && transmit, video: video && transmit, scope, team });
     for (const [connectionId, state] of peersRef.current) {
-      const peerTeam = roomRef.current?.getOthers().find(other => other.connectionId === connectionId)?.presence.team;
+      const peerTeam = roomRef.current?.getOthers().find(other => other.connectionId === connectionId)?.info?.team;
       for (const sender of state.pc.getSenders()) {
         if (!sender.track) continue;
-        sender.track.enabled = sender.track.kind === "video" ? video : mic && (scope === "everyone" || peerTeam === team);
+        sender.track.enabled = transmit && (sender.track.kind === "video" ? video : mic && (scope === "everyone" || peerTeam === team));
       }
     }
-  }, [mic, video, scope, team]);
+  }, [mic, video, scope, team, transmit]);
 
   return { room, status, localStream, remotePeers };
 }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { currentUser } from "@/app/lib/current-user";
 import { logAudit } from "@/app/lib/audit";
 import { updateSubmissionDescription } from "@/app/lib/airtable";
+import { rateLimited, tooManyRequests } from "@/app/lib/rate-limit";
 import { getSql } from "@/db";
 
 // Prepended to a publication's description the first time it's reported for
@@ -15,11 +16,14 @@ export async function POST(request: NextRequest, context: { params: Promise<{ ma
   const user = await currentUser(request);
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { matchId } = await context.params;
-  const { type, targetId, details } = (await request.json()) as {
-    type?: string;
-    targetId?: string;
-    details?: string;
-  };
+  const body = (await request.json().catch(() => null)) as {
+    type?: unknown;
+    targetId?: unknown;
+    details?: unknown;
+  } | null;
+  const type = body?.type;
+  const targetId = typeof body?.targetId === "string" ? body.targetId : "";
+  const details = body?.details;
   if (type !== "misconduct" && type !== "ai") return NextResponse.json({ error: "Invalid report type." }, { status: 400 });
   if (!targetId || targetId === user.id) return NextResponse.json({ error: "Choose who you're reporting." }, { status: 400 });
   const trimmedDetails = typeof details === "string" ? details.trim().slice(0, 1000) : "";
@@ -32,6 +36,16 @@ export async function POST(request: NextRequest, context: { params: Promise<{ ma
   ]);
   if (!reporterRow.length) return NextResponse.json({ error: "You are not in this match." }, { status: 403 });
   if (!targetRow.length) return NextResponse.json({ error: "That player isn't in this match." }, { status: 400 });
+
+  // One report of each type per player per match. A repeat is acknowledged
+  // the same way as the original so the reporter isn't left wondering, but it
+  // doesn't add a second row for a reviewer to wade through.
+  const alreadyFiled = await getSql()`SELECT 1 FROM reports
+    WHERE match_id=${matchId} AND reporter_id=${user.id} AND target_id=${targetId} AND type=${type}::report_type LIMIT 1`;
+  if (alreadyFiled.length) return NextResponse.json({ ok: true, duplicate: true });
+  if (await rateLimited(`report:${user.id}`, 5, 600)) {
+    return tooManyRequests("You've filed several reports in a short time. Try again in a few minutes.");
+  }
 
   const reportId = crypto.randomUUID();
   await getSql()`INSERT INTO reports (id, match_id, reporter_id, target_id, type, details)

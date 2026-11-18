@@ -127,6 +127,27 @@
       "when": 1787968997163,
       "tag": "0017_add_banner_color",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1794435474833,
+      "tag": "0018_friendship_blocked_by",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1794520303615,
+      "tag": "0019_unique_usernames",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1795030004542,
+      "tag": "0020_rate_limits",
+      "breakpoints": true
     }
   ]
 }

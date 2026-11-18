@@ -2,12 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { createRankedSubmission } from "@/app/lib/airtable";
 import { logAudit } from "@/app/lib/audit";
 import { currentUser } from "@/app/lib/current-user";
+import { rateLimited, tooManyRequests } from "@/app/lib/rate-limit";
 import {
   completeSubmissionAddress,
   completeSubmissionProfile,
   getHackClubProfile,
 } from "@/app/lib/hack-club-profile";
 import { addChallengeProgress } from "@/app/lib/progression";
+import { publicPageIsLive } from "@/app/lib/safe-fetch";
 import { getSql } from "@/db";
 
 function githubUsername(repositoryUrl: string) {
@@ -26,6 +28,7 @@ export async function POST(request: NextRequest) {
   if (!user) {
     return NextResponse.json({ error: "Sign in with Hack Club first." }, { status: 401 });
   }
+  if (await rateLimited(`airtable-submit:${user.id}`, 12, 600)) return tooManyRequests();
   const formData = await request.formData();
   const publicationIdValue = formData.get("publicationId");
   const publicationId =
@@ -77,14 +80,7 @@ export async function POST(request: NextRequest) {
 
   // Never submit a URL until GitHub Pages actually serves it.
   try {
-    const pagesResponse = await fetch(publication.pagesUrl, {
-      method: "GET",
-      redirect: "follow",
-      cache: "no-store",
-      headers: { Connection: "close" },
-      signal: AbortSignal.timeout(8_000),
-    });
-    if (!pagesResponse.ok) {
+    if (!(await publicPageIsLive(publication.pagesUrl))) {
       return NextResponse.json({ status: "deploying" }, { status: 202 });
     }
   } catch {

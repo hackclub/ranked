@@ -16,8 +16,8 @@ declare global {
       info: {
         name: string;
         color: string;
-        slackId: string;
         avatarConfig: ResolvedAvatarConfig;
+        team: "blue" | "red";
       };
     };
     RoomEvent: {

@@ -51,10 +51,17 @@ const geistMono = localFont({
 });
 
 export async function generateMetadata(): Promise<Metadata> {
-  const requestHeaders = await headers();
-  const host = requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host") ?? "localhost:3000";
-  const protocol = requestHeaders.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
-  const ogImage = `${protocol}://${host}/og.png`;
+  // The configured origin wins: building this from the Host header would let
+  // a request with a spoofed host put someone else's domain into the page's
+  // share metadata (and into any cache that stores the response).
+  let origin = process.env.APP_BASE_URL?.replace(/\/$/, "");
+  if (!origin) {
+    const requestHeaders = await headers();
+    const host = requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host") ?? "localhost:3000";
+    const protocol = requestHeaders.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
+    origin = `${protocol}://${host}`;
+  }
+  const ogImage = `${origin}/og.png`;
 
   return {
     title: "Hack Club Ranked",

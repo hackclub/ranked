@@ -1,5 +1,6 @@
 import { getSql } from "@/db";
-import { deleteRecordingObjects } from "@/app/lib/r2";
+import { deleteRecordingObjects, recordingStorageConfigured } from "@/app/lib/r2";
+import { logAudit } from "@/app/lib/audit";
 import type { NextRequest } from "next/server";
 
 type ExpiredRecordingRow = {
@@ -62,4 +63,87 @@ export function isSameOriginMutation(request: NextRequest) {
       ? "http"
       : "https");
   return origin === `${protocol}://${host}`;
+}
+
+// How long a player may be in a live match without a clip reaching storage
+// before their recording counts as missing. Clips are 10 seconds long and are
+// retried on upload, so a working client lands one well inside this window.
+const RECORDING_STALE_SECONDS = 60;
+
+// The safety recording is produced by each player's own browser, so the server
+// can't make it happen — but it can notice when it isn't happening. Enforcement
+// is on whenever recording storage is configured; RECORDING_ENFORCEMENT=off is
+// the escape hatch for a storage outage (calls then run unrecorded, exactly as
+// they do on a deployment with no storage at all).
+export function recordingEnforced() {
+  return recordingStorageConfigured() && process.env.RECORDING_ENFORCEMENT !== "off";
+}
+
+export type RecordingHealth = {
+  participant: boolean;
+  // Inside the match's timed window — the only time its call is open.
+  live: boolean;
+  // False once a player has been in a live match past the grace period with no
+  // clip uploaded recently. Always true when enforcement is off.
+  ok: boolean;
+};
+
+export async function recordingHealth(matchId: string, userId: string): Promise<RecordingHealth> {
+  const rows = await getSql()`
+    SELECT
+      (m.status='active' AND m.started_at<=NOW() AND NOW()<m.ends_at) AS live,
+      (
+        -- Grace: the match, or this player's time in it, has only just begun.
+        -- presence_confirmed_at is set once by the first heartbeat and never
+        -- moves, so a client can't keep itself inside the grace period.
+        m.started_at>NOW()-(${RECORDING_STALE_SECONDS}||' seconds')::interval
+        OR COALESCE(mp.presence_confirmed_at,NOW())>NOW()-(${RECORDING_STALE_SECONDS}||' seconds')::interval
+        OR EXISTS (
+          SELECT 1 FROM match_recordings r
+          JOIN recording_segments s ON s.recording_id=r.id
+          WHERE r.match_id=mp.match_id AND r.user_id=mp.user_id
+            AND s.status='uploaded'
+            AND s.uploaded_at>NOW()-(${RECORDING_STALE_SECONDS}||' seconds')::interval
+        )
+      ) AS recorded
+    FROM match_players mp JOIN matches m ON m.id=mp.match_id
+    WHERE mp.match_id=${matchId} AND mp.user_id=${userId}
+    LIMIT 1
+  `;
+  const row = rows[0] as { live: boolean; recorded: boolean } | undefined;
+  if (!row) return { participant: false, live: false, ok: false };
+  return {
+    participant: true,
+    live: row.live,
+    ok: !recordingEnforced() || !row.live || row.recorded,
+  };
+}
+
+// Leaves one audit entry per player per match the first time their recording
+// goes missing, so a reviewer looking into a report can see that a player was
+// in the call without one. Bounded to recent rows so the existence check can
+// use the audit log's created_at index.
+export async function flagMissingRecording(
+  matchId: string,
+  user: { id: string; name: string; email: string },
+) {
+  try {
+    const existing = await getSql()`
+      SELECT 1 FROM audit_log
+      WHERE created_at>NOW()-INTERVAL '6 hours' AND action='recording.missing'
+        AND target_id=${matchId} AND actor_id=${user.id}
+      LIMIT 1
+    `;
+    if (existing.length) return;
+    await logAudit({
+      actor: { id: user.id, name: user.name, email: user.email },
+      action: "recording.missing",
+      summary: `${user.name} was in a live match with no safety recording reaching storage`,
+      targetType: "match",
+      targetId: matchId,
+      metadata: { staleAfterSeconds: RECORDING_STALE_SECONDS },
+    });
+  } catch (error) {
+    console.error("Could not flag a missing recording", error);
+  }
 }

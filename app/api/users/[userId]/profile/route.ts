@@ -9,6 +9,7 @@ import { getSql } from "@/db";
 // GitHub login storage just for this.
 const REPO_ROOT_PATTERN = /^(https:\/\/github\.com\/[^/]+\/hackclubranked)\//;
 const PAGES_ROOT_PATTERN = /^(https:\/\/[^/]+\.github\.io\/hackclubranked\/)/;
+const GITHUB_LOGIN_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
 
 export async function GET(
   request: NextRequest,
@@ -18,7 +19,7 @@ export async function GET(
   if (!viewer) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { userId } = await context.params;
 
-  const rows = await getSql()`SELECT id, COALESCE(slack_username, name) AS name, avatar, elo, coding_seconds AS "codingSeconds",
+  const rows = await getSql()`SELECT id, COALESCE(slack_username, split_part(name, ' ', 1)) AS name, avatar, elo, coding_seconds AS "codingSeconds",
       matches_played AS "matchesPlayed", banner_color AS "bannerColor"
     FROM users WHERE id=${userId}`;
   const player = rows[0] as
@@ -52,7 +53,9 @@ export async function GET(
       FROM hackatime_connections WHERE user_id=${userId}`;
     const githubUsername = (hackatime[0] as { githubUsername: string | null } | undefined)
       ?.githubUsername;
-    if (githubUsername) {
+    // This value comes from Hackatime, not GitHub, so it's held to GitHub's
+    // own login format before it's allowed to become part of a link's host.
+    if (githubUsername && GITHUB_LOGIN_PATTERN.test(githubUsername)) {
       githubRepoUrl = `https://github.com/${githubUsername}/hackclubranked`;
       githubGalleryUrl = `https://${githubUsername}.github.io/hackclubranked/`;
     }

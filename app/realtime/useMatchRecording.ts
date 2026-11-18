@@ -126,6 +126,7 @@ export function useMatchRecording(
     let cancelled = false;
     let recorder: MediaRecorder | null = null;
     let segmentTimer: number | undefined;
+    let retryTimer: number | undefined;
 
     const queueUpload = (blob: Blob, durationMs: number) => {
       const segmentIndex = nextIndexRef.current++;
@@ -187,6 +188,10 @@ export function useMatchRecording(
         if (!cancelled) {
           setStatus("error");
           setError(reason instanceof Error ? reason.message : "Recording could not start.");
+          // Keep trying. The server stops this player sending to the call
+          // while no clips are arriving, so a recorder that gave up after one
+          // failed start would leave them muted for the rest of the match.
+          retryTimer = window.setTimeout(() => void startSegment(), 5_000);
         }
       }
     };
@@ -195,6 +200,7 @@ export function useMatchRecording(
     return () => {
       cancelled = true;
       window.clearTimeout(segmentTimer);
+      window.clearTimeout(retryTimer);
       if (recorder?.state === "recording") recorder.stop();
     };
   // The MediaStream object changes when the participant changes devices.

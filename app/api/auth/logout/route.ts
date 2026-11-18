@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { appUrl } from "@/app/lib/urls";
+import { appUrl, isCrossSiteMutation } from "@/app/lib/urls";
 
 export async function POST(request: NextRequest) {
+  if (isCrossSiteMutation(request)) {
+    return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
+  }
   const wantsJson = request.headers.get("accept")?.includes("application/json");
   const response = wantsJson
     ? NextResponse.json({ ok: true })

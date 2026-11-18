@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { getSql } from "@/db";
 import { decryptSession, SESSION_COOKIE } from "@/app/lib/session";
 import type { AvatarConfig } from "@/app/lib/avatar";
+import { isCrossSiteMutation } from "@/app/lib/urls";
 
 export type DbUser = {
   id: string;
@@ -24,6 +25,9 @@ export type DbUser = {
 };
 
 export async function currentUser(request: NextRequest): Promise<DbUser | null> {
+  // Every authenticated mutation resolves its user here, so this is the one
+  // place a forged cross-site request has to be turned away.
+  if (isCrossSiteMutation(request)) return null;
   const session = await decryptSession(request.cookies.get(SESSION_COOKIE)?.value);
   if (!session?.user) return null;
   const rows = await getSql()`

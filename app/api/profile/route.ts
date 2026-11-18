@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { currentUser } from "@/app/lib/current-user";
+import { rateLimited, tooManyRequests } from "@/app/lib/rate-limit";
 import { getSql } from "@/db";
 import { AVATAR_PARTS, isOwnedOrStarterValue, normalizeAvatar } from "@/app/lib/avatar";
 import { STARTING_ELO, type Experience } from "@/app/lib/rank";
 
 const experiences = new Set(["beginner", "intermediate", "expert"]);
 const SLACK_USERNAME_PATTERN = /^[a-z0-9._-]{1,80}$/;
+
+function isUniqueViolation(error: unknown) {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "23505";
+}
 
 export async function GET(request: NextRequest) {
   const user = await currentUser(request);
@@ -15,6 +20,9 @@ export async function GET(request: NextRequest) {
 export async function PATCH(request: NextRequest) {
   const user = await currentUser(request);
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // Username changes are checked against every other player's, so an
+  // unmetered loop here doubles as a way to enumerate which names are taken.
+  if (await rateLimited(`profile:${user.id}`, 120, 600)) return tooManyRequests();
   const body = await request.json();
   const experience = experiences.has(body.experience) ? body.experience : user.experience;
   // Placement (choosing a starting bracket) only ever happens once, the
@@ -59,11 +67,20 @@ export async function PATCH(request: NextRequest) {
       );
     }
   }
-  const rows = await getSql()`
-    UPDATE users SET experience = ${experience}::experience_level, avatar = ${JSON.stringify(avatar)}::jsonb,
-      slack_username = ${slackUsername}, elo = COALESCE(${startingElo}, elo), updated_at = NOW()
-    WHERE id = ${user.id}
-    RETURNING experience, avatar, slack_username AS "slackUsername", elo
-  `;
-  return NextResponse.json({ user: rows[0] });
+  try {
+    const rows = await getSql()`
+      UPDATE users SET experience = ${experience}::experience_level, avatar = ${JSON.stringify(avatar)}::jsonb,
+        slack_username = ${slackUsername}, elo = COALESCE(${startingElo}, elo), updated_at = NOW()
+      WHERE id = ${user.id}
+      RETURNING experience, avatar, slack_username AS "slackUsername", elo
+    `;
+    return NextResponse.json({ user: rows[0] });
+  } catch (error) {
+    // The check above can lose a race with another player claiming the same
+    // name; the database's unique constraint is what actually decides it.
+    if (isUniqueViolation(error)) {
+      return NextResponse.json({ error: "That username is already taken." }, { status: 409 });
+    }
+    throw error;
+  }
 }

@@ -22,7 +22,6 @@ import {
   useMatchRecording,
 } from "./realtime/useMatchRecording";
 import { getYjsProviderForRoom } from "@liveblocks/yjs";
-import { isAdmin } from "./lib/admin";
 import {
   RANK_TIERS,
   rankProgress,
@@ -30,6 +29,7 @@ import {
   type RankTier,
 } from "./lib/rank";
 import { recordingConsentCopy } from "./lib/recording-policy";
+import { TAILWIND_FILE_NAME, TAILWIND_PREVIEW_PATH } from "./lib/tailwind";
 import {
   AvatarCustomizer,
   ScribbleAvatar,
@@ -73,6 +73,9 @@ type AuthState = {
     hBucks: number;
     avatar: AvatarConfig;
     bannerColor: string | null;
+    // Set by /api/auth/me from the server-side admin allowlist. Only decides
+    // which controls are shown — the admin routes enforce it themselves.
+    isAdmin?: boolean;
   } | null;
   github: { login: string; avatarUrl: string | null } | null;
   hackatime: { id: string | null; email: string | null } | null;
@@ -117,7 +120,6 @@ type DashboardData = {
     id: string;
     friendshipId: string;
     name: string;
-    slackId: string | null;
     avatar: AvatarConfig | null;
     lastSeenAt: string | null;
     status: string;
@@ -366,6 +368,69 @@ const PREVIEW_IFRAME_ALLOW = [
 ].join("; ");
 const PREVIEW_MAX_HTML_LENGTH = 1_000_000;
 
+// How long a page gets to settle (Tailwind generating its styles, the
+// player's own scripts building the DOM) before its rendered HTML is captured
+// for the opponent, and how long a slightly out-of-date capture is preferred
+// over falling back to unrendered source while the player is mid-edit.
+const RENDERED_SNAPSHOT_SETTLE_MS = 1_200;
+const RENDERED_SNAPSHOT_STALE_MS = 6_000;
+
+// The opponent's snapshot is whatever their client chose to send, so it is
+// treated as hostile. It is shown as a still picture of their page: the frame
+// it goes in has scripts switched off entirely (sandbox=""), and this policy
+// stops it loading anything from the network at all. That second part is what
+// keeps a snapshot from learning the viewer's IP address — a remote image,
+// stylesheet or font is a request to a server the opponent chose. The cost is
+// that images and web fonts hosted elsewhere don't appear in this peek (they
+// do on the published site voters see). Flip the switch below to allow https
+// images, fonts and stylesheets back in if that trade isn't wanted.
+const OPPONENT_SNAPSHOT_ALLOW_REMOTE_MEDIA = false;
+const OPPONENT_SNAPSHOT_CSP = [
+  "default-src 'none'",
+  `style-src 'unsafe-inline'${OPPONENT_SNAPSHOT_ALLOW_REMOTE_MEDIA ? " https:" : ""}`,
+  `img-src data:${OPPONENT_SNAPSHOT_ALLOW_REMOTE_MEDIA ? " https:" : ""}`,
+  `media-src data:${OPPONENT_SNAPSHOT_ALLOW_REMOTE_MEDIA ? " https:" : ""}`,
+  `font-src data:${OPPONENT_SNAPSHOT_ALLOW_REMOTE_MEDIA ? " https:" : ""}`,
+  "form-action 'none'",
+  "base-uri 'none'",
+].join("; ");
+
+// Re-parses the snapshot and puts the policy first in <head>, ahead of
+// anything the sender wrote, so none of their markup or scripts can load
+// before it applies. Runs on the viewer's side: the sender is never trusted
+// to have included it.
+function hardenOpponentSnapshot(html: string) {
+  if (!html || html.length > PREVIEW_MAX_HTML_LENGTH) return null;
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  // Nothing in here can run in the viewer's frame anyway; dropping it keeps a
+  // <noscript> fallback from showing up in place of the rendered page.
+  doc
+    .querySelectorAll("script, noscript, iframe, object, embed, meta[http-equiv]")
+    .forEach((node) => node.remove());
+  const policy = doc.createElement("meta");
+  policy.httpEquiv = "Content-Security-Policy";
+  policy.content = OPPONENT_SNAPSHOT_CSP;
+  doc.head.prepend(policy);
+  return `<!doctype html>\n${doc.documentElement.outerHTML}`;
+}
+
+// Published builds are judged on their real GitHub Pages origin, where
+// allow-same-origin only gives a site access to its own storage. That flag is
+// never granted to anything else: a URL on this app's own origin (local seed
+// builds, for one) framed with allow-scripts + allow-same-origin could read
+// the signed-in voter's session and act as them.
+function voteFrameSandbox(pagesUrl: string) {
+  try {
+    const url = new URL(pagesUrl);
+    if (url.protocol === "https:" && url.hostname.endsWith(".github.io")) {
+      return "allow-scripts allow-same-origin";
+    }
+  } catch {
+    // Not a URL at all — fall through to the locked-down sandbox.
+  }
+  return "allow-scripts";
+}
+
 // GitHub Pages usually finishes its first build well within this window; it's
 // just the countdown estimate shown while we poll for the real thing.
 const PAGES_BUILD_ESTIMATE_SECONDS = 30;
@@ -458,6 +523,30 @@ if (!window.__rankedLiveUpdateBound) {
   });
 }`
     : "";
+  // The opponent is shown this page with scripts switched off, so what they
+  // get has to be the page as it looks *after* scripts have run: the live DOM
+  // (including the <style> Tailwind generated), serialized on request and
+  // handed to the parent, minus anything executable.
+  const snapshotShim = preview
+    ? `
+if (!window.__rankedSnapshotBound) {
+  window.__rankedSnapshotBound = true;
+  window.addEventListener("message", function (e) {
+    if (
+      e.source !== window.parent ||
+      !e.data ||
+      e.data.source !== "ranked-preview" ||
+      e.data.type !== "snapshot-request"
+    ) return;
+    var copy = document.documentElement.cloneNode(true);
+    var inert = copy.querySelectorAll("script, noscript, iframe, object, embed");
+    for (var i = 0; i < inert.length; i++) inert[i].parentNode.removeChild(inert[i]);
+    var html = "<!doctype html>\\n" + copy.outerHTML;
+    if (html.length > ${PREVIEW_MAX_HTML_LENGTH}) return;
+    window.parent.postMessage({ source: "ranked-preview", type: "snapshot", id: e.data.id, html: html }, "*");
+  });
+}`
+    : "";
   return `
 window.__RANKED_PREVIEW__ = ${preview};${normalize}
 window.goTo = function goTo(page) {
@@ -466,7 +555,7 @@ window.goTo = function goTo(page) {
   } else {
     window.location.href = page;
   }
-};${clickShim}${liveUpdateShim}`;
+};${clickShim}${liveUpdateShim}${snapshotShim}`;
 }
 
 // Assembles one HTML page for preview/publish by inlining every CSS file (as
@@ -502,15 +591,17 @@ function buildPage(
   // before anything of ours is added, so our tags are appended as actual DOM
   // nodes that can never be un-parsed back into an earlier broken tag.
   const doc = new DOMParser().parseFromString(base, "text/html");
-  // Tailwind's Play CDN build needs no bundler, so it's the only way to give
+  // Tailwind's browser build needs no bundler, so it's the only way to give
   // players utility classes on a raw html/css/js page with no build step —
   // it injects its own <style> at load, ahead of styles.css in source order
-  // so a player's own CSS still wins on conflicting rules. It's a no-op (a
-  // few KB fetched, nothing generated) for anyone who never types a
-  // Tailwind class, and this same output is what gets committed on publish,
-  // so the deployed GitHub Pages site renders identically to the preview.
+  // so a player's own CSS still wins on conflicting rules. It's a no-op for
+  // anyone who never types a Tailwind class. The script is a fixed copy kept
+  // in this repo rather than loaded from Tailwind's CDN: the preview gets it
+  // from this app, and a published build references the copy committed next
+  // to it (see publishWebsite), so a deployed site renders the same as the
+  // preview and depends on no third-party server.
   const tailwindScript = doc.createElement("script");
-  tailwindScript.src = "https://cdn.tailwindcss.com";
+  tailwindScript.src = opts.preview ? TAILWIND_PREVIEW_PATH : TAILWIND_FILE_NAME;
   doc.head.appendChild(tailwindScript);
   const styleEl = doc.createElement("style");
   styleEl.textContent = styles;
@@ -1661,7 +1752,7 @@ function Home({
       )}
       <ProgressBar
         elo={auth.user?.elo}
-        isAdmin={isAdmin(auth.user?.email)}
+        isAdmin={Boolean(auth.user?.isAdmin)}
         onAdjust={onAdjustElo}
       />
       <section className="home-grid">
@@ -3174,7 +3265,7 @@ function Lobby({
                 <i className="dock-dot" /> {matchingPhase}
               </p>
             )}
-            {isAdmin(user.email) && !matching && (
+            {user.isAdmin && !matching && (
               <button
                 className="test-lobby-button"
                 onClick={() => void testEmptyLobby()}
@@ -3763,6 +3854,11 @@ function Match({
     },
     [team, toast],
   );
+  // The server reports, on every heartbeat, whether this player's safety
+  // recording is actually reaching storage. Until it says otherwise the
+  // recording is assumed fine: a match starts inside a grace period.
+  const [recordingOk, setRecordingOk] = useState(true);
+  const callLive = seconds > 0 && !outcome;
   const { status, localStream, remotePeers } = useRealtimeRoom(
     `ranked:call:${match.id}`,
     mic,
@@ -3772,11 +3868,15 @@ function Match({
     micDeviceId || undefined,
     videoDeviceId || undefined,
     onPeerVideoLost,
+    // The call and its recording share one lifetime (callLive) and one
+    // condition (recordingOk): there is never a moment where this player is
+    // sending audio or video to someone without it also being recorded.
+    { enabled: callLive, transmit: recordingOk },
   );
   const { status: recordingStatus, error: recordingError } = useMatchRecording(
     match.id,
     localStream,
-    seconds > 0 && !outcome,
+    callLive,
   );
   const room = useCodeRoom(`ranked:code:${match.id}:${team}`);
   // The call room is one shared room for the whole match (both teams, so
@@ -3819,6 +3919,14 @@ function Match({
   }, [status, toast]);
 
   useEffect(() => {
+    if (!recordingOk && callLive) {
+      toast(
+        "Your match recording is not uploading, so your camera and mic are paused for other players until it recovers",
+      );
+    }
+  }, [callLive, recordingOk, toast]);
+
+  useEffect(() => {
     if (recordingError) toast(`Recording problem: ${recordingError}`);
   }, [recordingError, toast]);
 
@@ -3852,7 +3960,12 @@ function Match({
       // before the leader-election below existed, and this keeps any match
       // still carrying that leftover doubled file-list from ever rendering
       // duplicate tabs, regardless of what's physically in the Yjs array.
-      const names = [...new Set(fileList.toArray())];
+      // Names also go through the same pattern addFile enforces: this array
+      // is shared, so a teammate's client can put anything in it, and these
+      // names end up as object keys and inside the preview's inline script.
+      const names = [...new Set(fileList.toArray())].filter(
+        (name) => typeof name === "string" && FILE_NAME_PATTERN.test(name),
+      );
       const resolved = names.length ? names : Object.keys(starterFiles);
       setFileOrder(resolved);
       setOpenTabs((current) =>
@@ -4043,11 +4156,19 @@ function Match({
     setTabForPreviewReset(tab);
     setPreviewPage(null);
   }
+  // When the timer runs out the preview is pointed at index.html: that is the
+  // page the opponent's final snapshot (and the results screen) is anchored
+  // to, and the rendered copy they're sent comes from this preview.
+  const [previewAnchoredAtEnd, setPreviewAnchoredAtEnd] = useState(false);
+  if (seconds === 0 && !previewAnchoredAtEnd) {
+    setPreviewAnchoredAtEnd(true);
+    setPreviewPage("index.html");
+  }
   const activeHtmlFile = useMemo(
     () =>
-      previewPage && files[previewPage] !== undefined
+      previewPage && Object.hasOwn(files, previewPage)
         ? previewPage
-        : tab.endsWith(".html") && files[tab] !== undefined
+        : tab.endsWith(".html") && Object.hasOwn(files, tab)
           ? tab
           : "index.html",
     [previewPage, tab, files],
@@ -4057,8 +4178,10 @@ function Match({
     [files, fileOrder, activeHtmlFile],
   );
   const previewDocRef = useRef(previewDoc);
+  const previewChangedAtRef = useRef(0);
   useEffect(() => {
     previewDocRef.current = previewDoc;
+    previewChangedAtRef.current = Date.now();
   }, [previewDoc]);
   // The snapshot an opponent sees mid-match intentionally follows whatever
   // page you're actively working on (a live peek at your progress). But once
@@ -4078,6 +4201,55 @@ function Match({
     if (seconds === 0) matchEndedRef.current = true;
   }, [seconds]);
   const ownPreviewFrames = useRef<Set<Window>>(new Set());
+  // What the opponent is sent is a rendered copy of this player's own preview
+  // (see snapshotShim): `source` is the document that was in the frame when
+  // the copy was asked for, so a copy is only ever presented as up to date
+  // for the exact source it was rendered from.
+  const renderedSnapshotRef = useRef<{ source: string; html: string } | null>(
+    null,
+  );
+  const snapshotRequestRef = useRef<{ id: number; source: string } | null>(
+    null,
+  );
+  const snapshotTimerRef = useRef<number | undefined>(undefined);
+  const requestRenderedSnapshot = useCallback((source: string) => {
+    window.clearTimeout(snapshotTimerRef.current);
+    snapshotTimerRef.current = window.setTimeout(() => {
+      const id = (snapshotRequestRef.current?.id ?? 0) + 1;
+      snapshotRequestRef.current = { id, source };
+      for (const win of ownPreviewFrames.current) {
+        win.postMessage(
+          { source: "ranked-preview", type: "snapshot-request", id },
+          "*",
+        );
+      }
+    }, RENDERED_SNAPSHOT_SETTLE_MS);
+  }, []);
+  useEffect(() => {
+    function handleSnapshotMessage(event: MessageEvent) {
+      const pending = snapshotRequestRef.current;
+      if (
+        event.data?.source !== "ranked-preview" ||
+        event.data?.type !== "snapshot" ||
+        !ownPreviewFrames.current.has(event.source as Window) ||
+        !pending ||
+        event.data.id !== pending.id ||
+        typeof event.data.html !== "string" ||
+        event.data.html.length > PREVIEW_MAX_HTML_LENGTH
+      ) {
+        return;
+      }
+      renderedSnapshotRef.current = {
+        source: pending.source,
+        html: event.data.html,
+      };
+    }
+    window.addEventListener("message", handleSnapshotMessage);
+    return () => {
+      window.removeEventListener("message", handleSnapshotMessage);
+      window.clearTimeout(snapshotTimerRef.current);
+    };
+  }, []);
   const registerOwnPreviewFrame = useCallback(
     (el: HTMLIFrameElement | null) => {
       if (!el?.contentWindow) return;
@@ -4098,9 +4270,10 @@ function Match({
           },
           "*",
         );
+        requestRenderedSnapshot(previewDocRef.current);
       });
     },
-    [],
+    [requestRenderedSnapshot],
   );
   // The iframe's srcDoc is only reset when the active page actually changes
   // (a real "navigate to a different page" moment, where a fresh load reads
@@ -4148,7 +4321,8 @@ function Match({
         "*",
       );
     }
-  }, []);
+    requestRenderedSnapshot(latest);
+  }, [requestRenderedSnapshot]);
   // Pushes shortly after typing actually pauses, rather than on a fixed
   // clock — noticeably snappier for normal typing (short pauses between
   // words/lines) than waiting out a fixed interval, while still not pushing
@@ -4174,7 +4348,7 @@ function Match({
         return;
       }
       const page = event.data.page;
-      if (typeof page === "string" && files[page] !== undefined) {
+      if (typeof page === "string" && Object.hasOwn(files, page)) {
         setPreviewPage(page);
       }
     }
@@ -4434,8 +4608,12 @@ function Match({
     (result: {
       match?: MatchOutcome | null;
       disconnect?: DisconnectNotice | null;
+      recordingOk?: boolean;
     }) => {
       setDisconnect(result.disconnect ?? null);
+      if (typeof result.recordingOk === "boolean") {
+        setRecordingOk(result.recordingOk);
+      }
       if (
         result.match &&
         Number.isFinite(Number(result.match.remainingSeconds))
@@ -4630,18 +4808,35 @@ function Match({
       const result = (await response.json()) as {
         snapshot?: { html?: string } | null;
       };
-      if (result.snapshot?.html) setOpponentSnapshot(result.snapshot.html);
+      const hardened =
+        typeof result.snapshot?.html === "string"
+          ? hardenOpponentSnapshot(result.snapshot.html)
+          : null;
+      if (hardened) setOpponentSnapshot(hardened);
     },
     [match.id],
   );
 
+  // The opponent's frame runs no scripts, so the rendered copy is what makes
+  // their view match this player's. While this player is mid-edit the last
+  // rendered copy is kept for a few seconds rather than flashing unrendered
+  // source at the opponent; if no rendered copy exists for the current source
+  // after that (or the match is over and it's for the wrong page), the plain
+  // source is sent — still correct, just without anything scripts produce.
+  const snapshotForOpponent = useCallback(() => {
+    const ended = matchEndedRef.current;
+    const source = ended ? finalPreviewDocRef.current : previewDocRef.current;
+    const rendered = renderedSnapshotRef.current;
+    if (!rendered) return source;
+    if (rendered.source === source) return rendered.html;
+    return !ended &&
+      Date.now() - previewChangedAtRef.current < RENDERED_SNAPSHOT_STALE_MS
+      ? rendered.html
+      : source;
+  }, []);
+
   useEffect(() => {
-    const sync = () =>
-      postSnapshot(
-        matchEndedRef.current
-          ? finalPreviewDocRef.current
-          : previewDocRef.current,
-      );
+    const sync = () => postSnapshot(snapshotForOpponent());
     const initial = window.setTimeout(() => void sync(), 1000);
     // Fast enough that the opponent panel reads as close to live; 3s already
     // matches the cadence the duo-state poll runs at elsewhere in this app
@@ -4652,17 +4847,20 @@ function Match({
       window.clearTimeout(initial);
       window.clearInterval(interval);
     };
-  }, [postSnapshot]);
+  }, [postSnapshot, snapshotForOpponent]);
 
   // The periodic sync above can take up to a few seconds to catch up once
   // the timer hits zero, which is long enough that the results screen
   // (opened right after) would still show a stale mid-match snapshot. Push
   // the index.html-anchored one immediately instead of waiting for that tick.
+  // This player's own preview is pointed at index.html at the same moment
+  // (see previewAnchoredAtEnd), so the rendered copy the following ticks send
+  // is of that page too.
   const matchJustEnded = seconds === 0;
   useEffect(() => {
     if (!matchJustEnded) return;
-    void postSnapshot(finalPreviewDocRef.current);
-  }, [matchJustEnded, postSnapshot]);
+    void postSnapshot(snapshotForOpponent());
+  }, [matchJustEnded, postSnapshot, snapshotForOpponent]);
 
   useEffect(() => {
     if (seconds === 0 && !outcome)
@@ -4682,8 +4880,8 @@ function Match({
   };
 
   const isTestMatch = Boolean(match.isTest);
-  const canSkipPublish = isTestMatch && isAdmin(auth.user?.email);
-  const canForceEndTimer = isAdmin(auth.user?.email);
+  const canSkipPublish = isTestMatch && Boolean(auth.user?.isAdmin);
+  const canForceEndTimer = Boolean(auth.user?.isAdmin);
 
   const disconnectSeconds = disconnect
     ? Math.max(0, disconnect.secondsRemaining)
@@ -4735,16 +4933,22 @@ function Match({
           </div>
           <div className="match-actions">
             <div
-              className={`match-recording-indicator ${recordingStatus}`}
+              className={`match-recording-indicator ${recordingOk ? recordingStatus : "error"}`}
               role="status"
-              title="This match is currently being recorded"
+              title={
+                recordingOk
+                  ? "This match is currently being recorded"
+                  : "Your recording is not uploading, so your camera and mic are paused for other players"
+              }
             >
               <i />
               <span>
-                {recordingStatus === "error" ||
-                recordingStatus === "unsupported"
-                  ? "REC ERROR"
-                  : "REC"}
+                {!recordingOk
+                  ? "REC ERROR · CALL PAUSED"
+                  : recordingStatus === "error" ||
+                      recordingStatus === "unsupported"
+                    ? "REC ERROR"
+                    : "REC"}
               </span>
             </div>
             <button
@@ -5065,7 +5269,9 @@ function Match({
                 ))}
               </div>
               <span>{codeCollaborators.length + 1} editing</span>
-              <b>{status === "connected" ? "synced" : status}</b>
+              {/* The call room is left when the match ends, so its last status
+                  says nothing about the editor from then on. */}
+              <b>{!callLive || status === "connected" ? "synced" : status}</b>
             </div>
           </div>
           <div
@@ -5414,7 +5620,7 @@ function Match({
               <iframe
                 title="Opponent website preview"
                 srcDoc={opponentSnapshot}
-                sandbox="allow-scripts"
+                sandbox=""
                 allow={PREVIEW_IFRAME_ALLOW}
                 referrerPolicy="no-referrer"
               />
@@ -5582,7 +5788,7 @@ function Match({
               <iframe
                 title="Expanded opponent preview"
                 srcDoc={opponentSnapshot}
-                sandbox="allow-scripts"
+                sandbox=""
                 allow={PREVIEW_IFRAME_ALLOW}
                 referrerPolicy="no-referrer"
               />
@@ -5679,7 +5885,7 @@ function Match({
                     <iframe
                       title="Opponent's site"
                       srcDoc={opponentSnapshot}
-                      sandbox="allow-scripts"
+                      sandbox=""
                       allow={PREVIEW_IFRAME_ALLOW}
                       referrerPolicy="no-referrer"
                     />
@@ -6007,11 +6213,12 @@ function Leaderboard({
   useEffect(() => {
     const params = new URLSearchParams({ type: board });
     if (requestedPage) params.set("page", String(requestedPage));
+    if (!auth.user) return;
     fetch(`/api/leaderboard?${params}`)
-      .then((response) => response.json())
+      .then((response) => (response.ok ? response.json() : null))
       .then((result) => setData(result))
       .catch(() => setData(null));
-  }, [board, requestedPage]);
+  }, [auth.user, board, requestedPage]);
 
   const onYourPage = Boolean(data?.yourPage && data.yourPage === data.page);
 
@@ -6045,6 +6252,12 @@ function Leaderboard({
           <span>{board === "elo" ? "ELO" : "hours"}</span>
           <span>matches played</span>
         </div>
+        {!auth.user && (
+          <div className="leader-row">
+            <span />
+            <b>sign in to see the leaderboard</b>
+          </div>
+        )}
         {data?.players.map((row, index) => {
           const rank = (data.page - 1) * data.pageSize + index + 1;
           const isYou = row.id === auth.user?.id;
@@ -6848,7 +7061,7 @@ function Voting({
                 <iframe
                   title="Build A"
                   src={match.sites.blue.pagesUrl}
-                  sandbox="allow-scripts allow-same-origin"
+                  sandbox={voteFrameSandbox(match.sites.blue.pagesUrl)}
                   allow={PREVIEW_IFRAME_ALLOW}
                   referrerPolicy="no-referrer"
                 />
@@ -6887,7 +7100,7 @@ function Voting({
                 <iframe
                   title="Build B"
                   src={match.sites.red.pagesUrl}
-                  sandbox="allow-scripts allow-same-origin"
+                  sandbox={voteFrameSandbox(match.sites.red.pagesUrl)}
                   allow={PREVIEW_IFRAME_ALLOW}
                   referrerPolicy="no-referrer"
                 />
@@ -7522,7 +7735,7 @@ export default function RankedApp() {
           onProfile={() => setProfileOpen(true)}
           balance={auth.user?.hBucks ?? 0}
           avatar={auth.user?.avatar}
-          showAdmin={isAdmin(auth.user?.email)}
+          showAdmin={Boolean(auth.user?.isAdmin)}
           wardrobeUnlocked={avatarInventory.size > 0}
           toast={toast}
         />
@@ -7623,7 +7836,7 @@ export default function RankedApp() {
           onAvatarUpdated={handleAvatarUpdated}
         />
       )}
-      {screen === "admin" && auth.user && isAdmin(auth.user.email) && (
+      {screen === "admin" && auth.user?.isAdmin && (
         <AdminAuditLog navigate={navigate} />
       )}
       {profileOpen && (

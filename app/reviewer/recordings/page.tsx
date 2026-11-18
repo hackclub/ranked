@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getSession } from "@/app/lib/session";
-import { isRecordingReviewer } from "@/app/lib/recording-policy";
+import { isRecordingReviewer } from "@/app/lib/admin";
 import RecordingReviewDashboard from "./RecordingReviewDashboard";
 
 export const dynamic = "force-dynamic";

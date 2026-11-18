@@ -10,6 +10,7 @@ import {
   PRIVATE_RECORDING_HEADERS,
   purgeExpiredRecordings,
 } from "@/app/lib/recordings";
+import { rateLimited, tooManyRequests } from "@/app/lib/rate-limit";
 import { getSql } from "@/db";
 
 export async function POST(request: NextRequest) {
@@ -25,6 +26,9 @@ export async function POST(request: NextRequest) {
       { error: "Unauthorized" },
       { status: 401, headers: PRIVATE_RECORDING_HEADERS },
     );
+  }
+  if (await rateLimited(`recording-session:${user.id}`, 20, 60)) {
+    return tooManyRequests(undefined, PRIVATE_RECORDING_HEADERS);
   }
   const body = await request.json().catch(() => null);
   const matchId = typeof body?.matchId === "string" ? body.matchId : "";

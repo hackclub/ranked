@@ -7,6 +7,8 @@ import {
   completeSubmissionAddresses,
   getHackClubProfile,
 } from "@/app/lib/hack-club-profile";
+import { rateLimited, tooManyRequests } from "@/app/lib/rate-limit";
+import { encryptShipping, type ShippingAddress } from "@/app/lib/shipping";
 import { getSql } from "@/db";
 
 export async function GET(request: NextRequest) {
@@ -20,15 +22,18 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const user = await currentUser(request);
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const { itemId, addressId } = await request.json();
+  const body = (await request.json().catch(() => null)) as { itemId?: unknown; addressId?: unknown } | null;
+  const itemId = typeof body?.itemId === "string" ? body.itemId : "";
+  const addressId = typeof body?.addressId === "string" ? body.addressId : "";
   const item = shopItemById(itemId);
   if (!item) return NextResponse.json({ error: "Unknown item" }, { status: 400 });
+  if (await rateLimited(`shop-order:${user.id}`, 30, 600)) return tooManyRequests();
 
   // Shipping now always resolves from the player's own Hack Club Auth
   // addresses, keyed by the id they picked in the dropdown, rather than
   // trusting whatever free-text a form submitted — same reasoning as the
   // match-publish flow's move to a server-resolved HCA address.
-  let shipping: Record<string, string | null> | null = null;
+  let shipping: ShippingAddress | null = null;
   if (item.kind === "avatar" || item.kind === "banner") {
     const owned = await getSql()`SELECT 1 FROM shop_orders WHERE user_id=${user.id} AND item_id=${itemId} LIMIT 1`;
     if (owned.length) {
@@ -71,7 +76,9 @@ export async function POST(request: NextRequest) {
   // auto-approve instead of sitting in the manual shipping-approval queue
   // physical prizes go through.
   const status = item.kind !== "physical" ? "approved" : "pending";
-  const shippingJson = shipping ? JSON.stringify(shipping) : null;
+  // Encrypted before it goes anywhere near the database, and before the
+  // debit below — a misconfigured key fails here with nothing spent.
+  const shippingJson = shipping ? JSON.stringify(await encryptShipping(shipping)) : null;
   const result = await getSql()`WITH debit AS (
       UPDATE users SET h_bucks=h_bucks-${item.cost},updated_at=NOW() WHERE id=${user.id} AND h_bucks>=${item.cost} RETURNING h_bucks
     ), placed AS (

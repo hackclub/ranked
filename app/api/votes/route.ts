@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { logAudit } from "@/app/lib/audit";
 import { currentUser } from "@/app/lib/current-user";
+import { rateLimited, tooManyRequests } from "@/app/lib/rate-limit";
 import { addChallengeProgress } from "@/app/lib/progression";
 import { getVoteGate } from "@/app/lib/vote-gate";
 import { getSql } from "@/db";
@@ -16,7 +17,7 @@ export async function GET(request: NextRequest) {
       FROM matches m JOIN canonical p ON p.match_id=m.id
       WHERE m.status='voting' AND NOT EXISTS (SELECT 1 FROM match_players mp WHERE mp.match_id=m.id AND mp.user_id=${user.id})
         AND NOT EXISTS (SELECT 1 FROM votes v WHERE v.match_id=m.id AND v.voter_id=${user.id})
-      GROUP BY m.id HAVING COUNT(*)=2 ORDER BY m.voting_ends_at NULLS LAST, m.created_at LIMIT 1`,
+      GROUP BY m.id HAVING COUNT(*)=2 ORDER BY m.voting_ends_at NULLS LAST, m.created_at, m.id LIMIT 1`,
     getVoteGate(user.id, user.matchesPlayed),
   ]);
   return NextResponse.json({ match: rows[0] ?? null, voteGate });
@@ -25,12 +26,21 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const user = await currentUser(request);
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const { matchId, choice } = await request.json();
-  if (!matchId || !["blue", "red"].includes(choice)) return NextResponse.json({ error: "Invalid vote" }, { status: 400 });
-  const eligible = await getSql()`SELECT id FROM matches m WHERE id=${matchId} AND status='voting'
+  const body = await request.json().catch(() => null);
+  const matchId = typeof body?.matchId === "string" ? body.matchId : "";
+  const choice = body?.choice;
+  if (!matchId || (choice !== "blue" && choice !== "red")) return NextResponse.json({ error: "Invalid vote" }, { status: 400 });
+  if (await rateLimited(`vote:${user.id}`, 60, 600)) return tooManyRequests();
+  // A vote is only accepted for the match this voter is next in line to judge
+  // — the same match, in the same order, that GET hands out. Without that, a
+  // voter could pick any match id they liked (a friend's, say) and a handful
+  // of accounts could decide its ELO between them.
+  const eligible = await getSql()`SELECT m.id FROM matches m WHERE m.status='voting'
     AND NOT EXISTS (SELECT 1 FROM match_players WHERE match_id=m.id AND user_id=${user.id})
-    AND (SELECT COUNT(DISTINCT team)::int FROM publications WHERE match_id=m.id)=2`;
-  if (!eligible.length) return NextResponse.json({ error: "You cannot vote on this match." }, { status: 403 });
+    AND NOT EXISTS (SELECT 1 FROM votes v WHERE v.match_id=m.id AND v.voter_id=${user.id})
+    AND (SELECT COUNT(DISTINCT team)::int FROM publications WHERE match_id=m.id)=2
+    ORDER BY m.voting_ends_at NULLS LAST, m.created_at, m.id LIMIT 1`;
+  if (eligible[0]?.id !== matchId) return NextResponse.json({ error: "You cannot vote on this match." }, { status: 403 });
   const inserted = await getSql()`INSERT INTO votes (id, match_id, voter_id, choice) VALUES (${crypto.randomUUID()},${matchId},${user.id},${choice}::match_team)
     ON CONFLICT (match_id,voter_id) DO NOTHING RETURNING id`;
   if (inserted.length) {

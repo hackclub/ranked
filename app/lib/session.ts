@@ -1,5 +1,5 @@
 import { cookies } from "next/headers";
-import { aesGcmDecrypt, aesGcmEncrypt, aesGcmKey } from "@/app/lib/aes-gcm";
+import { aesGcmDecrypt, aesGcmEncrypt, aesGcmKey, requireSecret } from "@/app/lib/aes-gcm";
 
 export const SESSION_COOKIE = "ranked_session";
 const SESSION_MAX_AGE = 60 * 60 * 24 * 30;
@@ -27,14 +27,8 @@ export type RankedSession = {
   exp: number;
 };
 
-function sessionSecret() {
-  const secret = process.env.AUTH_SESSION_SECRET;
-  if (!secret) throw new Error("AUTH_SESSION_SECRET is required.");
-  return secret;
-}
-
 async function encryptionKey() {
-  return aesGcmKey(sessionSecret());
+  return aesGcmKey(requireSecret("AUTH_SESSION_SECRET"));
 }
 
 export async function encryptSession(session: Omit<RankedSession, "exp"> & { exp?: number }) {

@@ -1,0 +1,63 @@
+body {
+  background-color: darkslateblue;
+  color: white;
+  font-family: Papyrus, fantasy;
+}
+
+.top {
+  background-color: black;
+  padding: 10px;
+  text-align: center;
+}
+
+.top h1 {
+  color: lime;
+  font-size: 40px;
+}
+
+a {
+  color: yellow;
+}
+
+.sale {
+  font-size: 30px;
+  color: red;
+  background-color: yellow;
+  width: 300px;
+  margin: 20px auto;
+  text-align: center;
+  animation: spin 3s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.intro {
+  font-size: 20px;
+}
+
+.item {
+  float: left;
+  width: 30%;
+  border: 3px solid white;
+  margin: 5px;
+  text-align: center;
+}
+
+.price {
+  color: lime;
+  font-size: 25px;
+}
+
+.buy {
+  background-color: lime;
+  font-size: 20px;
+}
+
+.footer {
+  background-color: black;
+  text-align: center;
+  padding: 10px;
+}

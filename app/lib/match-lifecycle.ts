@@ -143,7 +143,7 @@ export async function matchOutcome(matchId: string): Promise<MatchOutcome | null
 }
 
 export async function pendingDisconnect(matchId: string): Promise<DisconnectNotice | null> {
-  const rows = await getSql()`SELECT mp.user_id AS "userId",u.name,mp.team,
+  const rows = await getSql()`SELECT mp.user_id AS "userId",COALESCE(u.slack_username, split_part(u.name, ' ', 1)) AS name,mp.team,
       COALESCE(mp.disconnect_started_at,mp.last_heartbeat_at)+INTERVAL '10 seconds' AS "expiresAt",
       GREATEST(0,CEIL(EXTRACT(EPOCH FROM (
         COALESCE(mp.disconnect_started_at,mp.last_heartbeat_at)+INTERVAL '10 seconds'-NOW()
@@ -242,4 +242,49 @@ export async function finalizeForfeit(
     ]),
   );
   return { status: "completed", remainingSeconds: 0, ...completed } satisfies MatchOutcome;
+}
+
+// How long after its timer a match may sit unfinished before it's closed out.
+// Generous on purpose: publishing happens after the timer, and a player may
+// need to come back later to sort out GitHub access before they can.
+const ABANDONED_MATCH_GRACE = "24 hours";
+
+// A match only leaves 'active' when every player publishes, so one player who
+// never does would otherwise hold it — and anyone still marked as playing in
+// it — open forever. Run from the daily cron:
+//  - if both teams have a published build, the match goes to community voting
+//    with what was published (a missing duo teammate doesn't block it);
+//  - otherwise it is cancelled with no ELO change for anyone.
+// Either way every player is released from the match.
+export async function closeAbandonedMatches() {
+  const sql = getSql();
+  const [toVoting, cancelled] = await sql.transaction([
+    sql`UPDATE matches m SET status='voting',voting_ends_at=NOW()+INTERVAL '24 hours'
+      WHERE m.status='active' AND m.is_test=FALSE
+        AND m.ends_at<NOW()-${ABANDONED_MATCH_GRACE}::interval
+        AND (SELECT COUNT(DISTINCT p.team) FROM publications p WHERE p.match_id=m.id)=2
+      RETURNING m.id`,
+    sql`UPDATE matches m SET status='cancelled',ended_at=NOW(),end_reason='abandoned'
+      WHERE m.status='active' AND m.ends_at<NOW()-${ABANDONED_MATCH_GRACE}::interval
+        AND (m.is_test=TRUE OR (SELECT COUNT(DISTINCT p.team) FROM publications p WHERE p.match_id=m.id)<2)
+      RETURNING m.id`,
+    sql`UPDATE match_players mp SET finished_at=NOW()
+      FROM matches m WHERE m.id=mp.match_id AND mp.finished_at IS NULL
+        AND m.status IN ('active','voting','cancelled')
+        AND m.ends_at<NOW()-${ABANDONED_MATCH_GRACE}::interval`,
+  ]);
+  const result = { movedToVoting: toVoting.length, cancelled: cancelled.length };
+  if (result.movedToVoting || result.cancelled) {
+    await logAudit({
+      actor: null,
+      action: "match.abandoned.closed",
+      summary: `Closed ${result.movedToVoting + result.cancelled} match(es) left unfinished for over ${ABANDONED_MATCH_GRACE}: ${result.movedToVoting} moved to voting, ${result.cancelled} cancelled`,
+      targetType: "match",
+      metadata: {
+        movedToVoting: toVoting.map((row) => row.id),
+        cancelled: cancelled.map((row) => row.id),
+      },
+    });
+  }
+  return result;
 }
