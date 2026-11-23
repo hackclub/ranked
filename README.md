@@ -76,7 +76,7 @@ With **Request user authorization (OAuth) during installation** enabled, GitHub 
 
 Because a code from the installation flow is issued without a `code_challenge`, it must be exchanged without a `code_verifier`; codes from `?mode=authorize` keep their PKCE pair. The callback tells them apart with a short-lived `ranked_github_flow` cookie.
 
-Matchmaking will not hand out a match to a player who can't publish one: `/api/matchmaking/queue`'s POST runs `rankedPublishBlock` and answers `github_install_required` (with the specific problem and the URL that fixes it) alongside its existing Hackatime and voting gates. That is what converts existing players — the check happens when they ready up, a 30-second detour, instead of after a finished build has nowhere to go. It deliberately fails open: an unreachable GitHub, or an access token too near expiry to check without spending its rotating refresh token, lets them queue rather than holding matchmaking closed.
+Matchmaking will not hand out a match to a player who can't publish one: `/api/matchmaking/queue`'s POST runs `rankedPublishBlock` and answers `github_install_required` (with the specific problem and the URL that fixes it) alongside its existing Hackatime and voting gates. That is what converts existing players — the check happens when they ready up, a 30-second detour, instead of after a finished build has nowhere to go.
 
 One trap in that check: `GET /user/installations` lists every installation the player can *see*, which for a Hack Club member includes the app installed on the **hackclub org**. Matching on the app alone can pick that one — the wrong id to link to (an org installation lives under `/organizations/<org>/settings/installations`) and the wrong permissions to compare against, which manufactures a pending approval with nothing to approve. A player's `hackclubranked` repo is always personal, so only an installation whose `target_type` is `User` and whose account is that player counts; an org-only installation reads as not installed.
 
@@ -105,17 +105,12 @@ server-side reviewer allowlist; it is separate from `ADMIN_EMAILS`, so being an
 admin does not grant access to recordings. Reviewer playback is proxied through
 an authenticated, no-store API; the bucket must not have public access enabled.
 
-The recording is made by each player's own browser, so the server cannot force
-it to happen, but it does check that it is happening. The call is open only
-during the match's timed window, and each player's client leaves it when the
-timer ends. While a match is live the server expects a clip from every player
-at least once a minute; a player whose clips stop arriving is flagged in the
-audit log (`recording.missing`), is refused new call tokens, and is told to
-stop sending their camera and microphone to the other players until clips
-arrive again. A deliberately modified client can still ignore that instruction
-for a call it has already joined. Closing that gap completely means recording
-on a media server instead of in the browser. Set `RECORDING_ENFORCEMENT=off`
-only to keep calls working through a storage outage.
+The recording is made by each player's own browser, and the server checks that
+clips keep arriving while a match is live. The call is open only during the
+match's timed window, and each player's client leaves it when the timer ends.
+A player whose clips stop arriving is flagged in the audit log
+(`recording.missing`) and loses call access until they resume.
+`RECORDING_ENFORCEMENT` is an operator override for storage outages.
 
 Configure these environment values:
 
@@ -130,14 +125,13 @@ only the authenticated server communicates with the private bucket.
 Add an R2 Object Lifecycle Rule for the `recordings/` prefix that expires
 objects after **10 days**. This is defense in depth alongside the authenticated
 daily Vercel retention job in `vercel.json`, which removes expired R2 objects
-and PostgreSQL metadata. The private dashboard is available at
-`/reviewer/recordings` after signing in through Hack Club Auth with one of the
-two allowlisted addresses. Dashboard opens and playback starts are written to
-the audit log.
+and PostgreSQL metadata. Allowlisted reviewers reach the review dashboard after
+signing in through Hack Club Auth. Dashboard opens and playback starts are
+written to the audit log.
 
-Because recording laws and requirements for minors differ by jurisdiction, the
-built-in affirmative consent gate is a technical safeguard, not a substitute
-for legal review of the final consent language and privacy policy before launch.
+Recording laws and requirements for minors differ by jurisdiction. Anyone
+deploying Ranked is responsible for their own consent language and privacy
+policy.
 
 For a local multiplayer test, sign in as separate Hack Club users in separate browser profiles, select the same mode and duration, and ready up. Ranked assigns teams transactionally once two solo or four duo players are queued.
 
@@ -148,7 +142,7 @@ For a local multiplayer test, sign in as separate Hack Club users in separate br
 - `TURN_*` / `CLOUDFLARE_TURN_*`: optional but strongly recommended for reliable WebRTC outside friendly networks; `TURN_RELAY_ONLY=true` additionally keeps players' IP addresses private from each other.
 - Shop redemptions create `pending` PostgreSQL orders and atomically deduct H-Bucks. Fulfillment/approval remains an admin operation, not an automatic hardware purchase.
 - The shipping address on an order is stored encrypted (AES-GCM) and is never returned by the API. To fulfil orders, run `npm run shop:orders` with the app's secrets in `.env.local`; it prints each open order with its decrypted address. Addresses saved before encryption was added are encrypted once with `npm run shop:encrypt-shipping -- --confirm encrypt-shipping`.
-- Mutating and outbound-fetching routes are rate limited per account with counters in the `rate_limits` table (`app/lib/rate-limit.ts`). Limits by IP address for signed-out traffic are left to the platform's firewall.
+- Mutating and outbound-fetching routes are rate limited per account with counters in the `rate_limits` table (`app/lib/rate-limit.ts`).
 - The daily cron in `vercel.json` (authenticated with `CRON_SECRET`) also closes matches left unfinished for more than 24 hours after their timer: a match both teams published goes to community voting, anything else is cancelled with no ELO change. Without it a single player who never publishes would hold a match open indefinitely.
 - Tailwind's browser build is vendored at `app/lib/vendor/` (see the README there). Previews load it from this app and every published build carries its own copy, so player sites depend on no third-party CDN.
 - An opponent's live preview is a still, script-free copy of their rendered page, and loads nothing from the network. Images and web fonts hosted elsewhere therefore don't appear in that peek; they do on the published site voters see.
